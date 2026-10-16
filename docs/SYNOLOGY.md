@@ -46,6 +46,14 @@ rc.2 / rc.3 的 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失或留空会在启动�
 
 `.env` 仅用于自定义路径等部署参数，使用时须与 YML 位于同一项目目录，真实文件名为 `.env`，不能仍叫 `env.example` 或 `.env.txt`。可运行 `docker compose config --quiet` 检查配置；排错时只提供错误文字，不分享包含敏感信息的配置。
 
+### 下载或拉取很慢
+
+当前在线镜像来自 `ghcr.io`。若群晖拉取慢，或 GitHub 的 TAR 附件下载慢，可优先使用构建电脑上已有的离线包，经局域网传到 NAS。已打包电脑的 `artifacts/releases/0.2.0-rc.4/` 中分别有 amd64 和 arm64 TAR，每份约 81 MB（77 MiB）；该目录不随 Git 克隆提供。
+
+按 NAS 架构选择一份，使用下方离线步骤导入，然后在项目同目录 `.env` 设置 `LABOS_IMAGE=labos:0.2.0-rc.4`，保留实际数据路径和 UID/GID。确认本地映像存在后直接启动项目，跳过 `docker compose pull`。仅导入 TAR 而仍使用默认 GHCR 镜像名称，Compose 还会尝试下载线上镜像。
+
+若需要长期在线更新，可将同版本双架构镜像同步到自己的国内镜像仓库，并通过 `LABOS_IMAGE` 指向其地址；这需要对应仓库的地址和推送凭据，尚未配置。Docker 的 Docker Hub `registry-mirrors` 配置不代理 `ghcr.io`。网络慢的具体原因须在目标 NAS 上确认，不能用开发电脑的验证代替测速。
+
 ## 离线导入镜像包
 
 `0.2.0-rc.2` 首先提供按架构导入 TAR 的交付方式；`0.2.0-rc.3` 增加公开镜像在线部署，rc.4 沿用这两种方式。已完成打包的文件位于对应版本的 `artifacts/releases/<version>/`，对外下载以 GitHub 对应 Release 的实际附件为准。
