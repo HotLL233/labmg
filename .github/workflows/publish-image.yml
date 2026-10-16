@@ -3,6 +3,12 @@ name: Publish versioned image
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,11 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Validate version tag
         id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           node <<'NODE'
           const assert = require('node:assert/strict');
@@ -36,9 +45,11 @@ jobs:
           const { execFileSync } = require('node:child_process');
           const { version } = require('./package.json');
           assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
-          assert.equal(process.env.GITHUB_REF, `refs/tags/v${version}`, 'Tag must match package.version');
+          assert.equal(process.env.RELEASE_TAG, `v${version}`, 'Tag must match package.version');
           const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-          assert.equal(commit, process.env.GITHUB_SHA);
+          const taggedCommit = execFileSync('git', ['rev-parse', `${process.env.RELEASE_TAG}^{commit}`], { encoding: 'utf8' }).trim();
+          assert.equal(commit, taggedCommit, 'Checkout must match the requested tag commit');
+          if (process.env.GITHUB_EVENT_NAME === 'push') assert.equal(commit, process.env.GITHUB_SHA);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\n`);
           NODE
 

@@ -128,6 +128,8 @@ npm run package:zip
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
+rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续独立 CI 提交增加手动入口，默认分支设为 `develop` 供 GitHub 发现工作流，稳定 `main` 内容保持 0.1.1。选择“Run workflow”的 `develop`，输入已存在的标签（如 `v0.2.0-rc.3`），流程固定检出该标签并验证提交，不把 CI 分支的新提交当作发布源码。已生成的 rc.3 ZIP/TAR 和标签不改写，该入口归入后续 CI 变更。
+
 维护者发布后须确认 GHCR 包可公开访问，并在没有镜像仓库登录凭据的环境验证该版本的多架构清单和拉取。工作流文件、成功构建、包公开及匿名拉取是不同检查项，结果以实际运行和外部状态为准。
 
 `deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。将 `deploy/.env.example` 复制为同目录 `.env`，设置初始化密码、数据目录及 UID/GID；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.3`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
