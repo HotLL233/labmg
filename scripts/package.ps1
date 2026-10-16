@@ -29,7 +29,7 @@ try {
         $relative = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
         if ($relative -match '(^|/)(var|data|uploads|logs|artifacts|\.git|node_modules)(/|$)' -or
             $_.Name -match '\.(log|db(-wal|-shm)?)$' -or
-            ($_.Name -like '.env*' -and $relative -ne 'config/.env.example')) { return }
+            ($_.Name -like '.env*' -and @('config/.env.example', 'deploy/.env.example') -notcontains $relative)) { return }
         $item = $_
         while ($item.FullName -ne $root) {
             if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "Cannot package linked path: $relative" }

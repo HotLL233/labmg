@@ -1,24 +1,23 @@
+version: '3.8'
+
 services:
-  postgres:
-    image: postgres:16
-    container_name: labos-postgres
+  labos:
+    image: labos:0.2.0-rc.2
+    user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
+    init: true
     restart: unless-stopped
+    ports:
+      - "${LABOS_PORT:-3000}:3000"
     environment:
-      POSTGRES_DB: labos
-      POSTGRES_USER: labos
-      POSTGRES_PASSWORD: change-me
-    ports: ["5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
-  minio:
-    image: minio/minio:latest
-    container_name: labos-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: labos-admin
-      MINIO_ROOT_PASSWORD: change-me-please
-    ports: ["9000:9000", "9001:9001"]
-    volumes: ["minio_data:/data"]
-volumes:
-  postgres_data:
-  minio_data:
+      NODE_ENV: production
+      PORT: "3000"
+      LABOS_RUNTIME_DIR: /var/lib/labos
+      LABOS_ADMIN_USER: "${LABOS_ADMIN_USER:-admin}"
+      LABOS_ADMIN_PASSWORD: "${LABOS_ADMIN_PASSWORD:?必须设置 LABOS_ADMIN_PASSWORD}"
+    volumes:
+      - "${LABOS_DATA_DIR:-../var/docker/0.2.0-rc.2}:/var/lib/labos"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

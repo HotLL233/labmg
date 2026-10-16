@@ -11,10 +11,14 @@ src/
 scripts/
   check.js             全部 JavaScript 的语法检查
   package.ps1          部署包生成脚本
+  package-docker.ps1   Docker 镜像导出与版本化层缓存
 config/
   .env.example         环境变量示例
 deploy/
-  docker-compose.yml   PostgreSQL、MinIO 配置
+  Dockerfile           Node 24 非 root 应用镜像
+  docker-compose.yml   应用单容器部署
+  .env.example         Compose 变量示例
+  docker-compose.infrastructure.yml  旧 PostgreSQL、MinIO 示例
 docs/                  开发说明与变更记录
 tests/                 启动、权限、前端状态与版本打包回归
 var/                   本地数据库、附件和日志，不提交
@@ -24,7 +28,7 @@ artifacts/             唯一构建产物与缓存目录，不提交
   legacy/              目录整理前的产物和数据迁移备份
 ```
 
-当前服务仍使用 SQLite 与本地附件；`deploy/docker-compose.yml` 中的服务不会自动接入应用。
+当前服务仍使用 SQLite 与本地附件；应用 Compose 只启动 LabOS。原来仅 PostgreSQL/MinIO 的 Compose 保留为 `deploy/docker-compose.infrastructure.yml`，不会自动接入应用。
 
 ## 记忆、历程与版本说明
 
@@ -58,7 +62,7 @@ npm start
 npm run dev
 ```
 
-开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.1/`。它不会自动复制正式或旧开发版本的数据。
+开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.2/`。它不会自动复制正式或旧开发版本的数据。
 
 `LABOS_RUNTIME_DIR` 决定运行根目录，`PORT` 决定端口；需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如在 PowerShell 中：
 
@@ -102,6 +106,8 @@ git switch -c feature/permission-rules
 
 第一轮首版为 `0.2.0-rc.1`，从 `develop` 的文档基线 `a728e28` 创建 `feature/v0.2.0-round1`。候选版经检查后可集成到 `develop` 并保留同名版本标签；本轮不把候选代码直接提升到稳定 `main`。
 
+群晖 Docker 版为 `0.2.0-rc.2`，从 `develop` 的首版提交 `6c12017` 创建 `feature/docker-synology`；保留 rc.1 的代码、包和标签，候选版检查后集成 `develop`，稳定 `main` 仍为 `0.1.1`。
+
 ## 打包与回退
 
 ```powershell
@@ -115,5 +121,27 @@ npm run package:zip
 旧 0.1.1 ZIP 已归档到 `artifacts/releases/0.1.1/labos-0.1.1.zip`，原解压验证目录归入 `artifacts/cache/0.1.1/verification/`；更早产物及原数据迁移备份保留在 `artifacts/legacy/`。旧 ZIP 是历史保留件，不补写成新构建。
 
 部署包保留 `src/`、`scripts/`、`config/`、`deploy/`、`docs/`、`tests/` 及必要根文件，可在解压后的根目录执行 `npm start`，或运行 `start-labos.cmd`。包中不应包含本地数据库、附件、日志、真实环境配置和构建缓存。
+
+### Docker 镜像包
+
+```powershell
+npm run package:docker
+```
+
+该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
+
+需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
+
+镜像的运行目录固定为 `/var/lib/labos`，由 Compose 绑定到宿主机本版数据目录；通过 `LABOS_UID/GID` 指定运行用户，目录须允许该用户读写。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。
+
+`tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
+
+```powershell
+$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.2'
+node --test tests/docker.test.js
+Remove-Item Env:LABOS_DOCKER_IMAGE
+```
+
+该检查使用 `artifacts/cache/<version>/` 下的独立挂载目录，验证非 root、健康状态、登录和记录/附件在容器重建后的持久化，不使用 `var/` 真实数据库。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。

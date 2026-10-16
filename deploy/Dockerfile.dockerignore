@@ -1,0 +1,16 @@
+**
+!package.json
+!src
+!src/**
+**/.env*
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.log
+**/data
+**/uploads
+**/var
+**/logs
+**/artifacts
+**/.git
+**/node_modules
