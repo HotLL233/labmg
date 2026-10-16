@@ -64,7 +64,7 @@ npm start
 npm run dev
 ```
 
-开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.4/`。它不会自动复制正式或旧开发版本的数据。
+开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.5/`。它不会自动复制正式或旧开发版本的数据。
 
 `LABOS_RUNTIME_DIR` 决定运行根目录，`PORT` 决定端口；需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如在 PowerShell 中：
 
@@ -116,6 +116,8 @@ git switch -c feature/permission-rules
 
 `0.2.0-rc.4` 从 `develop` 的 `46841f3` 创建 `feature/first-login-setup`，改为网页首次设置管理员密码，移除默认密码及 Compose 必填密码变量。保留 rc.3 标签、镜像和离线产物；新版使用自己的数据、构建和缓存目录。旧库不会重新开放初始化，代码升级不等于密码重置。
 
+`0.2.0-rc.5` 从 `develop` 的 `9713851` 创建 `feature/auto-create-runtime`，默认改为 Docker 自动创建的命名数据卷，并用一次性初始化服务准备目录及权限。每个项目、每个版本有独立卷；保留旧 `LABOS_DATA_DIR` 指定宿主机目录的能力，不自动复制旧数据。rc.4 标签、镜像、离线产物及原有数据继续保留。
+
 ## 打包与回退
 
 ```powershell
@@ -140,7 +142,9 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.4`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。按需将 `deploy/.env.example` 复制为同目录 `.env`，设置数据目录及 UID/GID，密码在首次网页访问时设置；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.4`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
+`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.5`。rc.5 默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.2.0-rc.5` 命名卷，应用和初始化服务共用该卷。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+
+已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID，目录须已存在；默认新卷不含旧数据。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留卷，日常升级不要用 `down --volumes` / `down -v`。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持完成依赖条件须以实际部署工具为准。
 
 ### Docker 离线镜像包
 
@@ -150,20 +154,20 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.4`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置。
+导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.5`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
-镜像的运行目录固定为 `/var/lib/labos`，由 Compose 绑定到宿主机本版数据目录；通过 `LABOS_UID/GID` 指定运行用户，目录须允许该用户读写。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。
+镜像的运行目录固定为 `/var/lib/labos`，由 Compose 默认挂载本版命名卷，也可指定已有宿主机目录；通过 `LABOS_UID/GID` 指定运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，不加载业务服务或创建数据库。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 使用自定义 UID 时仍须自行准备可写卷；自动初始化属于 Compose 项目启动流程。
 
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.4'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.5'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
 
-该检查使用 `artifacts/cache/<version>/` 下的独立挂载目录，验证非 root、健康状态、登录和记录/附件在容器重建后的持久化，不使用 `var/` 真实数据库。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
+该检查使用独立 Compose 项目及命名卷，验证自动创建、初始化属主、非 root、首次设置、登录和记录/附件在容器重建后的持久化；验证产物集中在 `artifacts/cache/<version>/`，不使用 `var/` 真实数据库。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。
