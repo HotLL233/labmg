@@ -165,6 +165,7 @@
 - rc.3 公开前扫描覆盖本地全部 refs 可达的 5 个提交、54 个路径、74 个唯一 blob，以及本轮跟踪文件和新增工作流，未发现真实运行文件或高置信秘密格式；硬编码口令候选为默认值、示例或合成测试数据。这是有限静态检查，不能证明绝无秘密。16 个 JS 语法、普通回归 18 通过/1 Docker 跳过、actionlint 工作流检查通过；工作流内联逻辑 10 个自检场景及 Compose 默认/覆盖/必填密码检查通过。尚需外部构建及匿名拉取验证。
 - rc.3 发布后补充：Actions 运行 `38855576508` 构建并推送成功，固定源码 `46f2a3c`，索引摘要 `sha256:91485b0effbd7b0e5784e2ed3b534a51633ca99c423751cce3ddc4e89c93b4df`。用户设包 Public 后，匿名核对两架构 manifest/config 摘要和 OCI；新建空 Docker 配置、清除继承仓库凭据后实际拉取 amd64/arm64，通过正式发布 YML 默认线上镜像的配置、pull、启动、健康、登录、1000:1000、独立缓存挂载及清理。双架构离线 TAR 的非 root/登录/重建持久化也通过，ARM64 为模拟环境。证据在 rc.3 的 `ghcr-anonymous-verification.json` 与 `docker-offline-release-validation.json`，实际数据未用于测试。
 - 发布检查发现原 Registry Accept 漏写 OCI 索引的 `.v1`：即便包公开，GHCR 也会返回 `MANIFEST_UNKNOWN` / 不支持 OCI 索引的 404，不能当作标签不存在。后续 CI 已修正请求类型，实际重复发布复用结果以 Actions 报告为准。Docker 29 containerd 的 image ID 可为平台 manifest 摘要，验收同时核对已验证的 config/manifest 与 RepoDigests 索引；不把 ID 表示差异判成镜像损坏。
+- CI 修正提交 `4573f71` 已同步；重复调度运行 `38856620041` 实际核验已存在的 rc.3 双架构镜像并跳过构建推送，随后匿名索引摘要仍为 `91485b0…`，未覆盖已发布镜像。证据为本版 `ghcr-reuse-verification.json`，补齐上条待验证结论。
 - rc.3 Release 已发布且非草稿，10 个附件大小/摘要、匿名 YML 下载及包页面均核验通过。GitHub 按标签读取 Release 不返回草稿，恢复草稿应按 ID 或列表查找；本轮误建的同内容临时草稿经逐项摘要核对后已清理，公开版本和本地不可变产物保留。
 
 ## 后续开发顺序
