@@ -1,28 +1,44 @@
-# LabOS 实验室综合管理系统 MVP
+# LabOS 实验室综合管理系统
 
-本版本覆盖前面方案中的基础闭环：电子档案、电子模板、在线填写与打印、收支台账、资产台账、物资库存、体系文件、人员能力、统一登录、附件、导出、到期提醒、审计日志、Docker 数据服务配置。
+当前版本：**0.1.1**。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。
 
-## 当前运行方式
+## 快速启动
 
-当前版本使用 Node.js 22.5+ 内置 SQLite 运行，便于在 Java/Docker PATH尚未恢复时立即测试。正式部署配置已经提供 PostgreSQL 和 MinIO 的 `docker-compose.yml`，后续将文件存储和数据库切换到正式服务。
+需要 Node.js 22.13+，建议使用 Node.js 24。
 
 ```powershell
 npm run check
+npm test
 npm start
 ```
 
-浏览器打开 `http://127.0.0.1:3000`，默认账号：admin，密码：admin123。
+日常运行地址为 `http://127.0.0.1:3000`，数据保存在 `var/`。首次初始化默认账号为 `admin`，密码为 `admin123`，使用前请修改。
 
-局域网测试时，其他电脑访问运行电脑的内网IP，例如 `http://192.168.1.100:3000`，并在 Windows 防火墙放行 TCP 3000。
+开发使用 `npm run dev`，默认地址为 `http://127.0.0.1:3001`，独立数据保存在 `var/development/`。
 
-## 生成部署包
+## 目录
+
+| 路径 | 内容 |
+| --- | --- |
+| `src/` | 服务端和静态前端 |
+| `scripts/` | 检查与打包脚本 |
+| `tests/` | 隔离环境中的启动与路径检查 |
+| `config/` | 环境变量示例 |
+| `deploy/` | PostgreSQL、MinIO 辅助服务配置 |
+| `docs/` | 开发约定和变更记录 |
+| `var/` | 本地数据库、附件和日志，不提交 |
+| `artifacts/` | 本地部署包和历史产物，不提交 |
+
+应用当前仍使用 SQLite 与本地附件；Docker 配置中的数据服务尚未接入。`config/.env.example` 不会自动加载，配置通过进程环境变量传入。
+
+## 版本与发布
+
+`main` 保存发布基线，`develop` 用于后续开发，`feature/*` 承载具体功能；Git 标签保留版本快照。切换分支不会自动隔离或回退数据。
 
 ```powershell
 npm run package:zip
 ```
 
-会生成 `labos-mvp.zip`，内含启动脚本、服务端、前端和 Docker 配置。当前终端无法识别 Java/Docker，因此本次先验证网页服务和业务接口；恢复 PATH 后再生成 EXE 安装器。
+生成 `artifacts/labos-0.1.1.zip`，解压后运行 `npm start` 或 `start-labos.cmd`。部署包不包含本地运行数据。
 
-## 正式上线前
-
-需要把默认密码改掉，启用 PostgreSQL/MinIO，增加角色权限细分、审批节点配置、OCR、NAS或对象存储备份，以及数据库和附件的 3-2-1 备份策略。
+具体操作见 [开发与版本管理](docs/DEVELOPMENT.md) 和 [变更记录](docs/CHANGELOG.md)。当前仍为 MVP，已知权限、密码和并发业务问题尚待后续处理。

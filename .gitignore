@@ -1,6 +1,7 @@
-data/
-uploads/
-dist/
+/var/
+/artifacts/
+/node_modules/
 .env
+.env.*
+!.env.example
 *.log
-/labos-mvp.zip
