@@ -1,0 +1,6 @@
+data/
+uploads/
+dist/
+.env
+*.log
+/labos-mvp.zip
