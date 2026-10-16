@@ -8,8 +8,8 @@
     "dev": "node --watch src/server.js --dev",
     "check": "node scripts/check.js",
     "test": "node --test tests/*.test.js",
-    "package:zip": "powershell -ExecutionPolicy Bypass -File .\\scripts\\package.ps1",
-    "package:docker": "powershell -ExecutionPolicy Bypass -File .\\scripts\\package-docker.ps1"
+    "package:zip": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\package.ps1",
+    "package:docker": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\package-docker.ps1"
   },
   "engines":{"node":">=22.13"}
 }

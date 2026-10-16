@@ -35,8 +35,8 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
     else assert.notEqual(result.status, 0, result.stdout + result.stderr);
     return result.stdout + result.stderr;
   };
-  const powershell = code => run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
-  const build = expected => run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(fixture, 'scripts/package.ps1')], expected);
+  const powershell = code => run('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
+  const build = expected => run('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(fixture, 'scripts/package.ps1')], expected);
   const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
   run('git', ['init', '--quiet']);
