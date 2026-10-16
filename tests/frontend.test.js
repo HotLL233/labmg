@@ -112,7 +112,7 @@ function parse(html, parent) {
   stack.at(-1)._text += decode(html.slice(previous));
 }
 
-async function browser(user = { role: 'ADMIN', permissions: ['*'] }) {
+async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) {
   const document = new Element('document'); parse(index, document);
   document.head = document.querySelector('head'); document.body = document.querySelector('body');
   document.createElement = tag => new Element(tag);
@@ -120,23 +120,37 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }) {
   const records = modules.map((module, i) => ({
     id: i + 1, module, version: 4, title: `${module}-record`, code: module, category: '', status: '合格',
     owner: 'tester', amount: 123, quantity: 2, due_date: '', created_at: '2026-10-16', updated_at: '2026-10-16',
-    data: { asset_stage: '检定/校准', quality_section: '质量手册', is_current: '是', material_type: '试剂', flow: '库存台账', access_roles: user.role, retained: 'keep' }
+    data: { asset_stage: '检定/校准', quality_section: '质量手册', is_current: '是', material_type: '试剂', flow: '库存台账', access_roles: user?.role || 'ADMIN', retained: 'keep' }
   }));
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
-  const state = { conflict: false, hold: null };
+  const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
   const fetch = async (input, options = {}) => {
     const url = new URL(input, 'http://localhost'), method = options.method || 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
     requests.push({ url, method, body });
-    if (url.pathname === '/api/auth/me' || url.pathname === '/api/auth/login') return response({ user });
+    if (url.pathname === '/api/auth/me') return response(state.auth);
+    if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/setup') {
+      if (state.authHold) {
+        const hold = state.authHold; state.authHold = null;
+        await new Promise(resolve => { hold.release = resolve; });
+      }
+      if (state.authError) {
+        const error = state.authError; state.authError = null;
+        if (error.status === 409) state.auth.setupRequired = false;
+        return response({ error: error.message }, error.status);
+      }
+      state.auth.user ||= { role: 'ADMIN', permissions: ['*'] };
+      state.auth.setupRequired = false;
+      return response({ user: state.auth.user }, url.pathname === '/api/auth/setup' ? 201 : 200);
+    }
     if (url.pathname === '/api/ui-config/nav') return response(nav);
     if (url.pathname === '/api/ui-config/dashboard') return response(modules.map(target => ({ key: target, kind: 'module', target, label: target, visible: 1, sort_order: 0 })));
     if (url.pathname === '/api/dashboard') return response({ totals: {}, finance: { income: 0, expense: 0 }, warnings: 0 });
-    if (url.pathname === '/api/permissions') return response({ catalog: [], roles: [{ role: user.role, permissions: user.permissions }], roleNames: {}, sections: {} });
-    if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: user.role }]);
+    if (url.pathname === '/api/permissions') return response({ catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
+    if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: state.auth.user.role }]);
     if (url.pathname === '/api/records' && method === 'GET') {
       const module = url.searchParams.get('module'), q = url.searchParams.get('q') || '';
       const result = response(records.filter(row => row.module === module && row.title.includes(q)));
@@ -183,9 +197,112 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }) {
     async submit(title) {
       document.querySelector('[name=title]').value = title;
       await document.querySelector('#record-form').onsubmit({ preventDefault() {}, target: document.querySelector('#record-form') });
+    },
+    async authenticate(values) {
+      for (const [name, value] of Object.entries(values)) document.querySelector(`#login-form [name=${name}]`).value = value;
+      await document.querySelector('#login-form').onsubmit({ preventDefault() {}, target: document.querySelector('#login-form') });
     }
   };
 }
+
+test('first launch creates an administrator once and clears passwords before entering', async () => {
+  const app = await browser(null, { setupRequired: true, setupUsername: 'lab-admin' });
+  assert.equal(app.context.login.open, true);
+  assert.equal(app.$('#auth-title').textContent, '首次设置管理员');
+  assert.equal(app.$('#auth-username').value, 'lab-admin');
+  assert.equal(app.$('#auth-password').value, '');
+  assert.equal(app.$('#auth-password').autocomplete, 'new-password');
+  assert.equal(app.$('#auth-password').minLength, 8);
+  assert.equal(app.$('#auth-confirm-field').hidden, false);
+  assert.equal(app.$('#auth-password-confirm').disabled, false);
+  assert.equal(app.$('.layout'), null);
+  let cancelled = false;
+  app.context.login.oncancel({ preventDefault() { cancelled = true; } });
+  assert.equal(cancelled, true);
+  assert.equal(app.context.login.open, true);
+
+  const hold = {}; app.state.authHold = hold;
+  const values = { username: 'lab-admin', password: 'MyFirstPassword!9', passwordConfirm: 'MyFirstPassword!9' };
+  const pending = app.authenticate(values);
+  assert.equal(app.$('#auth-submit').disabled, true);
+  await app.authenticate(values);
+  assert.equal(app.requests.filter(request => request.url.pathname === '/api/auth/setup').length, 1);
+  hold.release(); await pending;
+  const setup = app.requests.find(request => request.url.pathname === '/api/auth/setup');
+  assert.deepEqual(setup.body, values);
+  assert.equal(setup.method, 'POST');
+  assert.equal(app.context.login.open, false);
+  assert.equal(app.$('#auth-password').value, '');
+  assert.equal(app.$('#auth-password-confirm').value, '');
+  assert.equal(app.$('#auth-submit').disabled, false);
+  assert.equal(app.run('currentUser.role'), 'ADMIN');
+  assert.ok(app.$('.layout'));
+});
+
+test('setup validates password length and confirmation and preserves rejected inputs', async () => {
+  const app = await browser(null, { setupRequired: true });
+  for (const [values, message] of [
+    [{ username: '   ', password: 'ValidPass!9', passwordConfirm: 'ValidPass!9' }, /请输入账号/],
+    [{ username: 'admin', password: 'short', passwordConfirm: 'short' }, /8–1024/],
+    [{ username: 'admin', password: 'x'.repeat(1025), passwordConfirm: 'x'.repeat(1025) }, /8–1024/],
+    [{ username: 'admin', password: 'ValidPass!9', passwordConfirm: 'different' }, /不一致/]
+  ]) {
+    await app.authenticate(values);
+    assert.match(app.$('#auth-error').textContent, message);
+    assert.equal(app.$('#auth-error').hidden, false);
+    assert.equal(app.$('#auth-password').value, values.password);
+  }
+  assert.equal(app.requests.filter(request => request.method === 'POST').length, 0);
+  app.state.authError = { status: 400, message: '账号格式无效' };
+  await app.authenticate({ username: 'admin', password: 'ValidPass!9', passwordConfirm: 'ValidPass!9' });
+  assert.equal(app.$('#auth-error').textContent, '账号格式无效');
+  assert.equal(app.$('#auth-password').value, 'ValidPass!9');
+  assert.equal(app.$('#auth-password-confirm').value, 'ValidPass!9');
+  assert.equal(app.context.login.open, true);
+  assert.equal(app.$('#auth-submit').disabled, false);
+  assert.equal(app.$('.layout'), null);
+});
+
+test('existing users keep normal login with short legacy passwords and no default password', async () => {
+  const app = await browser(null);
+  assert.doesNotMatch(index, /admin123/);
+  assert.equal(app.$('#auth-title').textContent, '登录 LabOS');
+  assert.equal(app.$('#auth-password').value, '');
+  assert.equal(app.$('#auth-password').autocomplete, 'current-password');
+  assert.equal(app.$('#auth-password').minLength, 0);
+  assert.equal(app.$('#auth-confirm-field').hidden, true);
+  assert.equal(app.$('#auth-password-confirm').disabled, true);
+  app.state.authError = { status: 401, message: '用户名或密码错误' };
+  await app.authenticate({ username: 'legacy', password: 'old' });
+  assert.equal(app.context.login.open, true);
+  assert.equal(app.$('#auth-password').value, 'old');
+  assert.equal(app.$('#auth-error').textContent, '用户名或密码错误');
+  await app.authenticate({ username: 'legacy', password: 'old' });
+  const login = app.requests.findLast(request => request.url.pathname === '/api/auth/login');
+  assert.deepEqual(login.body, { username: 'legacy', password: 'old' });
+  assert.equal(app.requests.some(request => request.url.pathname === '/api/auth/setup'), false);
+  assert.equal(app.context.login.open, false);
+  assert.equal(app.$('#auth-password').value, '');
+});
+
+test('setup contention refreshes state into normal login without authenticating the losing page', async () => {
+  const app = await browser(null, { setupRequired: true });
+  app.state.auth.user = { role: 'ADMIN', permissions: ['*'] };
+  app.state.authError = { status: 409, message: '管理员已设置' };
+  await app.authenticate({ username: 'admin', password: 'Uncommitted!9', passwordConfirm: 'Uncommitted!9' });
+  assert.equal(app.requests.filter(request => request.url.pathname === '/api/auth/me').length, 2);
+  assert.equal(app.$('#auth-title').textContent, '登录 LabOS');
+  assert.equal(app.$('#auth-confirm-field').hidden, true);
+  assert.equal(app.$('#auth-password-confirm').disabled, true);
+  assert.equal(app.$('#auth-password').minLength, 0);
+  assert.equal(app.$('#auth-password').value, 'Uncommitted!9');
+  assert.match(app.$('#auth-error').textContent, /其他页面完成设置/);
+  assert.equal(app.context.login.open, true);
+  assert.equal(app.$('#auth-submit').disabled, false);
+  assert.equal(app.run('currentUser'), null);
+  assert.equal(app.$('.layout'), null);
+  assert.equal(app.requests.some(request => request.url.pathname === '/api/ui-config/nav'), false);
+});
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();

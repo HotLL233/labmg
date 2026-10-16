@@ -62,7 +62,7 @@ npm start
 npm run dev
 ```
 
-开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.3/`。它不会自动复制正式或旧开发版本的数据。
+开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.4/`。它不会自动复制正式或旧开发版本的数据。
 
 `LABOS_RUNTIME_DIR` 决定运行根目录，`PORT` 决定端口；需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如在 PowerShell 中：
 
@@ -72,7 +72,9 @@ $env:PORT = '3002'
 npm start
 ```
 
-`config/.env.example` 仅供参考，不会自动加载。管理员初始化变量等配置也必须传给启动进程；不要将真实口令写回示例或提交到 Git。初始化管理员变量不等于修改已有账号的密码。
+`config/.env.example` 仅供参考，不会自动加载。空数据库默认首次打开网页设置管理员账号和密码（8–1024 字符、不能全为空白、需确认），没有默认密码。已有任意用户时初始化入口关闭；升级后继续使用原账号。首次设置完成前只允许可信人员访问服务。
+
+如自动化部署确需预设，仍可把非空 `LABOS_ADMIN_PASSWORD` 与可选 `LABOS_ADMIN_USER` 传给启动进程，仅在零用户时创建管理员；默认 Docker Compose 不传密码。不要将真实口令写回示例或提交到 Git，初始化变量不等于修改已有账号的密码。
 
 ### 0.2.0-rc.1 兼容性
 
@@ -110,6 +112,8 @@ git switch -c feature/permission-rules
 
 `0.2.0-rc.3` 在 rc.2 的镜像 TAR 部署基础上增加公开 GHCR 多架构镜像与标签发布流程，YML 默认使用线上镜像，保留 `LABOS_IMAGE` 覆盖以支持离线导入。rc.2 的标签、产物和历史记录继续保留；仓库公开、GHCR 包公开及匿名拉取的实际结果分别核验，不能用配置完成替代发布验证。
 
+`0.2.0-rc.4` 从 `develop` 的 `46841f3` 创建 `feature/first-login-setup`，改为网页首次设置管理员密码，移除默认密码及 Compose 必填密码变量。保留 rc.3 标签、镜像和离线产物；新版使用自己的数据、构建和缓存目录。旧库不会重新开放初始化，代码升级不等于密码重置。
+
 ## 打包与回退
 
 ```powershell
@@ -134,7 +138,7 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。将 `deploy/.env.example` 复制为同目录 `.env`，设置初始化密码、数据目录及 UID/GID；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.3`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
+`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.4`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。按需将 `deploy/.env.example` 复制为同目录 `.env`，设置数据目录及 UID/GID，密码在首次网页访问时设置；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.4`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
 
 ### Docker 离线镜像包
 
@@ -144,7 +148,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.3`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 历史 TAR 仍使用 `labos:0.2.0-rc.2`。
+导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.4`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -153,7 +157,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.3'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.4'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```

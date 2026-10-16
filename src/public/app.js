@@ -84,5 +84,47 @@ async function enter(user){
   const first=Object.keys(M).find(canOpen);
   if(first)await go(first);else{$('#page').innerHTML='<div class="empty">当前账号暂无可访问模块，请联系管理员。</div>';applyPermissions()}
 }
-async function start(){try{const me=await call('/api/auth/me');if(!me.user){login.showModal();return}await enter(me.user)}catch(error){toast(error.message)}}
-$('#login-form').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{const result=await call('/api/auth/login',{method:'POST',body:JSON.stringify(b)});login.close();await enter(result.user)}catch(error){toast(error.message)}};
+let setupRequired=false,authPending=false;
+function authError(message){$('#auth-error').textContent=message;$('#auth-error').hidden=false}
+function showAuth(me={}){
+  setupRequired=me.setupRequired===true;
+  $('#auth-title').textContent=setupRequired?'首次设置管理员':'登录 LabOS';
+  $('#auth-description').textContent=setupRequired?'创建首个管理员账号，设置完成后进入系统。':'实验室综合管理系统';
+  $('#auth-username-label').textContent=setupRequired?'管理员账号':'用户名';
+  $('#auth-password-label').textContent=setupRequired?'设置密码':'密码';
+  if(setupRequired)$('#auth-username').value=me.setupUsername||'admin';
+  $('#auth-password').autocomplete=setupRequired?'new-password':'current-password';
+  $('#auth-password').minLength=setupRequired?8:0;
+  $('#auth-confirm-field').hidden=!setupRequired;
+  $('#auth-password-confirm').disabled=!setupRequired;
+  $('#auth-password-confirm').required=setupRequired;
+  $('#auth-submit').textContent=setupRequired?'创建管理员并进入系统':'登录系统';
+  $('#auth-note').textContent=setupRequired?'密码为 8–1024 个字符，请妥善保存管理员账号和密码。':'请输入已有账号和密码。';
+  $('#auth-error').hidden=true;
+  if(!login.open)login.showModal();
+}
+login.oncancel=e=>e.preventDefault();
+async function start(){
+  try{const me=await call('/api/auth/me');if(me.setupRequired||!me.user){showAuth(me);return}await enter(me.user)}
+  catch(error){showAuth();authError(error.message)}
+}
+$('#login-form').onsubmit=async e=>{
+  e.preventDefault();
+  if(authPending)return;
+  const b=Object.fromEntries(new FormData(e.target)),initializing=setupRequired;
+  if(!b.username.trim())return authError('请输入账号');
+  if(initializing&&(b.password.length<8||b.password.length>1024))return authError('密码须为 8–1024 个字符');
+  if(initializing&&b.password!==b.passwordConfirm)return authError('两次输入的密码不一致');
+  authPending=true;$('#auth-submit').disabled=true;$('#auth-error').hidden=true;
+  try{
+    const result=await call(initializing?'/api/auth/setup':'/api/auth/login',{method:'POST',body:JSON.stringify(b)});
+    if(!result.user)throw Error('未能确认登录状态，请重试');
+    $('#auth-password').value='';$('#auth-password-confirm').value='';
+    login.close();await enter(result.user);
+  }catch(error){
+    if(initializing&&error.status===409){
+      try{showAuth(await call('/api/auth/me'))}catch{showAuth()}
+      authError('管理员已在其他页面完成设置，请使用已有账号登录。');
+    }else authError(error.message);
+  }finally{authPending=false;$('#auth-submit').disabled=false}
+};

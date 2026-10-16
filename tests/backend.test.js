@@ -9,7 +9,7 @@ const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 
-async function fixture(t, legacy = false) {
+async function fixture(t, legacy = false, options = {}) {
   const cache = path.join(root, 'artifacts/cache', require('../package.json').version, 'backend-tests');
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'run-'));
@@ -41,28 +41,39 @@ async function fixture(t, legacy = false) {
   await once(reservation, 'listening');
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
-  const child = spawn(process.execPath, [path.join(directory, 'src/server.js')], {
-    cwd: directory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'test-admin', LABOS_ADMIN_PASSWORD: 'test-password' }
-  });
-  let stderr = '';
-  child.stderr.on('data', data => { stderr += data; });
-  t.after(async () => {
+  const environment = { ...process.env, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'test-admin', LABOS_ADMIN_PASSWORD: 'test-password', ...options.environment };
+  let child;
+  const start = async () => {
+    child = spawn(process.execPath, [path.join(directory, 'src/server.js')], {
+      cwd: directory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: environment
+    });
+    let stderr = '';
+    child.stderr.on('data', data => { stderr += data; });
+    const [output] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) });
+    assert.match(String(output), /LabOS:/, stderr);
+  };
+  const stop = async () => {
     if (child.exitCode === null && child.signalCode === null) {
       const stopped = once(child, 'exit');
       child.kill();
       await stopped;
     }
+  };
+  t.after(async () => {
+    await stop();
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(cache));
+    assert.ok(path.basename(directory).startsWith('run-'));
     fs.rmSync(directory, { recursive: true, force: true });
   });
-  const [output] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) });
-  assert.match(String(output), /LabOS:/, stderr);
-  const request = async (method, route, cookie, body, expected = 200) => {
+  await start();
+  const restart = async (overrides = {}) => { await stop(); Object.assign(environment, overrides); await start(); };
+  const base = `http://127.0.0.1:${port}`;
+  const request = async (method, route, cookie, body, expected = 200, extraHeaders = {}) => {
     const headers = {};
     if (cookie) headers.Cookie = cookie;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    const response = await fetch(`http://127.0.0.1:${port}${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    Object.assign(headers, extraHeaders);
+    const response = await fetch(base + route, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
     if (Array.isArray(expected)) assert.ok(expected.includes(response.status), `${method} ${route}: ${response.status} ${text}`);
     else assert.equal(response.status, expected, `${method} ${route}: ${text}`);
@@ -72,7 +83,7 @@ async function fixture(t, legacy = false) {
     const response = await request('POST', '/api/auth/login', null, { username, password });
     return { cookie: response.headers.get('set-cookie').split(';')[0], user: response.data.user };
   };
-  const admin = await login(legacy ? 'legacy-admin' : 'test-admin', legacy ? 'legacy-password' : 'test-password');
+  const admin = options.setup ? null : await login(legacy ? 'legacy-admin' : 'test-admin', legacy ? 'legacy-password' : 'test-password');
   const role = async (name, permissions) => {
     await request('POST', '/api/permissions/roles', admin.cookie, { role: name }, 201);
     await request('PUT', `/api/permissions/roles/${name}`, admin.cookie, { permissions });
@@ -83,8 +94,74 @@ async function fixture(t, legacy = false) {
   };
   const create = async record => (await request('POST', '/api/records', admin.cookie, record, 201)).data;
   const upload = async record => (await request('POST', '/api/files', admin.cookie, { record_id: record.id, name: 'fixture.txt', type: 'text/plain', content: Buffer.from('fixture attachment').toString('base64') }, 201)).data;
-  return { directory, runtime, sql, request, login, admin, role, user, create, upload };
+  return { directory, runtime, sql, request, login, admin, role, user, create, upload, restart, base };
 }
+
+test('empty databases require validated same-origin administrator setup without a default password', { timeout: 30000 }, async t => {
+  const f = await fixture(t, false, { setup: true, environment: { LABOS_ADMIN_USER: undefined, LABOS_ADMIN_PASSWORD: undefined } });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: true, setupUsername: 'admin' });
+  await f.request('POST', '/api/auth/login', null, { username: 'admin', password: 'admin123' }, 401);
+  const valid = { username: 'first-admin', password: 'setup123', passwordConfirm: 'setup123' };
+  for (const input of [null, [], {}, { ...valid, username: 12 }, { ...valid, username: '' }, { ...valid, username: '  ' }, { ...valid, username: 'u'.repeat(65) }, { ...valid, password: 12345678 }, { ...valid, password: 'short12', passwordConfirm: 'short12' }, { ...valid, password: ' '.repeat(8), passwordConfirm: ' '.repeat(8) }, { ...valid, password: 'p'.repeat(1025), passwordConfirm: 'p'.repeat(1025) }, { ...valid, passwordConfirm: 'different' }, { username: valid.username, password: valid.password }]) {
+    await f.request('POST', '/api/auth/setup', null, input, 400);
+  }
+  await f.request('POST', '/api/auth/setup', null, valid, 415, { 'Content-Type': 'text/plain' });
+  for (const origin of ['https://other.example', 'null', '', 'not-an-origin', 'http://127.0.0.1:1']) {
+    await f.request('POST', '/api/auth/setup', null, valid, 403, { Origin: origin });
+  }
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM users').get().n), 0);
+  const username = 'u'.repeat(64), password = 'p'.repeat(1024);
+  const result = await f.request('POST', '/api/auth/setup', null, { username: ` ${username} `, password, passwordConfirm: password }, 201, { Origin: f.base, 'Content-Type': 'application/json; charset=utf-8' });
+  assert.equal(f.sql(db => db.prepare('SELECT username FROM users').get().username), username);
+  assert.equal(result.data.user.role, 'ADMIN');
+  assert.deepEqual(result.data.user.permissions, ['*']);
+  assert.equal(result.data.user.password, undefined);
+  assert.match(result.headers.get('set-cookie'), /Path=\/; HttpOnly; SameSite=Lax; Max-Age=86400/);
+  const cookie = result.headers.get('set-cookie').split(';')[0];
+  const me = (await f.request('GET', '/api/auth/me', cookie)).data;
+  assert.equal(me.setupRequired, false);
+  assert.equal(me.setupUsername, undefined);
+  assert.equal(me.user.id, result.data.user.id);
+  assert.match(f.sql(db => db.prepare('SELECT password FROM users').get().password), /^scrypt\$/);
+  const logs = f.sql(db => db.prepare('SELECT * FROM audit_logs').all());
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].action, 'SETUP');
+  assert.ok(!JSON.stringify(logs).includes(password));
+  await f.request('POST', '/api/auth/setup', null, valid, 409);
+  await f.login(username, password);
+});
+
+test('concurrent first setup creates one administrator and remains closed after restart', { timeout: 30000 }, async t => {
+  const f = await fixture(t, false, { setup: true, environment: { LABOS_ADMIN_USER: 'suggested-admin', LABOS_ADMIN_PASSWORD: '' } });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: true, setupUsername: 'suggested-admin' });
+  const attempts = ['setup-one', 'setup-two'].map(username => ({ username, password: 'setup123', passwordConfirm: 'setup123' }));
+  const results = await Promise.all(attempts.map(input => f.request('POST', '/api/auth/setup', null, input, [201, 409])));
+  assert.deepEqual(results.map(result => result.status).sort(), [201, 409]);
+  const winner = results.find(result => result.status === 201);
+  const original = f.sql(db => db.prepare('SELECT * FROM users').get());
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM users').get().n), 1);
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM sessions').get().n), 1);
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM audit_logs WHERE action=?').get('SETUP').n), 1);
+  await f.restart({ LABOS_ADMIN_USER: 'replacement-admin', LABOS_ADMIN_PASSWORD: 'replacement-password' });
+  const cookie = winner.headers.get('set-cookie').split(';')[0];
+  const me = (await f.request('GET', '/api/auth/me', cookie)).data;
+  assert.equal(me.setupRequired, false);
+  assert.equal(me.user.id, original.id);
+  assert.deepEqual(f.sql(db => db.prepare('SELECT * FROM users').all()), [original]);
+  await f.request('POST', '/api/auth/setup', null, attempts[0], 409);
+  await f.request('POST', '/api/auth/login', null, { username: 'replacement-admin', password: 'replacement-password' }, 401);
+  await f.login(original.username, 'setup123');
+});
+
+test('any existing user disables setup and explicit initialization never overwrites an existing database', { timeout: 30000 }, async t => {
+  const f = await fixture(t, true, { setup: true, environment: { LABOS_ADMIN_PASSWORD: '' } });
+  f.sql(db => db.prepare('DELETE FROM users WHERE username=?').run('legacy-admin'));
+  const original = f.sql(db => db.prepare('SELECT * FROM users').get());
+  await f.restart({ LABOS_ADMIN_USER: 'new-admin', LABOS_ADMIN_PASSWORD: 'new-password' });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: false });
+  await f.request('POST', '/api/auth/setup', null, { username: 'new-admin', password: 'setup123', passwordConfirm: 'setup123' }, 409);
+  assert.deepEqual(f.sql(db => db.prepare('SELECT * FROM users').all()), [original]);
+});
 
 test('legacy passwords upgrade, backups hash idle passwords, startup preserves old samples', { timeout: 30000 }, async t => {
   const f = await fixture(t, true);

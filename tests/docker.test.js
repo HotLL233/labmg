@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const execute = promisify(execFile);
 const image = process.env.LABOS_DOCKER_IMAGE;
 
-test('Docker image runs without root and persists records and attachments across container recreation', {
+test('Docker image supports first-run setup and persists records and attachments across container recreation', {
   skip: image ? false : 'set LABOS_DOCKER_IMAGE to test a locally built image', timeout: 120000
 }, async () => {
   const root = path.resolve(__dirname, '..');
@@ -22,6 +22,11 @@ test('Docker image runs without root and persists records and attachments across
   fs.chmodSync(runtime, 0o777);
   const runId = crypto.randomBytes(8).toString('hex');
   const names = [];
+  const credentials = { username: 'docker-test-admin', password: 'docker-test-password' };
+  const setupOptions = {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...credentials, passwordConfirm: credentials.password })
+  };
   const docker = async args => (await execute('docker', args, { cwd: root, windowsHide: true, timeout: 30000, maxBuffer: 1024 * 1024 })).stdout.trim();
   const inspect = async name => JSON.parse(await docker(['inspect', name]))[0];
   const pause = () => new Promise(resolve => setTimeout(resolve, 500));
@@ -33,7 +38,7 @@ test('Docker image runs without root and persists records and attachments across
   const login = async base => {
     const response = await request(base, '/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'docker-test-admin', password: 'docker-test-password' })
+      body: JSON.stringify(credentials)
     });
     await response.json();
     return response.headers.get('set-cookie').split(';')[0];
@@ -49,8 +54,7 @@ test('Docker image runs without root and persists records and attachments across
       await docker(['run', '--detach', '--pull=never', '--name', name, '--label', `labos.test=${runId}`,
         '--platform', `${metadata.Os}/${metadata.Architecture}`, '--publish', '127.0.0.1::3000',
         '--health-interval', '1s', '--health-start-period', '0s',
-        '--mount', `type=bind,source=${runtime},target=/var/lib/labos`,
-        '--env', 'LABOS_ADMIN_USER=docker-test-admin', '--env', 'LABOS_ADMIN_PASSWORD=docker-test-password', image]);
+        '--mount', `type=bind,source=${runtime},target=/var/lib/labos`, image]);
       const until = Date.now() + 30000;
       let state;
       do {
@@ -67,7 +71,14 @@ test('Docker image runs without root and persists records and attachments across
     };
     const first = await start('first');
     const health = await request(first.base, '/api/auth/me');
-    assert.deepEqual(await health.json(), { user: null });
+    const initial = await health.json();
+    assert.equal(initial.user, null);
+    assert.equal(initial.setupRequired, true);
+    const setup = await request(first.base, '/api/auth/setup', setupOptions, 201);
+    const administrator = (await setup.json()).user;
+    assert.equal(administrator.role, 'ADMIN');
+    assert.ok(Number.isSafeInteger(administrator.id));
+    assert.ok(setup.headers.get('set-cookie'), 'setup must create a session');
     const cookie = await login(first.base);
     const title = `docker persistence ${runId}`;
     const created = await request(first.base, '/api/records', {
@@ -85,6 +96,9 @@ test('Docker image runs without root and persists records and attachments across
     await docker(['rm', first.name]);
     names.splice(names.indexOf(first.name), 1);
     const second = await start('second');
+    const recreated = await request(second.base, '/api/auth/me');
+    assert.equal((await recreated.json()).setupRequired, false, 'container recreation must not reopen setup');
+    await request(second.base, '/api/auth/setup', setupOptions, 409);
     const secondCookie = await login(second.base);
     const records = await request(second.base, '/api/records?module=archives', { headers: { Cookie: secondCookie } });
     assert.ok((await records.json()).some(row => row.id === record.id && row.title === title));
