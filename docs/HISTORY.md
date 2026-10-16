@@ -87,3 +87,10 @@
 - 验证中修正两处假设：Registry Accept 必须包含正确 OCI index `.v1` 类型，否则公开包仍返回 404 并可能被误判为未发布；Docker 29 containerd 的 image ID 可能对应平台 manifest 而非 config 摘要，验收同时校验已知摘要和 RepoDigests。应用镜像内容无需修改，CI 修正继续列入未发布跟进。
 - `v0.2.0-rc.3` 候选 Release 已公开，10 个附件大小/SHA、非草稿状态、匿名 YML 下载和包页面通过。按标签接口未找到已有草稿而误建的重复草稿已在核对为本次同内容临时文件后清理；发布工具改用列表/ID 恢复。源标签和正式产物未覆盖。
 - CI 修正提交 `4573f71` 推送后，运行 `38856620041` 再次发布同一标签，已有双架构版本检查成功，构建推送步骤实际跳过；匿名索引摘要保持 `91485b0…`，复用验证通过。最终本地 Markdown 链接、原数据库/WAL/SHM 3 文件摘要和测试容器清理均通过。
+
+### 9. 群晖 Compose 插值报错排查
+
+- 用户反馈 `/volume1/docker/labos/compose.yaml` 解析报错，截图错误尾部截断，能看到 `error while interpolating services.labos.environme...`。当前 YML 在管理员初始化密码上设置必填插值，因此优先核对环境文件加载和密码是否为空。
+- 使用原 YML 的隔离副本进行 6 个配置检查：`.env` 缺失、密码空、仅有 `env.example`、仅有 `.env.txt` 均复现指向 `LABOS_ADMIN_PASSWORD` 的插值错误；正确 `.env` 及显式 CLI `--env-file` 均通过，插值环境保留单引号内的字面 `$`。结果存于 rc.3 缓存的 `compose-env-diagnosis-1792130082238/verification.json`。
+- 在群晖部署说明补充与报错路径对应的目录布局、文件重命名、密码设置及 `config --quiet` 检查命令，说明服务级 `env_file:` 与 Compose 插值环境的区别，不删除密码必填检查。
+- 本轮只改文档，不提升业务版本、不重建镜像或改写冻结 rc.3 附件；未创建容器或操作真实数据库，未重跑业务回归。未访问用户 NAS，具体原因及修复结果仍需完整错误或用户重试确认。

@@ -41,6 +41,32 @@ docker compose logs --tail=100 labos
 
 `x86_64` 设备使用 amd64，`aarch64` 设备使用 arm64，Docker 会根据多架构清单自动选择。32 位 ARM 不在本版镜像支持范围，ARM64 设备也须本身支持 Docker。可执行 `uname -m` 核对架构。
 
+### 配置解析时报 `error while interpolating`
+
+若错误指向 `services.labos.environment.LABOS_ADMIN_PASSWORD`，说明 Compose 没有取得非空的初始化密码，尚未进入镜像启动阶段。常见原因是未创建 `.env`、密码仍为空、下载的文件仍叫 `env.example`，或编辑器实际保存成了 `.env.txt`。
+
+例如报错中的 YML 路径为 `/volume1/docker/labos/compose.yaml`，项目文件应为：
+
+```text
+/volume1/docker/labos/
+  compose.yaml
+  .env
+```
+
+将填写后的环境示例命名为 `.env`，确认其中这一项已替换为自己的非空密码，同时保留实际的数据目录和 UID/GID 配置：
+
+```dotenv
+LABOS_ADMIN_PASSWORD='在这里填写自己的强密码'
+```
+
+保存后重新启动 Container Manager 项目。若有 SSH，可先显式指定环境文件，仅检查配置是否能解析；`--quiet` 不展开输出含密码的配置：
+
+```sh
+docker compose --env-file /volume1/docker/labos/.env -f /volume1/docker/labos/compose.yaml config --quiet
+```
+
+命令中的文件名须与 NAS 实际文件一致；若叫 `docker-compose.yml`，相应修改 `-f` 后的路径。仅添加服务级 `env_file:` 不能满足这里的 `${...}` 插值，不能替代上述 `.env` 或 CLI `--env-file`。保留密码必填校验。若仍失败，排查时只提供完整错误文字，不分享密码、整个 `.env` 或展开后的配置。
+
 ## 离线导入镜像包
 
 `0.2.0-rc.2` 首先提供按架构导入 TAR 的交付方式；`0.2.0-rc.3` 增加公开镜像在线部署，同时保留离线方式和旧版本包。已完成打包的文件位于对应版本的 `artifacts/releases/<version>/`，对外下载以 GitHub 对应 Release 的实际附件为准。
