@@ -2,7 +2,7 @@
 
 项目继续使用 Node.js、内置 SQLite 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。源码、部署配置与本地数据分别存放，便于维护和回退。
 
-Windows 命令统一使用 PowerShell 7（`pwsh`）；本机已验证版本为 7.6.7，路径为 `C:\Program Files\PowerShell\7\pwsh.exe`。当前开发分支的 npm 打包命令和打包回归均调用 `pwsh`。该工具调整发生在 rc.4 标签冻结后，不改写其原源码包、标签或镜像；后续打包需使用新版本号。
+Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
 ## 目录约定
 

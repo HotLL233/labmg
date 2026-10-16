@@ -7,4 +7,4 @@
 - 新版本说明始终新增到同一份 `docs/CHANGELOG.md`，按新版本在前排列。发布时将“未发布”内容归入真实版本号及日期，保留所有旧版本说明，并同步版本号、标签及相关文档。不要为文档变更虚构业务版本或移动已有标签。
 - `main` 保留发布基线，后续开发在 `develop` 或 `feature/*`；Git 分支不隔离数据，开发使用 `npm run dev`，测试使用临时运行目录。
 - 根目录只放必要入口和仓库配置；历史、记忆、版本说明放 `docs/`，运行数据放 `var/`，生成物放 `artifacts/`。后两者不得提交。
-- Windows 命令统一使用 PowerShell 7（`pwsh`），不要调用旧版 `powershell.exe`。当前环境路径为 `C:\Program Files\PowerShell\7\pwsh.exe`；工具执行时显式指定该 shell。
+- Windows 命令统一使用 PowerShell 7（`pwsh`），不要调用旧版 `powershell.exe`。通过 `Get-Command pwsh` 定位并用 `$PSVersionTable` 确认版本；工具执行时显式指定 `pwsh`。不要硬编码旧安装路径，当前环境使用 WindowsApps 提供的 PowerShell 7。
