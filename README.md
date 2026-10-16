@@ -41,4 +41,6 @@ npm run package:zip
 
 生成 `artifacts/labos-0.1.1.zip`，解压后运行 `npm start` 或 `start-labos.cmd`。部署包不包含本地运行数据。
 
-具体操作见 [开发与版本管理](docs/DEVELOPMENT.md) 和 [变更记录](docs/CHANGELOG.md)。当前仍为 MVP，已知权限、密码和并发业务问题尚待后续处理。
+具体操作见 [开发与版本管理](docs/DEVELOPMENT.md)。项目记录统一维护在 [项目记忆](docs/MEMORY.md)、[开发历程](docs/HISTORY.md) 和 [版本更新说明](docs/CHANGELOG.md) 中，后续版本说明在同一文件内新增。
+
+当前仍为 MVP，已知权限、密码和并发业务问题尚待后续处理。
