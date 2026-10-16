@@ -17,7 +17,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
     assert.ok(path.basename(fixture).startsWith('package-test-'));
     fs.rmSync(fixture, { recursive: true, force: true });
   });
-  for (const name of ['src', 'scripts', 'deploy', 'docs', 'tests']) {
+  for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests']) {
     fs.cpSync(path.join(root, name), path.join(fixture, name), { recursive: true });
   }
   fs.mkdirSync(path.join(fixture, 'config'));
@@ -69,7 +69,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   powershell(`Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archive)}, ${quote(extracted)})`);
   const files = fs.readdirSync(extracted, { recursive: true }).map(name => name.replaceAll('\\', '/'));
-  for (const required of ['src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
+  for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
     assert.ok(files.includes(required), required);
   }
   assert.ok(files.every(file => !/(^|\/)(var|data|uploads|logs|artifacts|\.git|node_modules)(\/|$)/.test(file)), files.join('\n'));

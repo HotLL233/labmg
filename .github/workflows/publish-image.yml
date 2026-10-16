@@ -1,0 +1,115 @@
+name: Publish versioned image
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-ghcr-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/hotll233/labmg
+  SOURCE: https://github.com/HotLL233/labmg
+
+jobs:
+  publish:
+    if: github.repository == 'HotLL233/labmg'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate version tag
+        id: version
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const { version } = require('./package.json');
+          assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+          assert.equal(process.env.GITHUB_REF, `refs/tags/v${version}`, 'Tag must match package.version');
+          const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          assert.equal(commit, process.env.GITHUB_SHA);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\n`);
+          NODE
+
+      - run: npm run check
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Preserve existing version
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REVISION: ${{ steps.version.outputs.commit }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          (async () => {
+            const { IMAGE, SOURCE, VERSION, REVISION, GITHUB_ACTOR, GH_TOKEN } = process.env;
+            const repository = IMAGE.slice('ghcr.io/'.length);
+            const tokenUrl = new URL('https://ghcr.io/token');
+            tokenUrl.searchParams.set('service', 'ghcr.io');
+            tokenUrl.searchParams.set('scope', `repository:${repository}:pull,push`);
+            const auth = await fetch(tokenUrl, { headers: { Authorization: `Basic ${Buffer.from(`${GITHUB_ACTOR}:${GH_TOKEN}`).toString('base64')}` } });
+            assert.ok(auth.ok, `Registry authorization failed: ${auth.status}`);
+            const { token } = await auth.json();
+            assert.ok(token, 'Missing registry token');
+            const get = route => fetch(`https://ghcr.io/v2/${repository}/${route}`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.oci.image.index+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }
+            });
+            const response = await get(`manifests/${VERSION}`);
+            if (response.status === 404) {
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'exists=false\n');
+              return;
+            }
+            assert.ok(response.ok, `Registry lookup failed: ${response.status}`);
+            const index = await response.json();
+            for (const architecture of ['amd64', 'arm64']) {
+              const descriptor = index.manifests?.find(item => item.platform?.os === 'linux' && item.platform.architecture === architecture);
+              assert.ok(descriptor, `Existing version lacks linux/${architecture}; use a new version`);
+              const manifestResponse = await get(`manifests/${descriptor.digest}`);
+              assert.ok(manifestResponse.ok, `Cannot inspect existing ${architecture} manifest`);
+              const manifest = await manifestResponse.json();
+              const configResponse = await get(`blobs/${manifest.config.digest}`);
+              assert.ok(configResponse.ok, `Cannot inspect existing ${architecture} config`);
+              const config = await configResponse.json();
+              assert.equal(config.os, 'linux');
+              assert.equal(config.architecture, architecture);
+              assert.equal(config.config.Labels['org.opencontainers.image.version'], VERSION);
+              assert.equal(config.config.Labels['org.opencontainers.image.revision'], REVISION, 'Existing tag points to different source; use a new version');
+              assert.equal(config.config.Labels['org.opencontainers.image.source'], SOURCE);
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'exists=true\n');
+            console.log(`Reused verified ${IMAGE}:${VERSION}`);
+          })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          NODE
+
+      - name: Build and push both architectures
+        if: steps.existing.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            VCS_REF=${{ steps.version.outputs.commit }}

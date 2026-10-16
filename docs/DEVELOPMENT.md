@@ -62,7 +62,7 @@ npm start
 npm run dev
 ```
 
-开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.2/`。它不会自动复制正式或旧开发版本的数据。
+开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.2.0-rc.3/`。它不会自动复制正式或旧开发版本的数据。
 
 `LABOS_RUNTIME_DIR` 决定运行根目录，`PORT` 决定端口；需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如在 PowerShell 中：
 
@@ -108,6 +108,8 @@ git switch -c feature/permission-rules
 
 群晖 Docker 版为 `0.2.0-rc.2`，从 `develop` 的首版提交 `6c12017` 创建 `feature/docker-synology`；保留 rc.1 的代码、包和标签，候选版检查后集成 `develop`，稳定 `main` 仍为 `0.1.1`。
 
+`0.2.0-rc.3` 在 rc.2 的镜像 TAR 部署基础上增加公开 GHCR 多架构镜像与标签发布流程，YML 默认使用线上镜像，保留 `LABOS_IMAGE` 覆盖以支持离线导入。rc.2 的标签、产物和历史记录继续保留；仓库公开、GHCR 包公开及匿名拉取的实际结果分别核验，不能用配置完成替代发布验证。
+
 ## 打包与回退
 
 ```powershell
@@ -120,15 +122,25 @@ npm run package:zip
 
 旧 0.1.1 ZIP 已归档到 `artifacts/releases/0.1.1/labos-0.1.1.zip`，原解压验证目录归入 `artifacts/cache/0.1.1/verification/`；更早产物及原数据迁移备份保留在 `artifacts/legacy/`。旧 ZIP 是历史保留件，不补写成新构建。
 
-部署包保留 `src/`、`scripts/`、`config/`、`deploy/`、`docs/`、`tests/` 及必要根文件，可在解压后的根目录执行 `npm start`，或运行 `start-labos.cmd`。包中不应包含本地数据库、附件、日志、真实环境配置和构建缓存。
+部署包保留 `.github/`、`src/`、`scripts/`、`config/`、`deploy/`、`docs/`、`tests/` 及必要根文件，可在解压后的根目录执行 `npm start`，或运行 `start-labos.cmd`。包中不应包含本地数据库、附件、日志、真实环境配置和构建缓存。
 
-### Docker 镜像包
+### GHCR 多架构发布
+
+GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
+
+维护者发布后须确认 GHCR 包可公开访问，并在没有镜像仓库登录凭据的环境验证该版本的多架构清单和拉取。工作流文件、成功构建、包公开及匿名拉取是不同检查项，结果以实际运行和外部状态为准。
+
+`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。将 `deploy/.env.example` 复制为同目录 `.env`，设置初始化密码、数据目录及 UID/GID；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.3`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
+
+### Docker 离线镜像包
 
 ```powershell
 npm run package:docker
 ```
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
+
+导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.3`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 历史 TAR 仍使用 `labos:0.2.0-rc.2`。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -137,7 +149,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.2'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.3'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
