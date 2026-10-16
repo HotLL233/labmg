@@ -1,6 +1,5 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { once } = require('node:events');
@@ -9,17 +8,22 @@ const { test } = require('node:test');
 
 test('moved entry serves assets and isolates normal, development and custom data', { timeout: 30000 }, async t => {
   const root = path.resolve(__dirname, '..');
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'labos-smoke-'));
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+  const cache = path.join(root, 'artifacts/cache', version);
+  fs.mkdirSync(cache, { recursive: true });
+  const fixture = fs.mkdtempSync(path.join(cache, 'smoke-'));
   t.after(() => {
-    assert.equal(path.dirname(path.resolve(fixture)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(fixture).startsWith('labos-smoke-'));
+    assert.equal(path.dirname(path.resolve(fixture)), path.resolve(cache));
+    assert.ok(path.basename(fixture).startsWith('smoke-'));
     fs.rmSync(fixture, { recursive: true, force: true });
   });
   fs.cpSync(path.join(root, 'src'), path.join(fixture, 'src'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
 
   for (const mode of [
     { name: 'normal', args: [], runtime: 'var' },
-    { name: 'development', args: ['--dev'], runtime: 'var/development' },
+    { name: 'development', args: ['--dev'], runtime: `var/development/${version}` },
     { name: 'custom', args: ['--dev'], runtime: 'custom-runtime', override: true }
   ]) {
     const reservation = net.createServer().listen(0, '127.0.0.1');
@@ -30,7 +34,7 @@ test('moved entry serves assets and isolates normal, development and custom data
     delete env.LABOS_RUNTIME_DIR;
     if (mode.override) env.LABOS_RUNTIME_DIR = mode.runtime;
     const child = spawn(process.execPath, [path.join(fixture, 'src/server.js'), ...mode.args], {
-      cwd: os.tmpdir(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+      cwd: cache, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
     });
     let stderr = '';
     child.stderr.on('data', chunk => { stderr += chunk; });
