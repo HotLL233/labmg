@@ -37,6 +37,7 @@
 | 分支约定 | `main` 为发布基线，`develop` 为开发集成，具体功能使用 `feature/*` |
 | 文档基线 | `a728e28`，位于 `develop`，保留此前记忆与开发记录 |
 | Docker TAR 版 | `0.2.0-rc.2`，提交 `4d6301d`，已集成 `develop` 并发布 GitHub 候选 Release，10 个附件大小与 SHA-256 核验通过 |
+| 在线部署版 | `0.2.0-rc.3`，源码提交 `46f2a3c`，公开镜像 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，匿名双架构拉取与正式 Compose 验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 已发布 |
 | 当前工作流 | 从 `4d6301d` 创建 `feature/ghcr-deployment` 制作 `0.2.0-rc.3`，检查后集成 `develop` 并通过版本标签触发 GHCR 发布；稳定 `main` 保留 0.1.1，具体提交与外部发布状态以 Git、Actions 和验证报告为准 |
 | 默认分支 | `develop`，2026-10-16 设置并经 API 核验，以提供当前开发文档及手动发布入口；`main` 提交仍为 `2672321` |
 | Node.js | 要求 `>=22.13`，建议 24；此前本机检查为 Node `24.18.0`、npm `11.16.0` |
@@ -90,6 +91,7 @@
 - Docker 镜像标签为 `labos:<version>`，包含版本/提交 OCI 标签；只复制 `package.json` 和 `src/`，过滤运行文件和真实环境配置。两个架构的 TAR 独立，部署时只导入与设备匹配的一份，不依赖公开镜像仓库。
 - rc.3 默认在线镜像为 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，由多架构清单选择 amd64/arm64。通过 `.env` 的 `LABOS_IMAGE` 可覆盖为离线 `labos:<version>`，离线方式跳过 `docker compose pull`；默认数据路径随版本隔离。新版源码 ZIP 同时包含 `.github/` 发布流程。
 - 仓库公开不等于 GHCR 包公开。新包默认私有，需在 GitHub Package settings 设置 Public，再实测匿名拉取。官方 REST/GraphQL 没有设置包可见性的接口；本会话没有可用浏览器会话，Windows Computer Use 管道重试和重置后仍不可用，不能声称已通过 UI 设置。镜像外部状态以实际验证为准。
+- 上述 UI 限制由用户自行完成包 Public 设置解决，用户已确认完成；代理随后实际通过匿名访问和部署验证，没有通过 API 猜测包可见性。公开 GHCR 包不能改回私有，后续可见性变更须遵循 GitHub 当前规则。
 - rc.3 代码冻结于 `46f2a3c` / `v0.2.0-rc.3`，ZIP、双架构 TAR 和独立部署文件已生成。首次标签推送后 Actions 运行数仍为 0，API 确认已启用，原因未确定；后续独立 CI 提交补充从默认分支输入已有 tag 的手动入口，检出并核对冻结提交。该跟进不改原标签或已有 rc.3 产物，不将新的 CI 提交伪装为 rc.3 发布源码；当前源码若再次打包必须使用后续版本。
 - Docker 内部端口固定 3000、运行根目录 `/var/lib/labos`。Compose 默认绑定本版数据路径，可配置绝对路径、宿主端口及 UID/GID；必填初始化密码。宿主机目录须允许该运行用户读写，不使用 root 或生产目录 777 作为默认方案。
 - Compose 项目会读取同目录 `.env`，普通 Node 启动不自动读环境文件。管理员变量只在空库初始化生效，不能用改 `.env` 代替重置密码。镜像/TAR 不包含真实本地数据库和附件。
@@ -161,6 +163,9 @@
 - Docker 轮次统一检查：16 个 JS 文件语法通过，普通回归 18 通过/1 Docker 项按设计跳过，指定临时镜像另测 1 项通过。真实脚本预检在独立 `0.2.0-rc.2-check` 副本中完成两架构导出，核对 TAR 内 tag/config 架构/OCI 标签与外部摘要，第二次全部复用且 SHA/mtime 不变；副本安全清理，结果保留在 `artifacts/cache/0.2.0-rc.2/docker-package-preflight.json`。7 份 Markdown 的 14 个相对链接通过，原数据库/WAL/SHM 3 文件 SHA-256 保持一致。
 - rc.2 正式 TAR 分别导入后，两架构的元数据、非 root、健康、登录及记录/附件重建持久化通过；正式 Compose 独立项目启动、登录和清理通过。ARM64 为 Docker Desktop 模拟。GitHub Release 已核对非草稿、候选状态及 10 个附件大小/摘要；结果在 rc.2 缓存报告中。
 - rc.3 公开前扫描覆盖本地全部 refs 可达的 5 个提交、54 个路径、74 个唯一 blob，以及本轮跟踪文件和新增工作流，未发现真实运行文件或高置信秘密格式；硬编码口令候选为默认值、示例或合成测试数据。这是有限静态检查，不能证明绝无秘密。16 个 JS 语法、普通回归 18 通过/1 Docker 跳过、actionlint 工作流检查通过；工作流内联逻辑 10 个自检场景及 Compose 默认/覆盖/必填密码检查通过。尚需外部构建及匿名拉取验证。
+- rc.3 发布后补充：Actions 运行 `38855576508` 构建并推送成功，固定源码 `46f2a3c`，索引摘要 `sha256:91485b0effbd7b0e5784e2ed3b534a51633ca99c423751cce3ddc4e89c93b4df`。用户设包 Public 后，匿名核对两架构 manifest/config 摘要和 OCI；新建空 Docker 配置、清除继承仓库凭据后实际拉取 amd64/arm64，通过正式发布 YML 默认线上镜像的配置、pull、启动、健康、登录、1000:1000、独立缓存挂载及清理。双架构离线 TAR 的非 root/登录/重建持久化也通过，ARM64 为模拟环境。证据在 rc.3 的 `ghcr-anonymous-verification.json` 与 `docker-offline-release-validation.json`，实际数据未用于测试。
+- 发布检查发现原 Registry Accept 漏写 OCI 索引的 `.v1`：即便包公开，GHCR 也会返回 `MANIFEST_UNKNOWN` / 不支持 OCI 索引的 404，不能当作标签不存在。后续 CI 已修正请求类型，实际重复发布复用结果以 Actions 报告为准。Docker 29 containerd 的 image ID 可为平台 manifest 摘要，验收同时核对已验证的 config/manifest 与 RepoDigests 索引；不把 ID 表示差异判成镜像损坏。
+- rc.3 Release 已发布且非草稿，10 个附件大小/摘要、匿名 YML 下载及包页面均核验通过。GitHub 按标签读取 Release 不返回草稿，恢复草稿应按 ID 或列表查找；本轮误建的同内容临时草稿经逐项摘要核对后已清理，公开版本和本地不可变产物保留。
 
 ## 后续开发顺序
 
@@ -189,5 +194,6 @@
 | 2026-10-16 | rc.2 提交 `4d6301d` 已同步 `develop` 与功能分支，标签 `v0.2.0-rc.2` 和 GitHub 候选 Release 发布成功，10 个附件摘要通过；稳定 main 不变。 |
 | 2026-10-16 | 用户明确要求公开仓库并让 YML 直接拉镜像；仓库公开与匿名访问已核验，从 rc.2 开发 rc.3 的 GHCR 标签发布流程、在线默认 YML 与离线覆盖。仓库和镜像包可见性分别处理，不把配置完成写成匿名拉取已成功。 |
 | 2026-10-16 | rc.3 冻结提交 `46f2a3c` 及标签已推送、产物已生成，但首次未产生 Actions 运行；补充独立 CI 手动入口，默认分支改为 develop，main 内容不变。12 个发布逻辑自检和 actionlint 通过，固定从原 rc.3 标签构建，不覆盖旧产物。 |
+| 2026-10-16 | 手动 Actions 发布双架构 rc.3 镜像成功，用户完成 GHCR 包 Public 设置；匿名双架构实际拉取和正式 YML 部署通过，rc.3 候选 Release 的 10 个附件公开并核验。修正 OCI 索引 Accept 类型及验收脚本的 Docker image ID 表示假设，保留冻结产物并完成测试清理。 |
 
 后续在此追加新事件摘要，并同步上方当前状态与关联文档。具体提交记录以 Git 为准，不在文件中预写本次尚未生成的提交散列。

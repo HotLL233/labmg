@@ -83,7 +83,7 @@ jobs:
             const { token } = await auth.json();
             assert.ok(token, 'Missing registry token');
             const get = route => fetch(`https://ghcr.io/v2/${repository}/${route}`, {
-              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.oci.image.index+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }
             });
             const response = await get(`manifests/${VERSION}`);
             if (response.status === 404) {

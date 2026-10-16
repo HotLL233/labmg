@@ -2,7 +2,7 @@
 
 本版为 `0.2.0-rc.3`，使用 SQLite 和本地附件，只需一个应用容器。YML 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，面向 `linux/amd64` 和 `linux/arm64`。无需启动 PostgreSQL 或 MinIO。推荐使用 64 位群晖的 Container Manager；旧版 Docker 套件可通过兼容 Compose 3.8 的工具部署。
 
-在线部署要求该版本已完成 GitHub Actions 发布且 GHCR 包设为公开。发布状态以对应 Actions 运行、包页面和匿名拉取结果为准；本说明及 YML 配置不代表这些外部步骤已验证成功。
+该版本镜像已发布为公开包，并通过匿名双架构拉取及 YML 启动验证。可从 [rc.3 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 下载 `docker-compose.yml` 和 `env.example`，将示例复制为 `.env`；源码中的示例名仍为 `.env.example`。NAS 须能访问 `ghcr.io`，无需 GitHub 账号登录。
 
 ## 在线用 YML 创建项目
 

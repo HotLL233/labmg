@@ -132,6 +132,8 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 维护者发布后须确认 GHCR 包可公开访问，并在没有镜像仓库登录凭据的环境验证该版本的多架构清单和拉取。工作流文件、成功构建、包公开及匿名拉取是不同检查项，结果以实际运行和外部状态为准。
 
+rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
+
 `deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，已公开的版本可直接 `docker compose pull` / `up -d`，无需导入 TAR 或 `docker login`。将 `deploy/.env.example` 复制为同目录 `.env`，设置初始化密码、数据目录及 UID/GID；相对数据路径基于 `deploy/`，默认 `../var/docker/0.2.0-rc.3`。群晖建议使用绝对 NAS 路径。主配置保留 Compose 3.8 兼容性，不设置 `pull_policy`。
 
 ### Docker 离线镜像包

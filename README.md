@@ -18,7 +18,7 @@ npm start
 
 ## Docker 与群晖
 
-从 `deploy/` 取用 `docker-compose.yml` 和 `.env.example`，在群晖 Container Manager 创建项目，将示例复制为 `.env` 并填写管理员初始化密码、NAS 数据绝对路径及 UID/GID。YML 默认拉取 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，支持 `linux/amd64` / `linux/arm64` 自动选择架构；公开镜像发布后，无需先导入 TAR 或执行 `docker login`。
+从 [rc.3 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 下载 `docker-compose.yml` 和 `env.example`，将示例复制为 `.env` 并填写管理员初始化密码、NAS 数据绝对路径及 UID/GID，在群晖 Container Manager 创建项目。YML 默认拉取公开镜像 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，支持 `linux/amd64` / `linux/arm64` 自动选择架构，无需先导入 TAR 或执行 `docker login`。源码中的示例仍名为 `deploy/.env.example`。
 
 保留按架构导入 TAR 的离线方式，导入后在 `.env` 设置 `LABOS_IMAGE=labos:0.2.0-rc.3`。容器端口 `3000`，数据挂载到 `/var/lib/labos`，默认非 root 运行。完整步骤及发布验证范围见 [群晖部署](docs/SYNOLOGY.md)。
 
