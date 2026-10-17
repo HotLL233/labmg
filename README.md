@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-当前版本：**0.3.2**（批次位置与领用）。源码、双架构镜像与离线包的构建和发布状态以 [0.3.2 发布记录](https://github.com/HotLL233/labmg/releases/tag/v0.3.2)及[版本说明](docs/CHANGELOG.md)为准。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
+当前版本：**0.3.2**（批次位置与领用验证版），源码、双架构镜像、离线包和配套 YML [已发布](https://github.com/HotLL233/labmg/releases/tag/v0.3.2)，实际验证范围见[版本说明](docs/CHANGELOG.md)。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
 
 ## 快速启动
 
@@ -33,7 +33,7 @@ npm start
 
 以下是 **0.3.2** 部署步骤。先在发布记录中确认镜像和所需附件可用，再使用同版本的部署文件；历史版本继续使用各自的配套文件。
 
-首次安装从 [0.3.2 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.2) 下载 `docker-compose.yml`，在群晖 Container Manager 创建项目。默认由 Docker 自动创建按项目和版本隔离的 `labos-runtime-0.3.2` 数据卷，一次性初始化容器准备目录及权限，无需手工创建数据文件夹；应用继续以非 root 用户运行。YML 默认使用 `ghcr.io/hotll233/labmg:0.3.2`，发布目标为 `linux/amd64` / `linux/arm64`；启动后访问网页设置管理员密码。镜像发布和匿名拉取结果以实际记录为准。
+首次安装从 [0.3.2 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.2) 下载 `docker-compose.yml`，在群晖 Container Manager 创建项目。默认由 Docker 自动创建按项目和版本隔离的 `labos-runtime-0.3.2` 数据卷，一次性初始化容器准备目录及权限，无需手工创建数据文件夹；应用继续以非 root 用户运行。YML 默认使用 `ghcr.io/hotll233/labmg:0.3.2`，支持 `linux/amd64` / `linux/arm64`，两架构实际匿名拉取已通过；启动后访问网页设置管理员密码。容器验证及目标 NAS 的验证边界见版本说明。
 
 按需下载 `env.example` 并改名为同目录 `.env`。默认留空 `LABOS_DATA_DIR`；如复用已有宿主机数据，必须填原来实际存在的绝对路径并保留原 UID/GID，新版不会自动迁移数据。不带原数据配置启动会得到空的新版本数据卷。源码示例仍名为 `deploy/.env.example`。
 

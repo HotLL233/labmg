@@ -56,6 +56,8 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 本次发布交付源码 ZIP、`v0.3.2` 版本标签、GHCR 双架构镜像及按架构导出的离线 TAR、校验清单和配套部署文件，产物目录为 `artifacts/releases/0.3.2/`。源码冻结后从同一快照构建和验证，保留历史标签及产物。构建、发布、匿名拉取及容器验证结果以 [0.3.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.2)、对应 Actions 和版本说明的实际记录为准；部署配置本身不证明发布已成功。
 
+已冻结 `d261a94` / `v0.3.2`，Actions `39009929050` 成功；正式镜像双架构匿名拉取、配套 Compose、两份离线 TAR 冻结容器专项及 amd64 同卷升级验证通过，ARM64 容器为模拟运行。[公开 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.2) 十件附件已核验大小和摘要，八份非 TAR 附件经官方 API 匿名完整下载通过；未额外重复下载大 TAR，未在目标 NAS 或长期负载验收。冻结后的发布记录另行提交，不重打 ZIP/TAR 或移动标签。
+
 参考入口及采用边界见[开源对照报告](research/MATERIAL_OPEN_SOURCE.md)。保留本项目协同申报、完整原版修订、独立区域与本批金额规则，不搬入上游服务或业务源码。实际实现、检查结果及验证边界统一记入[版本说明](CHANGELOG.md)的 0.3.2 条目。
 
 ## 0.3.1 新物资提交修复
