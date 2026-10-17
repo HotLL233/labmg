@@ -44,6 +44,18 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
+## 0.4.0：整件条码与可配置编号
+
+用户补充手机以群晖 IP 的 HTTP 地址访问，确认同种物资每瓶／每件独立编码、逐件跟踪，首版整瓶／整件领用；随后要求验收后根据合格数量自动生成条码，编号格式支持自定义配置加流水号。此前0.3.3批次QR只定位同批余额，不能区分每瓶；此结论由本轮新增单件台账补充。实时相机已有getUserMedia实现，HTTP安全限制不能由前端绕过，继续支持本地拍照／图片识别和手输，明确HTTPS、权限、设备及组件错误。
+
+从develop的`c7f79548a904e85f06f7738e44eafdd1ae20a9a9`创建`feature/v0.4.0-unit-barcodes`，新版本0.4.0；缓存、合成测试运行目录及发布辅助脚本仅放`artifacts/cache/0.4.0/`，交付`artifacts/releases/0.4.0/`，不访问真实var，保留main、旧标签及产物。
+
+实施约定：主档显式quantity／unit模式，旧主档保留quantity，页面新建默认unit；unit以瓶／件为基本单位，仅整数，旧存量不盲目拆瓶。无业务记录主档可带版本和原因切换，历史补码本版不做。合格验收、期初和盘盈在库存同事务按N件生成N码，单次最多1000；发放／盘亏必须指定同批在库具体单件，验收冲正检查原始那些单件。继续批次均价金额，不声称每瓶固定采购成本。申请仍不预占，发放确认才扣库；不实现开瓶余量、部分发放或退回。
+
+全局规则默认`LAB-{YYYY}{MM}{DD}-{SEQ}`、补零6位，日期按UTC，全局流水递增且不按日期重置；更新规则须主档权限、原因及版本，旧码不变，包装码／单件码不可相互占用。标签复用现有ZXing生成Code128及QR，不加依赖。备份升schema4，包含单件、规则序号及关联，严格兼容schema1/2/3。后续交付继续包含源码、双架构镜像、两TAR、YML和GitHub Release；完成及验证证据按实际追加，不把计划写成已发布。
+
+源码阶段22个JS语法通过；全量99项98通过、1个默认Docker条件跳过、0失败；最后后端修正后materials31/31再次通过。前端VM36/36、scanner12/12；真实Edge单件业务16/16、8张桌面/390px截图已目视，六张实际ZXing条形码/QR图片均解回对应单件码，扫码输入为排队文本替身，不冒充物理相机验收。已修复编号输入截断、标签晚生成窗口和冲正记录标签查询问题。Compose三场景配置解析通过，正式容器、升级与发布验证在冻结后执行；本机Docker不可用，实际容器使用GitHub runner，结果按实际追加。
+
 ## 0.3.3 手机扫码出入库
 
 从 `400f19e` 创建 `feature/v0.3.3-material-scanning`。用户确认同时支持现有外包装条码及系统库存批次二维码。版本为 0.3.3，测试和构建缓存只放 `artifacts/cache/0.3.3/`，正式交付放 `artifacts/releases/0.3.3/`；开发运行数据使用 `var/development/0.3.3/`。保留旧标签、产物、main 和真实数据。
@@ -211,7 +223,7 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 和 0.3.3 配套 YML 默认使用 `ghcr.io/hotll233/labmg:0.3.3`；部署前先核对实际发布状态。首次安装默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.3.3` 命名卷，应用和初始化服务共用该卷。已有 0.3.2 部署沿用原 YML/项目/挂载和 UID/GID，仅更新镜像，原卷名不变。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+`deploy/docker-compose.yml` 和 0.4.0 配套 YML 默认使用 `ghcr.io/hotll233/labmg:0.4.0`；部署前先核对实际发布状态。首次安装默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.4.0` 命名卷，应用和初始化服务共用该卷。已有 0.3.3 部署沿用原 YML/项目/挂载和 UID/GID，仅更新镜像，原卷名不变。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
 
 已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID，目录须已存在；默认新卷不含旧数据。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留卷，日常升级不要用 `down --volumes` / `down -v`。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持完成依赖条件须以实际部署工具为准。
 
@@ -223,7 +235,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.3.3 TAR 对应 `labos:0.3.3`），使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.4.0 TAR 对应 `labos:0.4.0`），使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -232,7 +244,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.3.3'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.4.0'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```

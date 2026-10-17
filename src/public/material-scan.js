@@ -32,6 +32,11 @@ function engine() {
 
 function stopTracks(stream) { stream?.getTracks().forEach(track => track.stop()); }
 function close() { active?.finish(null); }
+function cameraUnavailableMessage() {
+  if (!globalThis.isSecureContext) return (globalThis.location?.protocol === 'http:' ? '当前使用 HTTP，浏览器禁止实时相机。' : '当前连接不满足浏览器的相机安全要求。') + '请通过浏览器信任的 HTTPS 地址打开；仍可拍照、选图或手动输入。';
+  if (typeof navigator.mediaDevices?.getUserMedia !== 'function') return '当前浏览器不支持实时相机，请使用支持相机的浏览器直接打开，并检查网站相机权限；仍可拍照、选图或手动输入。';
+  return '';
+}
 
 function scan() {
   close();
@@ -96,14 +101,14 @@ function scan() {
       session.imageJob++;
       if (session.imageUrl) URL.revokeObjectURL(session.imageUrl);
       session.imageUrl = null;
-      if (!globalThis.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        message('实时扫码需要 HTTPS 和相机支持；可使用下方拍照、选图或手动输入。'); return;
-      }
+      const unavailable = cameraUnavailableMessage();
+      if (unavailable) { message(unavailable); return; }
       const job = session.cameraJob;
       startButton.disabled = true; message('正在准备摄像头，请允许使用相机。');
-      let stream;
+      let stream, preparingDecoder = true;
       try {
         const library = await engine();
+        preparingDecoder = false;
         if (!live() || job !== session.cameraJob) return;
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
         if (!live() || job !== session.cameraJob || document.hidden) {
@@ -134,7 +139,15 @@ function scan() {
         stopTracks(stream);
         if (!live() || job !== session.cameraJob) return;
         stopCamera();
-        message(['NotAllowedError', 'SecurityError'].includes(error.name) ? '相机权限未获允许；可使用拍照、选图或手动输入。' : '无法开启摄像头；可使用拍照、选图或手动输入。');
+        const errors = {
+          NotAllowedError: '相机权限未获允许，请在浏览器和系统设置中允许相机后重试。',
+          SecurityError: '浏览器安全策略阻止了相机，请直接打开可信 HTTPS 地址并检查网站相机权限。',
+          NotFoundError: '未找到可用摄像头，请确认设备连接了摄像头。',
+          NotReadableError: '无法读取摄像头，可能被其他应用占用，请关闭占用相机的应用后重试。',
+          OverconstrainedError: '摄像头不支持当前拍摄设置，请更换浏览器后重试。',
+          AbortError: '摄像头启动已中断，请重试。'
+        };
+        message(preparingDecoder ? '扫码组件加载失败，无法启动实时识别，请重试或手动输入。' : (errors[error.name] || '无法开启摄像头，请重试。') + '也可拍照、选图或手动输入。');
       }
     }
     async function readFile(input) {
@@ -178,8 +191,9 @@ function scan() {
     document.body.appendChild(dialog);
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else { dialog.setAttribute('open', ''); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); }
-    message(globalThis.isSecureContext && navigator.mediaDevices?.getUserMedia ? '点击开启摄像头，或使用拍照、选图、手动输入。' : '当前连接无法实时使用相机；可使用拍照、选图或手动输入。');
-    if (globalThis.isSecureContext && navigator.mediaDevices?.getUserMedia) startButton.focus();
+    const unavailable = cameraUnavailableMessage();
+    message(unavailable || '点击开启摄像头，或使用拍照、选图、手动输入。');
+    if (!unavailable) startButton.focus();
     else manual.elements.code.focus();
   });
 }
@@ -192,7 +206,15 @@ async function createQr(text) {
   return result.image;
 }
 
-globalThis.MaterialScanner = Object.freeze({ scan, close, createQr });
+async function createBarcode(text) {
+  if (typeof text !== 'string' || !/^[\x20-\x7e]{1,128}$/.test(text) || !text.trim()) throw Error('条码内容须为 1–128 个可打印 ASCII 字符。');
+  const library = await engine();
+  const result = await library.writeBarcode(text, { format: 'Code128', scale: 3, addQuietZones: true, addHRT: true });
+  if (result.error || !result.image) throw Error('条码生成失败，请检查编码内容后重试。');
+  return result.image;
+}
+
+globalThis.MaterialScanner = Object.freeze({ scan, close, createQr, createBarcode });
 addEventListener('pagehide', close);
 addEventListener('hashchange', close);
 addEventListener('popstate', close);

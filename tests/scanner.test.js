@@ -11,7 +11,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 // Only scanner DOM/media APIs are modeled here. These checks do not emulate a physical camera or browser layout.
-function fixture({ secure = true, getUserMedia, readBarcodes = async () => [], library = true } = {}) {
+function fixture({ secure = true, protocol = secure ? 'https:' : 'http:', mediaDevices = true, getUserMedia, readBarcodes = async () => [], library = true } = {}) {
   const windowEvents = {}, documentEvents = {}, timers = new Map(), urls = new Set(), revoked = [], draws = [];
   const nodes = [];
   class Element {
@@ -51,8 +51,8 @@ function fixture({ secure = true, getUserMedia, readBarcodes = async () => [], l
   const tracks = [], requests = [], prepares = [], writes = [];
   function stream() { const track = { stopped: 0, stop() { this.stopped++; } }; tracks.push(track); return { getTracks: () => [track] }; }
   const context = {
-    document, navigator: { mediaDevices: { async getUserMedia(options) { requests.push(options); return getUserMedia ? getUserMedia() : stream(); } } },
-    isSecureContext: secure, WebAssembly, Blob,
+    document, navigator: { mediaDevices: mediaDevices ? { async getUserMedia(options) { requests.push(options); return getUserMedia ? getUserMedia() : stream(); } } : undefined },
+    isSecureContext: secure, location: { protocol }, WebAssembly, Blob,
     URL: { createObjectURL() { const url = 'blob:' + urls.size; urls.add(url); return url; }, revokeObjectURL(url) { revoked.push(url); urls.delete(url); } },
     Image: class { constructor() { this.naturalWidth = 800; this.naturalHeight = 600; } set src(value) { this.url = value; queueMicrotask(() => this.onload?.()); } },
     setTimeout(callback) { const id = Symbol(); timers.set(id, callback); return id; }, clearTimeout(id) { timers.delete(id); },
@@ -87,10 +87,26 @@ test('HTTP scan has photo/file/manual fallbacks and never requests a live camera
   const result = app.api.scan();
   assert.match(app.dialog().innerHTML, /capture="environment"/);
   assert.match(app.dialog().innerHTML, /data-ms="file"/);
+  assert.match(app.dialog().parts['.ms-status'].textContent, /HTTP.*禁止实时相机.*信任的 HTTPS/);
   await app.dialog().parts['[data-ms="camera"]'].onclick();
   assert.equal(app.requests.length, 0);
+  assert.match(app.dialog().parts['.ms-status'].textContent, /HTTP.*禁止实时相机.*拍照、选图或手动输入/);
   app.manual('  000123  '); app.manual('second'); app.api.close();
   assert.equal(await result, '000123'); assert.equal(app.dialog().isConnected, false);
+});
+
+test('an unsafe HTTPS context and a browser without camera APIs have distinct explanations and keep manual input', async () => {
+  for (const [settings, expected] of [
+    [{ secure: false, protocol: 'https:' }, /连接不满足.*安全要求.*信任的 HTTPS/],
+    [{ mediaDevices: false }, /浏览器不支持实时相机.*直接打开/]
+  ]) {
+    const app = fixture(settings), result = app.api.scan();
+    assert.match(app.dialog().parts['.ms-status'].textContent, expected);
+    await app.dialog().parts['[data-ms="camera"]'].onclick();
+    assert.match(app.dialog().parts['.ms-status'].textContent, expected);
+    assert.equal(app.requests.length, 0);
+    app.manual('NO-CAMERA'); assert.equal(await result, 'NO-CAMERA');
+  }
 });
 
 test('synthetic video pixels use the real QR decoder, resolve once and release all camera tracks', async () => {
@@ -158,6 +174,40 @@ test('permission denial retains photo decoding and manual entry; selected images
   await assert.rejects(app.api.createQr('x'.repeat(4097)), /二维码内容/);
 });
 
+test('camera device, occupancy, policy and interrupted startup failures explain the cause without reporting a decoder failure', async () => {
+  for (const [name, expected] of [
+    ['NotFoundError', /未找到可用摄像头/],
+    ['NotReadableError', /其他应用占用/],
+    ['SecurityError', /安全策略.*相机权限/],
+    ['OverconstrainedError', /不支持当前拍摄设置/],
+    ['AbortError', /启动已中断/]
+  ]) {
+    const app = fixture({ getUserMedia: async () => { throw Object.assign(Error('device failure'), { name }); } });
+    const result = app.api.scan(); await app.dialog().parts['[data-ms="camera"]'].onclick();
+    const message = app.dialog().parts['.ms-status'].textContent;
+    assert.equal(app.requests.length, 1); assert.match(message, expected); assert.doesNotMatch(message, /组件加载失败/);
+    assert.equal(app.dialog().parts['[data-ms="camera"]'].disabled, false);
+    app.manual('FALLBACK'); assert.equal(await result, 'FALLBACK');
+  }
+});
+
+test('single-item Code128 labels produce a real decodable image and reject unsupported or oversized contents', async () => {
+  const app = fixture(), text = 'LAB-20261017-000001';
+  app.context.ZXingWASM.writeBarcode = (value, options) => {
+    app.writes.push({ text: value, options }); return zxing.writeBarcode(value, options);
+  };
+  const image = await app.api.createBarcode(text);
+  assert.ok(image instanceof Blob);
+  const results = await zxing.readBarcodes(new Uint8Array(await image.arrayBuffer()), { formats: ['Code128'], maxNumberOfSymbols: 2 });
+  assert.equal(results.length, 1); assert.equal(results[0].text, text); assert.equal(results[0].format, 'Code128');
+  assert.equal(app.writes[0].options.addQuietZones, true); assert.equal(app.writes[0].options.addHRT, true);
+  for (const value of ['', ' ', '瓶-0001', 'LAB\n0001', 'x'.repeat(129), null]) await assert.rejects(app.api.createBarcode(value), /1–128.*ASCII/);
+  app.context.ZXingWASM.writeBarcode = async () => ({ image: new Blob(['boundary']), error: '' });
+  assert.ok(await app.api.createBarcode('x'.repeat(128)) instanceof Blob);
+  app.context.ZXingWASM.writeBarcode = async () => ({ error: 'encoding failed' });
+  await assert.rejects(app.api.createBarcode(text), /条码生成失败/);
+});
+
 test('multiple visible codes do not select an arbitrary target and missing WASM keeps manual fallback', async () => {
   const app = fixture({ readBarcodes: async () => [{ text: 'A', isValid: true }, { text: 'B', isValid: true }] });
   const result = app.api.scan(); await app.dialog().parts['[data-ms="camera"]'].onclick();
@@ -175,5 +225,7 @@ test('the decoder script loads on demand from the pinned local URL and a load fa
   assert.equal(script.src, '/vendor/zxing-wasm/3.1.5/index.js');
   script.onerror(); await starting;
   assert.equal(app.requests.length, 0); assert.equal(app.timers.size, 0); assert.equal(script.isConnected, false);
+  assert.match(app.dialog().parts['.ms-status'].textContent, /扫码组件加载失败/);
+  assert.doesNotMatch(app.dialog().parts['.ms-status'].textContent, /相机权限未获允许|无法开启摄像头/);
   app.manual('offline-manual'); assert.equal(await result, 'offline-manual');
 });

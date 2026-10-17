@@ -105,6 +105,17 @@ function assertNoMoney(value) {
   }
 }
 
+function legacyBackup(value, schemaVersion) {
+  const result = structuredClone(value);
+  result.schemaVersion = schemaVersion;
+  delete result.data.material_stock_units;
+  for (const row of result.data.material_catalog) delete row.tracking_mode;
+  result.data.material_state = result.data.material_state.filter(row => ['opening_closed', 'restored_once'].includes(row.key));
+  if (schemaVersion < 3) delete result.data.material_barcodes;
+  if (schemaVersion < 2) { delete result.data.material_stock_locations; delete result.data.material_issues; }
+  return result;
+}
+
 function workbookXml(bytes) {
   assert.equal(bytes.readUInt32LE(0), 0x04034b50, 'XLSX must be an actual ZIP');
   const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
@@ -779,12 +790,11 @@ test('materials upgrade expands the stock CHECK atomically while retaining rows,
   } finally { db.close(); }
 });
 
-test('schema 3 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
+test('schema 4 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
   const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'BACKUP-ISSUE', expiryDate: '2030-05-06' };
   await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '4', amount: '1.01', requestIdempotencyKey: key() }, 201);
-  const legacy = structuredClone((await f.request('GET', '/api/materials/backup', f.admin)).data);
-  legacy.schemaVersion = 1; delete legacy.data.material_stock_locations; delete legacy.data.material_issues; delete legacy.data.material_barcodes;
+  const legacy = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 1);
   await f.request('PUT', '/api/materials/stock/location', s.material, { ...identity, location: 'Backup A', version: 0, reason: '备份位置' });
   const applyBody = { ...identity, quantity: '1', purpose: '备份发放', requestIdempotencyKey: key() };
   const issue = (await f.request('POST', '/api/materials/issues', ordinary, applyBody, 201)).data.issue;
@@ -797,7 +807,7 @@ test('schema 3 backups restore issue sources, locations and user mapping; damage
   const cancelled = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
   await f.request('POST', `/api/materials/issues/${cancelled.id}/cancel`, ordinary, { version: 1, reason: '备份取消', requestIdempotencyKey: key() }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 3); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
+  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
   const target = await fixture(t);
   await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
@@ -949,13 +959,12 @@ test('scanned material acceptance lookup filters exact catalog, region and wareh
   assert.equal((await f.request('GET', query, ordinary)).data.total, 3, 'default lookup still includes completed history');
 });
 
-test('schema 3 barcode backup maps creators and rejects damaged mappings while strict schema 2 imports normalize only the new table', { timeout: 45000 }, async t => {
+test('schema 4 barcode backup maps creators and rejects damaged mappings while strict schema 2 imports normalize only the new tables', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed();
-  const previous = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  previous.schemaVersion = 2; delete previous.data.material_barcodes;
+  const previous = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 2);
   const saved = (await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, s.material, { code: '0000Backup', reason: '备份映射' }, 201)).data.barcode;
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 3); assert.equal(backup.data.material_barcodes.length, 1);
+  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_barcodes.length, 1);
   const target = await fixture(t); await target.account('TESTER'); const targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
   for (const change of [
@@ -983,4 +992,230 @@ test('schema 3 barcode backup maps creators and rejects damaged mappings while s
   await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, previous);
   assert.equal((await oldTarget.request('GET', `/api/materials/catalog/${s.catalog.id}/barcodes`, oldMaterial)).data.total, 0);
   await oldTarget.request('POST', '/api/materials/scan/resolve', oldMaterial, { code: saved.code }, 404);
+});
+
+test('unit catalog modes and label rules enforce permissions, versions, integer units and permanent history boundaries', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  assert.equal(s.catalog.trackingMode, 'quantity');
+  const rule = (await f.request('GET', '/api/materials/unit-label-rule', ordinary)).data;
+  assert.equal(rule.nextSequence, 1); assert.equal(rule.dateBasis, 'UTC');
+  const update = { template: 'BOTTLE-{YYYY}{MM}{DD}-{SEQ}', padding: 8, version: rule.rule.version, reason: '独立瓶标签' };
+  await f.request('PUT', '/api/materials/unit-label-rule', ordinary, update, 403);
+  for (const change of [{ template: 'NO-SEQUENCE' }, { template: 'A{SEQ}{SEQ}' }, { template: 'A{UNKNOWN}{SEQ}' }, { template: '瓶{SEQ}' }, { template: 'A {SEQ}' }, { padding: 0 }, { padding: 13 }, { reason: '' }]) {
+    await f.request('PUT', '/api/materials/unit-label-rule', f.admin, { ...update, ...change }, 400);
+  }
+  const saved = (await f.request('PUT', '/api/materials/unit-label-rule', s.material, update)).data;
+  assert.equal(saved.rule.version, 2); assert.equal(saved.rule.actorId, s.material.id); assert.equal(saved.nextSequence, 1);
+  await f.request('PUT', '/api/materials/unit-label-rule', f.admin, update, 409);
+  const route = `/api/materials/catalog/${s.catalog.id}/tracking-mode`;
+  const mode = { trackingMode: 'unit', version: s.catalog.version, reason: '整瓶管理' };
+  await f.request('PUT', route, ordinary, mode, 403);
+  await f.request('PUT', route, f.admin, { ...mode, trackingMode: 'serial' }, 400);
+  const master = (await f.request('PUT', route, f.admin, mode)).data.catalog;
+  assert.equal(master.trackingMode, 'unit'); assert.equal(master.version, 2);
+  await f.request('PUT', route, f.admin, mode, 409);
+  s.catalog = master;
+  let order = await f.order(ordinary);
+  await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary, { requestVersion: order.version, ...f.item(s, { quantity: '1.5' }) }, 400);
+  order = await f.add(order, ordinary, f.item(s, { quantity: '2' }));
+  order = await f.submit(order, s.material);
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '0.001' }), 400);
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '0', amount: '0', rejectedQuantity: '0.5', rejectedReason: '非整件' }), 400);
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '0', amount: '0', rejectedQuantity: '1', rejectedReason: '包装破损' }), 201);
+  assert.equal((await f.request('GET', '/api/materials/unit-label-rule', f.admin)).data.nextSequence, 1);
+  await f.request('PUT', route, f.admin, { trackingMode: 'quantity', version: 2, reason: '已有拒收不允许切换' }, 409);
+  const fractional = await f.catalog(s.category.id, { code: 'BULK-FRACTION', trackingMode: 'quantity' });
+  await f.order(ordinary, f.item({ ...s, catalog: fractional }, { quantity: '0.5' }));
+  await f.request('PUT', `/api/materials/catalog/${fractional.id}/tracking-mode`, f.admin, { trackingMode: 'unit', version: 1, reason: '不能猜测半瓶' }, 409);
+});
+
+test('acceptance automatically generates immutable independent labels and retries never consume sequences or duplicate inventory', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  s.catalog = await f.catalog(s.category.id, { code: 'UNIT-RECEIVE', trackingMode: 'unit' });
+  let order = await f.order(s.material, f.item(s, { quantity: '5' })); order = await f.submit(order, s.material);
+  const body = f.receiptBody(order, { quantity: '3', amount: '1', rejectedQuantity: '1', rejectedReason: '破瓶', batch: 'UNITS', expiryDate: '2031-05-06' });
+  const received = (await f.request('POST', '/api/materials/receipts', s.material, body, 201)).data;
+  assert.equal(received.receipt.unitCount, 3); assert.equal(received.receipt.units.length, 3);
+  const units = received.receipt.units;
+  assert.equal(new Set(units.map(unit => unit.code)).size, 3);
+  assert.deepEqual(units.map(unit => unit.sequence), [1, 2, 3]);
+  for (const unit of units) { assert.match(unit.code, /^LAB-\d{8}-\d{6}$/); assert.equal(unit.qrPayload, unit.code); assert.equal(unit.status, 'in_stock'); assert.equal(unit.sourceReceiptId, received.receipt.id); assert.equal(unit.catalogCode, s.catalog.code); }
+  const replay = (await f.request('POST', '/api/materials/receipts', s.material, body)).data;
+  assert.deepEqual(replay.receipt.units, units);
+  const listed = (await f.request('GET', `/api/materials/stock/units?receiptId=${received.receipt.id}&pageSize=2&page=2`, s.material)).data;
+  assert.equal(listed.total, 3); assert.equal(listed.items.length, 1); assert.equal(listed.items[0].id, units[2].id);
+  const receiptList = (await f.request('GET', '/api/materials/receipts', s.material)).data.items[0];
+  assert.equal(receiptList.unitCount, 3); assert.equal(receiptList.units, undefined);
+  const before = (await f.request('GET', '/api/materials/stock', s.material)).data.items[0];
+  const scanned = (await f.request('POST', '/api/materials/scan/resolve', s.material, { code: units[0].code })).data;
+  assert.equal(scanned.kind, 'unit'); assert.equal(scanned.unit.id, units[0].id); assert.equal(scanned.batch.qtyM, 3000); assert.equal(scanned.catalog.trackingMode, 'unit');
+  assert.deepEqual((await f.request('GET', '/api/materials/stock', s.material)).data.items[0], before);
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'REAGENT', batch: 'UNITS', expiryDate: '2031-05-06' };
+  const rule = (await f.request('GET', '/api/materials/unit-label-rule', f.admin)).data;
+  await f.request('PUT', '/api/materials/unit-label-rule', f.admin, { template: 'ITEM/{SEQ}', padding: 2, version: rule.rule.version, reason: '改格式不重置序号' });
+  const addedBody = { ...identity, quantity: '1', amount: '0', direction: 'increase', reason: '新增赠品', requestIdempotencyKey: key() };
+  const added = (await f.request('POST', '/api/materials/stock/adjustments', s.material, addedBody, 201)).data.movement;
+  assert.equal(added.units[0].code, 'ITEM/04'); assert.equal(added.units[0].sequence, 4);
+  assert.equal((await f.request('POST', '/api/materials/stock/adjustments', s.material, addedBody)).data.movement.units[0].id, added.units[0].id);
+  assert.equal((await f.request('GET', '/api/materials/unit-label-rule', f.admin)).data.nextSequence, 5);
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...addedBody, quantity: '1001', requestIdempotencyKey: key() }, 400);
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...addedBody, quantity: '0.5', requestIdempotencyKey: key() }, 400);
+  await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, f.admin, { code: units[0].code, reason: '不能占用单件码' }, 409);
+  assert.equal((await f.request('POST', '/api/materials/scan/resolve', s.material, { code: units[0].code })).data.unit.code, units[0].code);
+});
+
+test('single-unit issuing rechecks exact identities atomically, accepts codes, and retains batch-average cents', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const other = await f.account('FINANCE');
+  s.catalog = await f.catalog(s.category.id, { code: 'UNIT-ISSUE', trackingMode: 'unit' });
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'ONE', expiryDate: '' };
+  const opening = (await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '3', amount: '1', requestIdempotencyKey: key() }, 201)).data.movement;
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, batch: 'OTHER', quantity: '1', amount: '0', zeroAmountReason: '赠品', requestIdempotencyKey: key() }, 201);
+  const foreign = (await f.request('GET', `/api/materials/stock/units?catalogId=${s.catalog.id}&batch=OTHER`, s.material)).data.items[0];
+  const apply = extra => f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity: '1', purpose: '整瓶领取', requestIdempotencyKey: key(), ...extra }, 201);
+  await f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity: '0.5', purpose: '不能半瓶', requestIdempotencyKey: key() }, 400);
+  const first = (await apply()).data.issue, second = (await apply()).data.issue;
+  assert.equal(first.trackingMode, 'unit'); assert.equal(first.units.length, 0);
+  const route = `/api/materials/issues/${first.id}/issue`, action = { version: 1, requestIdempotencyKey: key() };
+  await f.request('POST', route, ordinary, { ...action, unitIds: [opening.units[0].id] }, 403);
+  await f.request('POST', route, s.material, action, 400);
+  await f.request('POST', route, s.material, { ...action, unitIds: [opening.units[0].id], unitCodes: [opening.units[0].code] }, 400);
+  await f.request('POST', route, s.material, { ...action, unitIds: [foreign.id] }, 409);
+  await f.request('POST', route, s.material, { ...action, unitCodes: ['NOT-FOUND'] }, 409);
+  const results = await Promise.all([first, second].map(issue => f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material,
+    { version: 1, requestIdempotencyKey: key(), unitIds: [opening.units[0].id] }, [201, 409])));
+  assert.deepEqual(results.map(result => result.status).sort(), [201, 409]);
+  const issued = results.find(result => result.status === 201).data.issue;
+  assert.equal(issued.amountCents, 33); assert.equal(issued.units[0].status, 'issued'); assert.equal(issued.units[0].id, opening.units[0].id);
+  const remaining = [first, second].find(issue => issue.id !== issued.id);
+  const codeAction = { version: 1, requestIdempotencyKey: key(), unitCodes: [opening.units[1].code] };
+  const next = (await f.request('POST', `/api/materials/issues/${remaining.id}/issue`, s.material, codeAction, 201)).data.issue;
+  assert.equal(next.amountCents, 34); assert.equal(next.units[0].id, opening.units[1].id);
+  assert.equal((await f.request('POST', `/api/materials/issues/${remaining.id}/issue`, s.material, codeAction)).data.issue.units[0].id, opening.units[1].id);
+  const third = (await apply()).data.issue;
+  const final = (await f.request('POST', `/api/materials/issues/${third.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key(), unitIds: [opening.units[2].id] }, 201)).data.issue;
+  assert.equal(final.amountCents, 33);
+  assert.equal((await f.request('GET', `/api/materials/stock/units?issueId=${issued.id}`, ordinary)).data.items[0].id, opening.units[0].id);
+  await f.request('GET', `/api/materials/stock/units?issueId=${issued.id}`, other, undefined, 403);
+  const scanned = (await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: opening.units[0].code })).data;
+  assert.equal(scanned.unit.status, 'issued'); assert.equal(scanned.batch.qtyM, 0);
+  assertNoMoney(scanned);
+});
+
+test('unit adjustments and receipt reversals preserve physical source identity and never recycle void labels', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  s.catalog = await f.catalog(s.category.id, { code: 'UNIT-REVERSE', trackingMode: 'unit' });
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'REAGENT', batch: 'SAME', expiryDate: '' };
+  let order = await f.order(s.material, f.item(s, { quantity: '4' })); order = await f.submit(order, s.material);
+  const first = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '2', amount: '2', batch: 'SAME' }), 201)).data;
+  const second = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(first.request, { quantity: '2', amount: '2', batch: 'SAME' }), 201)).data;
+  const adjustment = { ...identity, quantity: '1', amount: '1', direction: 'decrease', reason: '破损出库', requestIdempotencyKey: key() };
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, adjustment, 400);
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...adjustment, quantity: '2', unitIds: [first.receipt.units[0].id, first.receipt.units[0].id] }, 400);
+  const removed = (await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...adjustment, unitCodes: [first.receipt.units[0].code] }, 201)).data.movement;
+  assert.equal(removed.units[0].status, 'void');
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...adjustment, requestIdempotencyKey: key(), unitIds: [first.receipt.units[0].id] }, 409);
+  const reversalBody = { requestVersion: second.request.version, version: second.request.items[0].version, requestIdempotencyKey: key(), reason: '原验收整笔冲正' };
+  await f.request('POST', `/api/materials/receipts/${first.receipt.id}/reverse`, s.material, reversalBody, 409);
+  const reversed = (await f.request('POST', `/api/materials/receipts/${second.receipt.id}/reverse`, s.material, reversalBody, 201)).data;
+  assert.equal(reversed.receipt.units.length, 2); assert.ok(reversed.receipt.units.every(unit => unit.status === 'void'));
+  const reverseLabels = (await f.request('GET', `/api/materials/stock/units?receiptId=${reversed.receipt.id}`, s.material)).data;
+  assert.equal(reverseLabels.total, 2); assert.deepEqual(reverseLabels.items.map(unit => unit.id), second.receipt.units.map(unit => unit.id));
+  const replenished = (await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...adjustment, direction: 'increase', requestIdempotencyKey: key() }, 201)).data.movement;
+  assert.equal(replenished.units[0].sequence, 5); assert.ok(![...first.receipt.units, ...second.receipt.units].some(unit => unit.code === replenished.units[0].code));
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...adjustment, direction: 'increase', requestIdempotencyKey: key(), unitIds: [first.receipt.units[0].id] }, 400);
+  assert.equal((await f.request('GET', `/api/materials/stock/units?catalogId=${s.catalog.id}&status=void`, s.material)).data.total, 3);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.items[0].qtyM, 2000);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data, target = await fixture(t), targetMaterial = await target.account('MATERIAL');
+  const wrongOrigin = structuredClone(backup), originalUnit = wrongOrigin.data.material_stock_units.find(unit => unit.id === first.receipt.units[1].id), reversedUnit = wrongOrigin.data.material_stock_units.find(unit => unit.id === second.receipt.units[0].id);
+  [originalUnit.source_movement_id, reversedUnit.source_movement_id] = [reversedUnit.source_movement_id, originalUnit.source_movement_id];
+  await target.request('POST', '/api/materials/restore', target.admin, wrongOrigin, 400);
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  assert.equal((await target.request('GET', `/api/materials/stock/units?receiptId=${reversed.receipt.id}`, targetMaterial)).data.total, 2);
+});
+
+test('unit label collisions roll back sequence, stock and idempotency together', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const unitCatalog = await f.catalog(s.category.id, { code: 'UNIT-COLLISION', trackingMode: 'unit' });
+  await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, f.admin, { code: 'TAKEN-1', reason: '已有包装码' }, 201);
+  await f.request('PUT', '/api/materials/unit-label-rule', f.admin, { template: 'TAKEN-{SEQ}', padding: 1, version: 1, reason: '故意测试冲突' });
+  const opening = { catalogId: unitCatalog.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '1', amount: '1', requestIdempotencyKey: key() };
+  await f.request('POST', '/api/materials/stock/opening', s.material, opening, 409);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/unit-label-rule', s.material)).data.nextSequence, 1);
+  await f.request('PUT', '/api/materials/unit-label-rule', f.admin, { template: 'SAFE-{SEQ}', padding: 1, version: 2, reason: '避开已有包装码' });
+  const saved = (await f.request('POST', '/api/materials/stock/opening', s.material, opening, 201)).data.movement;
+  assert.equal(saved.units[0].code, 'SAFE-1');
+  const maximum = (await f.request('POST', '/api/materials/stock/opening', s.material, { ...opening, quantity: '1000', amount: '0', zeroAmountReason: '上限整件赠品', requestIdempotencyKey: key() }, 201)).data.movement;
+  assert.equal(maximum.units.length, 1000); assert.equal(maximum.units[999].sequence, 1001);
+});
+
+test('schema 4 restores exact unit codes, lifecycle, rule and user mappings, rejects damaged unit ledgers atomically, and accepts strict schema 3', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, f.admin, { code: 'SKU-ONLY', reason: '包装码与单件分开' }, 201);
+  const previous = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 3);
+  s.catalog = await f.catalog(s.category.id, { code: 'UNIT-BACKUP', trackingMode: 'unit' });
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'REAGENT', batch: 'BACKUP', expiryDate: '' };
+  await f.request('PUT', '/api/materials/unit-label-rule', s.material, { template: 'RESTORE-{SEQ}', padding: 4, version: 1, reason: '保留规则用户映射' });
+  const opening = (await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '3', amount: '1', requestIdempotencyKey: key() }, 201)).data.movement;
+  const issue = (await f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity: '1', purpose: '备份领用', requestIdempotencyKey: key() }, 201)).data.issue;
+  const action = { version: 1, requestIdempotencyKey: key(), unitIds: [opening.units[0].id] };
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action, 201);
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...identity, quantity: '1', amount: '0.34', direction: 'decrease', reason: '盘亏', requestIdempotencyKey: key(), unitIds: [opening.units[1].id] }, 201);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_stock_units.length, 3);
+  const target = await fixture(t); await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
+  assert.notEqual(targetMaterial.id, s.material.id);
+  for (const change of [
+    payload => payload.data.material_stock_units.pop(),
+    payload => { payload.data.material_stock_units[1].code = payload.data.material_stock_units[0].code; },
+    payload => { payload.data.material_stock_units[0].code = 'SKU-ONLY'; },
+    payload => { payload.data.material_stock_units[0].sequence = 10; },
+    payload => { payload.data.material_stock_units[0].status = 'void'; },
+    payload => { payload.data.material_stock_units[0].created_by = ordinary.id; },
+    payload => { payload.data.material_stock_units[0].region_id = s.otherRegion.id; },
+    payload => { payload.data.material_stock_units[0].exit_movement_id = payload.data.material_stock_units[1].exit_movement_id; },
+    payload => { payload.data.material_stock_units[2].created_at = 'yesterday'; },
+    payload => { payload.data.material_catalog.find(row => row.id === s.catalog.id).tracking_mode = 'quantity'; },
+    payload => { payload.data.material_state.find(row => row.key === 'unit_sequence').value = '0'; },
+    payload => { const row = payload.data.material_state.find(row => row.key === 'unit_label_rule'); row.value = JSON.stringify({ ...JSON.parse(row.value), template: 'NO-SEQ' }); },
+    payload => { const row = payload.data.material_state.find(row => row.key === 'unit_label_rule'); row.value = JSON.stringify({ ...JSON.parse(row.value), actorId: 99999 }); },
+    payload => { delete payload.data.material_stock_units; }
+  ]) {
+    const damaged = structuredClone(backup); change(damaged);
+    await target.request('POST', '/api/materials/restore', target.admin, damaged, 400);
+    assert.equal((await target.request('GET', '/api/materials/catalog', targetMaterial)).data.total, 0);
+    assert.equal((await target.request('GET', '/api/materials/unit-label-rule', targetMaterial)).data.nextSequence, 1);
+  }
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  const restored = (await target.request('GET', `/api/materials/stock/units?catalogId=${s.catalog.id}`, targetMaterial)).data;
+  assert.deepEqual(restored.items.map(unit => unit.code), opening.units.map(unit => unit.code));
+  assert.deepEqual(restored.items.map(unit => unit.status), ['issued', 'void', 'in_stock']);
+  const rule = (await target.request('GET', '/api/materials/unit-label-rule', targetMaterial)).data;
+  assert.equal(rule.nextSequence, 4); assert.equal(rule.rule.actorId, targetMaterial.id); assert.equal(rule.rule.template, 'RESTORE-{SEQ}');
+  const replay = (await target.request('POST', `/api/materials/issues/${issue.id}/issue`, targetMaterial, action)).data.issue;
+  assert.equal(replay.createdBy, targetOrdinary.id); assert.equal(replay.units[0].code, opening.units[0].code);
+  const oldTarget = await fixture(t); await oldTarget.account('TESTER'); const oldMaterial = await oldTarget.account('MATERIAL');
+  const mixed = structuredClone(previous); mixed.data.material_catalog[0].tracking_mode = 'quantity';
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, mixed, 400);
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, previous);
+  assert.equal((await oldTarget.request('GET', '/api/materials/catalog', oldMaterial)).data.items[0].trackingMode, 'quantity');
+  assert.equal((await oldTarget.request('GET', '/api/materials/stock/units', oldMaterial)).data.total, 0);
+  assert.equal((await oldTarget.request('GET', '/api/materials/unit-label-rule', oldMaterial)).data.nextSequence, 1);
+});
+
+test('legacy SQLite catalogs migrate to quantity mode without inventing unit stock', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT);
+      INSERT INTO users VALUES(1,'legacy','Legacy');
+      CREATE TABLE material_catalog(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,
+        spec TEXT NOT NULL,unit TEXT NOT NULL,category_id INTEGER NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by) VALUES('OLD','Legacy bottle','500mL','瓶',1,1);`);
+    createMaterials({ db });
+    assert.equal(db.prepare('SELECT tracking_mode FROM material_catalog WHERE id=1').get().tracking_mode, 'quantity');
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM material_stock_units').get().total, 0);
+    assert.equal(db.prepare("SELECT value FROM material_state WHERE key='unit_sequence'").get().value, '0');
+  } finally { db.close(); }
 });

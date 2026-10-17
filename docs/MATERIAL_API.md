@@ -1,4 +1,4 @@
-# 0.3.3 物资 API 合同（源码开发版，未发布镜像）
+# 0.4.0 物资 API 合同
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，返回 `{handle, backup, restore}`。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`。新业务只使用专表，不写旧 `records`。以下合同供前端与 HTTP 回归共同使用。
 
@@ -17,6 +17,27 @@
 - `POST /catalog`，正文 `{code,name,spec,unit,categoryId}` → 201 主档；ADMIN/MATERIAL + `materials.catalog.write`。编码唯一，已有编码不能改规格/单位。
 
 下文省略共同前缀 `/api/materials`。
+
+## 独立单件与条码规则（0.4.0）
+
+主档增加 `trackingMode:'quantity'|'unit'`。旧主档和 API 创建时省略该字段均为 `quantity`，新建页面默认选择 `unit`。按数量管理保留三位小数；逐件管理要求以瓶／件等整件为基本单位，所有业务数量均为整数，不进行瓶内余量或单位换算。只整瓶／整件发放。
+
+- `POST /catalog` 可传 `trackingMode`。
+- `PUT /catalog/:id/tracking-mode`，`{trackingMode,version,reason}` → `{catalog}`。ADMIN/MATERIAL 加 `materials.catalog.write`；仅无相关业务记录的主档允许切换。已有存量不自动补码或虚构来源。
+- `GET /unit-label-rule` → `{rule:{template,padding,version,updatedAt,actorId},nextSequence,dateBasis:'UTC'}`，所有登录用户可读。
+- `PUT /unit-label-rule`，`{template,padding,version,reason}` → 相同结构；ADMIN/MATERIAL 加主档维护权限，原因必填、版本校验、审计。
+
+默认模板 `LAB-{YYYY}{MM}{DD}-{SEQ}`，流水号最少六位。模板支持固定 ASCII 文本及 `{YYYY}`、`{MM}`、`{DD}`、`{SEQ}`，必须包含流水号；`padding` 为 1–12。日期使用 UTC；流水号全局递增，不按日期或规则重置，修改模板不改变已生成的码。生成与库存、审计、幂等记录处于同一事务；单件码唯一，不能与包装码冲突。
+
+逐件主档的合格验收、期初与正调整按实际数量自动生成 N 个不同码，每次最多 1000 件；拒收、结案不生成。单件不单独估值，金额继续使用原批次均价核算。冲正只允许原验收生成的全部具体单件仍在库时整笔办理，不能用后来同批入库的其他瓶替代。
+
+- `GET /stock/units` → 统一分页。支持 `receiptId,issueId,catalogId,regionId,warehouse,batch,expiryDate,status,q`，空批号／效期存在时精确匹配。`status` 为 `in_stock|issued|void`，默认包括全部状态。
+- 单件行：`{id,code,sequence,qrPayload,catalogId,catalogCode,name,spec,unit,regionId,regionName,warehouse,batch,expiryDate,location,status,sourceMovementId,exitMovementId,sourceReceiptId,createdAt}`；`qrPayload` 为单件码本身。
+- 验收行增加 `unitCount`，验收／冲正写入回包另含 `units`；主档、库存及领用增加 `trackingMode`。领用列表返回单件数，详情／处理回包的 `units` 为实发单件，避免历史列表展开过大；完整单件从分页接口读取。
+- `POST /scan/resolve` 命中单件 → `{kind:'unit',catalog,unit,batch}`；已领用／作废仍可追溯，但不可重复出库。单件码指向既有入库实物，不能拿它再验收入库。
+- 逐件 `POST /issues/:id/issue` 及减少库存的 `POST /stock/adjustments` 必须传 `unitIds:number[]` 或 `unitCodes:string[]`，两者只选一个。编号不得重复，必须同一精确批次且仍在库，个数须等于申请／调整数量；检查、状态更改与扣库同事务。按数量主档拒绝这两个字段。
+
+申请仍只记录批次和数量，不预占单件；扫码单件可定位批次并预填申请一件，发放时扫描实际取出的每件。标签支持 Code128 条形码及二维码，两者表示同一永久单件编号；重打印不重新发号。
 
 ## 包装条码与库存二维码
 
@@ -121,12 +142,12 @@
 - `GET /export.xlsx?type=requests|stock|issues` → 真正 XLSX；需要 `materials.export`，金额列另看 amount 权限。`type` 省略时默认 `requests`。申报导出支持 `q,from,to,status=draft|submitted,requestId,version=current|original`，日期按申报创建日期筛选，筛选命中的单据包含全部明细；`version` 默认 current，original 先按当前单据筛选，再使用原提交快照，未提交草稿仍用当前内容。库存导出支持 `q,regionId,warehouse,catalogId`，含库存汇总及按相同条件筛选的批次库存、存放位置。领用导出支持 `q,status` 并遵守本人/管理员可见范围，含申请时位置和当前位置或发放时位置；未发放金额留空。导出全部筛选结果，不受列表页码限制；一次最多 1000 张申报单，明细、验收流水和修订记录各不超过 5000 条；库存、批次或领用各最多 5000 条，超限返回 413。
 - 页面申报列表导出沿用已查询的 `q,status,from,to`，库存列表沿用 `q,regionId,warehouse`，领用列表沿用 `q,status`；单据详情按 `requestId,version` 导出，不携带列表筛选。验收列表不提供按验收进度导出，通过每行“原单”进入来源申报后导出；`pending|partial|done|closed` 不是申报导出的 status 值。
 - 用户文本按文本单元格写，不识别公式。原版/当前申报明细完整导出；验收流水及修订记录仍保留所选单据的完整历史。修订记录的“修改前/后快照摘要”单元格最多32767字符，超长时明确加注“完整快照见修订历史/物资备份”，完整历史仍保留于系统及业务备份。
-- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十四张物资业务及辅助表（含包装码映射、存放位置、领用）、附件内容、稳定用户映射与所有快照，不含用户密码。包装码映射使用新表 `material_barcodes`；既有 Excel 导出保持原有数量金额及筛选口径，本轮不另加条码导出类型或原始 QR 文本列。
+- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十五张物资业务及辅助表（含单件、包装码映射、存放位置、领用）、编号规则与序号、附件内容、稳定用户映射与所有快照，不含用户密码。既有 Excel 导出保持原有数量金额及筛选口径。
 - `POST /restore`，正文为上述完整备份对象 → `{restored:true,counts}`，需 backup.restore + materials.amount.read；只允许空的新业务库，验证格式、用户 username→当前ID 映射、外键、库存及来源唯一性，事务恢复；同份重放与追加恢复均拒绝。
 
-物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=3`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表及 schema 2 原十三表：schema 1 将位置、领用和包装码三表补空，schema 2 仅将包装码表补空。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段；schema 3 不能遗漏包装码表。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段（含其他 scope 或组合包字段）、未知表/字段、遗漏字段均拒绝，避免错误范围被静默忽略。领用处理人、条码创建人及快照同样按 username 映射现有用户。
+物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=4`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
 
-恢复继续逐项核对领用状态/版本、申请与发放流水一一对应、历史批次成本分摊、取消/驳回无流水、位置有对应批次和非负库存。schema 3 还验证包装码规范、唯一绑定和主档外键；失败时整次恢复回滚。0.3.2 服务不能恢复 schema 3；0.3.3 只新增包装码表，保留 0.3.2 的库存来源规则，回退必须恢复升级前完整运行数据，不能只切旧镜像。0.3.2 对更旧数据库扩展库存流水 CHECK 的历史升级要求仍保留。
+恢复继续核对领用状态/版本、申请与发放流水、历史批次成本分摊、取消/驳回无流水、位置、包装码及非负库存。schema 4 另核对单件码／序号唯一、来源与退出流水、状态及数量守恒、编号规则和序号进度；失败整次回滚。旧服务不能恢复 schema 4，回退必须恢复升级前完整运行数据，不能只切旧镜像。旧版表结构升级要求仍保留。
 
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 

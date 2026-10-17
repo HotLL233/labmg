@@ -168,7 +168,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
-    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues'].includes(url.pathname)) {
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues'].includes(url.pathname)) {
       const entries = state.materialLists[url.pathname.slice('/api/materials'.length)] || [];
       return response({ items: entries, total: entries.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
     }
@@ -744,11 +744,12 @@ test('zero-value stock adjustments require a reason and receipt history shows bu
   assert.match(ordinary.app.$('#page').textContent, /MATERIAL.*提交申报.*ADMIN/);
 });
 
-function materialScanner(app, scan, createQr = async () => new Blob(['synthetic QR'], { type: 'image/png' })) {
-  const calls = { scans: 0, closes: 0, qr: [] };
+function materialScanner(app, scan, createQr = async () => new Blob(['synthetic QR'], { type: 'image/png' }), createBarcode = async () => new Blob(['synthetic Code128'], { type: 'image/png' })) {
+  const calls = { scans: 0, closes: 0, qr: [], barcode: [] };
   app.context.MaterialScanner = {
     scan: async () => { calls.scans++; return scan(); }, close: () => { calls.closes++; },
-    createQr: async text => { calls.qr.push(text); return createQr(text); }
+    createQr: async text => { calls.qr.push(text); return createQr(text); },
+    createBarcode: async text => { calls.barcode.push(text); return createBarcode(text); }
   };
   return calls;
 }
@@ -949,4 +950,169 @@ test('QR labels open synchronously in an isolated printable window, escape mater
   assert.equal(popup.prints, 1); assert.deepEqual(revoked, ['blob:synthetic-label']);
   const stale = click('[data-mw=print-label]'); await click({ dataset: { mw: 'page', page: 'requests' } }); release(new Blob(['late'])); await stale;
   assert.equal(opened[1].closed, true);
+});
+
+const singleUnit = (row, values = {}) => ({ ...row, id: 71, code: 'UNIT-000071', catalogCode: row.code, qrPayload: 'UNIT-000071', status: 'in_stock', ...values });
+
+test('new catalogs default to individual tracking and numbering-rule edits require a reason and a current version', async () => {
+  const { app, click, fill, submit } = await materialApp();
+  let created; const writes = [], rule = { template: 'LAB-{SEQ}', padding: 6, version: 3 };
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/catalog' && method === 'POST') { created = body; return { body: { catalog: { id: 6, ...body } } }; }
+    if (url.pathname === '/api/materials/unit-label-rule') {
+      if (method === 'GET') return { body: { rule, nextSequence: 72, dateBasis: 'UTC' } };
+      writes.push(body);
+      if (writes.length === 1) { rule.version = 4; return { body: { error: '编号规则已被其他人修改' }, status: 409 }; }
+      return { body: { rule: { ...body, version: 5 }, nextSequence: 72, dateBasis: 'UTC' } };
+    }
+  };
+  await click('[data-mw=dictionaries]'); await click('[data-mw=new-catalog]');
+  assert.equal(app.$('#mw-fields [name=trackingMode]').value, 'unit');
+  fill({ code: 'NEW-UNIT', name: '逐瓶试剂', spec: '100 mL', unit: '瓶', categoryId: '1' }); await submit();
+  assert.equal(created.trackingMode, 'unit'); assert.equal(created.unit, '瓶');
+  await click('[data-mw=unit-rule]');
+  assert.match(app.$('#mw-intro').textContent, /UTC.*全局递增.*不按日期重置/);
+  fill({ template: 'SJ-{YYYY}{MM}{DD}-{SEQ}', padding: '8' }); await submit();
+  assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /修改原因不能为空/);
+  fill({ reason: '统一新实物编号格式' }); await submit();
+  assert.equal(writes[0].version, 3); assert.equal(writes[0].padding, 8);
+  assert.equal(app.$('[data-mw=reload-form]').hidden, false); await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-fields [name=template]').value, 'SJ-{YYYY}{MM}{DD}-{SEQ}');
+  assert.equal(app.$('#mw-fields [name=reason]').value, '统一新实物编号格式');
+  assert.match(app.$('#mw-version').textContent, /最新版本 4/); await submit();
+  assert.deepEqual(writes[1], { ...writes[0], version: 4 });
+});
+
+test('acceptance history opens its generated units and unit pagination retains the exact receipt or empty-batch scope', async () => {
+  const { app, row, item, request, click } = await materialApp(); row.trackingMode = item.trackingMode = 'unit'; request.status = 'submitted';
+  app.state.materialLists['/receipts'] = [{ id: 51, type: 'acceptance', unitCount: 2, snapshot: row, qtyM: 2000, requestRevision: 1 }];
+  const lookups = [];
+  app.state.materialResponse = ({ url }) => {
+    if (url.pathname === '/api/materials/stock/units') {
+      lookups.push(url); return { body: { items: [singleUnit(row)], total: 51, page: Number(url.searchParams.get('page')), pageSize: 50 } };
+    }
+  };
+  const nextUnits = () => app.document.querySelectorAll('[data-mw=unit-page]').find(node => node.dataset.historyPage === '2');
+  await click({ dataset: { mw: 'events', request: '101', item: '11' } });
+  assert.match(app.$('[data-mw=receipt-units]').textContent, /2/); await click('[data-mw=receipt-units]'); await click(nextUnits());
+  assert.equal(lookups.length, 2);
+  for (const url of lookups) { assert.equal(url.searchParams.get('receiptId'), '51'); assert.equal(url.searchParams.has('batch'), false); }
+  assert.equal(lookups[1].searchParams.get('page'), '2');
+  await click('[data-mw=close-view]'); await click({ dataset: { mw: 'page', page: 'inventory' } });
+  await click('[data-mw=batches]'); await click('[data-mw=batch-units]'); await click(nextUnits());
+  for (const url of lookups.slice(2)) {
+    assert.equal(url.searchParams.get('catalogId'), '5'); assert.equal(url.searchParams.get('regionId'), '2'); assert.equal(url.searchParams.get('warehouse'), 'MAIN');
+    assert.equal(url.searchParams.has('receiptId'), false); assert.equal(url.searchParams.has('batch'), true); assert.equal(url.searchParams.get('batch'), '');
+    assert.equal(url.searchParams.has('expiryDate'), true); assert.equal(url.searchParams.get('expiryDate'), '');
+  }
+  assert.equal(lookups[3].searchParams.get('page'), '2');
+});
+
+test('unit scans reject issued or void items, prevent duplicate receipt and only prefill an unreserved application for an in-stock unit', async () => {
+  const { app, row, click, fill, submit } = await materialApp(); row.trackingMode = 'unit';
+  let unit = singleUnit(row), applied;
+  materialScanner(app, async () => unit.code);
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname.endsWith('/scan/resolve')) return { body: { kind: 'unit', catalog: { ...row, id: 5 }, unit, batch: row } };
+    if (url.pathname === '/api/materials/issues' && method === 'POST') { applied = body; return { body: { issue: { id: 41 } } }; }
+  };
+  for (const status of ['issued', 'void']) {
+    unit.status = status; const before = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').length;
+    await click('[data-mw=scan-issue]');
+    assert.match(app.$('#mw-status').textContent, /已领用或作废/); assert.equal(app.$('#mw-view').open, false);
+    assert.equal(app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').length, before);
+  }
+  unit.status = 'in_stock'; await click('[data-mw=scan-receive]');
+  assert.match(app.$('#mw-status').textContent, /已入库单件.*不能再次验收入库/); assert.equal(app.$('#mw-dialog').open, false);
+  await click('[data-mw=scan-issue]');
+  const lookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1).url;
+  assert.equal(lookup.searchParams.get('catalogId'), '5'); assert.equal(lookup.searchParams.get('regionId'), '2'); assert.equal(lookup.searchParams.get('warehouse'), 'MAIN');
+  assert.equal(lookup.searchParams.has('batch'), true); assert.equal(lookup.searchParams.get('batch'), ''); assert.equal(lookup.searchParams.get('expiryDate'), '');
+  assert.match(app.$('#mw-view-body').textContent, /UNIT-000071.*申请不锁定此码/);
+  await click('[data-mw=issue-create]'); assert.equal(app.$('#mw-fields [name=quantity]').value, '1');
+  fill({ purpose: '单瓶扫码申请' }); await submit();
+  assert.equal(applied.quantity, '1'); assert.equal(Object.hasOwn(applied, 'unitIds'), false); assert.equal(Object.hasOwn(applied, 'unitCodes'), false);
+  assert.equal(app.requests.some(entry => /\/issues\/\d+\/issue$/.test(entry.url.pathname)), false);
+});
+
+test('unit issuance checks unique counts and every scanned batch dimension, then replays the unchanged codes after an uncertain response', async () => {
+  const { app, row, click, fill, submit } = await materialApp();
+  const issue = { ...row, id: 31, version: 2, qtyM: 2000, trackingMode: 'unit', status: 'pending', snapshot: row, canIssue: true };
+  app.state.materialLists['/issues'] = [issue]; const writes = []; let resolved = { kind: 'unit', unit: singleUnit(row) };
+  materialScanner(app, async () => resolved.unit?.code || 'PACKAGING');
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/issues/31' && method === 'GET') return { body: { issue } };
+    if (url.pathname.endsWith('/scan/resolve')) return { body: resolved };
+    if (url.pathname === '/api/materials/issues/31/issue') {
+      writes.push(body); if (writes.length === 1) throw Error('synthetic response lost after issuance');
+      return { body: { issue: { ...issue, status: 'issued', version: 3, canIssue: false } } };
+    }
+  };
+  await click({ dataset: { mw: 'page', page: 'issues' } }); await click('[data-mw=issue-stock]');
+  assert.ok(Number(app.$('#mw-fields [name=unitCodes]').attrs.maxlength) >= 128999, 'the field must hold 1000 full-length codes and line breaks');
+  await submit(); assert.match(app.$('#mw-error').textContent, /请扫描或填写/);
+  fill({ unitCodes: 'UNIT-000071\nUNIT-000071' }); await submit(); assert.match(app.$('#mw-error').textContent, /不能重复/);
+  fill({ unitCodes: 'UNIT-000071' }); await submit(); assert.match(app.$('#mw-error').textContent, /件数必须等于申请数量/); assert.equal(writes.length, 0);
+  fill({ unitCodes: '' });
+  for (const changed of [{ catalogId: 99 }, { regionId: 9 }, { warehouse: 'OTHER' }, { batch: 'OTHER' }, { expiryDate: '2030-01-01' }]) {
+    resolved = { kind: 'unit', unit: singleUnit(row, changed) }; await click('[data-mw=unit-code-scan]');
+    assert.match(app.$('#mw-status').textContent, /物资、仓库、区域或批次.*不一致/); assert.equal(app.$('#mw-fields [name=unitCodes]').value, '');
+  }
+  resolved = { kind: 'unit', unit: singleUnit(row, { status: 'issued' }) }; await click('[data-mw=unit-code-scan]'); assert.match(app.$('#mw-status').textContent, /在库的独立单件码/);
+  resolved = { kind: 'catalog', unit: singleUnit(row) }; await click('[data-mw=unit-code-scan]'); assert.equal(app.$('#mw-fields [name=unitCodes]').value, '');
+  resolved = { kind: 'unit', unit: singleUnit(row) }; await click('[data-mw=unit-code-scan]'); await click('[data-mw=unit-code-scan]');
+  assert.match(app.$('#mw-status').textContent, /已经添加/); assert.equal(app.$('#mw-fields [name=unitCodes]').value, 'UNIT-000071');
+  resolved.unit = singleUnit(row, { id: 72, code: 'UNIT-000072' }); await click('[data-mw=unit-code-scan]'); await submit();
+  assert.deepEqual(writes[0].unitCodes, ['UNIT-000071', 'UNIT-000072']); assert.equal(writes[0].version, 2); assert.ok(writes[0].requestIdempotencyKey);
+  assert.equal(app.$('#mw-fields [name=unitCodes]').disabled, true); assert.equal(app.$('#mw-save').textContent, '按原内容重试');
+  app.$('#mw-fields [name=unitCodes]').value = 'PROGRAMMATIC-CHANGE'; await submit(); assert.deepEqual(writes[1], writes[0]);
+});
+
+test('negative individual-stock adjustments require exactly the chosen distinct unit codes', async () => {
+  const { app, row, click, fill, submit } = await materialApp(); app.state.materialLists['/catalog'][0].trackingMode = 'unit'; await click({ dataset: { mw: 'refresh' } });
+  let adjustment;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/stock/adjustments' && method === 'POST') { adjustment = body; return { body: { movement: { id: 81 } } }; }
+  };
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=adjustment]');
+  assert.ok(Number(app.$('#mw-fields [name=unitCodes]').attrs.maxlength) >= 128999);
+  fill({ catalogId: '5', code: row.code, name: row.name, spec: row.spec, unit: row.unit, categoryId: '1', regionId: '2', warehouse: 'MAIN', quantity: '2', amount: '0', direction: 'decrease', reason: '清点破损两瓶', unitCodes: '' });
+  await submit(); assert.match(app.$('#mw-error').textContent, /请扫描或填写/); assert.equal(adjustment, undefined);
+  fill({ unitCodes: 'UNIT-000071\nUNIT-000071' }); await submit(); assert.match(app.$('#mw-error').textContent, /不能重复/);
+  fill({ unitCodes: 'UNIT-000071' }); await submit(); assert.match(app.$('#mw-error').textContent, /数量必须等于调整数量/); assert.equal(adjustment, undefined);
+  fill({ unitCodes: 'UNIT-000071\nUNIT-000072' }); await submit();
+  assert.deepEqual(adjustment.unitCodes, ['UNIT-000071', 'UNIT-000072']); assert.equal(adjustment.direction, 'decrease'); assert.equal(adjustment.quantity, '2'); assert.ok(adjustment.requestIdempotencyKey);
+});
+
+test('individual labels generate Code128 and QR in an isolated window and wait for both images before printing or discard late results', { timeout: 5000 }, async () => {
+  const { app, row, click } = await materialApp(); row.trackingMode = 'unit';
+  const unit = singleUnit(row, { name: '<img src=x onerror=alert(1)>', location: '柜 <A>' }); app.state.materialLists['/stock/units'] = [unit];
+  const opened = [], events = [], revoked = []; let resolveQr, resolveBarcode, serial = 0;
+  app.context.open = () => {
+    events.push('open'); const document = new Element('document'); document.open = () => {}; document.write = html => { document.innerHTML = html; }; document.close = () => {};
+    document.getElementById = id => document.querySelector('#' + id);
+    const popup = { document, closed: false, prints: 0, listeners: {}, close() { this.closed = true; this.listeners.pagehide?.(); }, print() { this.prints++; }, addEventListener(type, listener) { this.listeners[type] = listener; } }; opened.push(popup); return popup;
+  };
+  app.context.URL = class extends URL { static createObjectURL() { return 'blob:unit-' + ++serial; } static revokeObjectURL(value) { revoked.push(value); } };
+  const scanner = materialScanner(app, async () => null,
+    () => { events.push('qr'); return new Promise(resolve => { resolveQr = resolve; }); },
+    () => { events.push('barcode'); return new Promise(resolve => { resolveBarcode = resolve; }); });
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]'); await click('[data-mw=batch-units]');
+  const printing = click('[data-mw=unit-print]'); assert.deepEqual(events, ['open', 'barcode', 'qr']);
+  const popup = opened[0], button = popup.document.getElementById('unit-label-print'); assert.equal(popup.opener, null); assert.equal(button.disabled, true);
+  resolveQr(new Blob(['QR'])); resolveBarcode(new Blob(['Code128'])); await new Promise(setImmediate);
+  assert.deepEqual(scanner.barcode, [unit.code]); assert.deepEqual(scanner.qr, [unit.qrPayload]);
+  const images = popup.document.querySelectorAll('img'); assert.equal(images.length, 2); assert.equal(popup.document.querySelector('script'), null);
+  assert.equal(images.filter(image => image.attrs.alt === '单件条形码').length, 1); assert.equal(images.filter(image => image.attrs.alt === '单件二维码').length, 1);
+  assert.match(popup.document.textContent, /UNIT-000071/); assert.doesNotMatch(popup.document.textContent, /¥10\.00/);
+  assert.equal(button.disabled, true); images[0].onload(); await new Promise(setImmediate); assert.equal(button.disabled, true);
+  images[1].onload(); await printing; assert.equal(button.disabled, false); button.click(); assert.equal(popup.prints, 1);
+  popup.listeners.pagehide(); assert.deepEqual(revoked, ['blob:unit-1', 'blob:unit-2']);
+  const late = click('[data-mw=unit-print]'); await click({ dataset: { mw: 'page', page: 'requests' } });
+  resolveQr(new Blob(['late QR'])); resolveBarcode(new Blob(['late barcode'])); await new Promise(setImmediate);
+  const discardedBeforeImageLoad = opened[1].closed;
+  if (!discardedBeforeImageLoad) for (const image of opened[1].document.querySelectorAll('img')) image.onload?.();
+  await late;
+  assert.equal(discardedBeforeImageLoad, true, 'a late result must close before inserting or loading images');
+  assert.equal(serial, 2, 'stale generation must not create image URLs');
 });

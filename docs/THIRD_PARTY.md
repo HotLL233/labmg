@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | [write-excel-file](https://www.npmjs.com/package/write-excel-file/v/4.1.1) | 4.1.1 | 服务端 XLSX 导出 | [MIT](licenses/npm/write-excel-file-4.1.1-MIT.txt) |
 | [fflate](https://www.npmjs.com/package/fflate/v/0.8.3) | 0.8.3 | XLSX ZIP 压缩 | [MIT](licenses/npm/fflate-0.8.3-MIT.txt) |
-| [zxing-wasm](https://www.npmjs.com/package/zxing-wasm/v/3.1.5) | 3.1.5 | 浏览器本地条码解码及 QR 生成 | 包装代码 [MIT](licenses/zxing-wasm/MIT-zxing-wasm.txt)，内含其他许可见下表 |
+| [zxing-wasm](https://www.npmjs.com/package/zxing-wasm/v/3.1.5) | 3.1.5 | 浏览器本地条码解码及 QR／Code128 标签生成 | 包装代码 [MIT](licenses/zxing-wasm/MIT-zxing-wasm.txt)，内含其他许可见下表 |
 | [@types/emscripten](https://www.npmjs.com/package/@types/emscripten/v/1.41.6) | 1.41.6 | zxing-wasm 类型依赖，不作为浏览器脚本加载 | [MIT](licenses/npm/types-emscripten-1.41.6-MIT.txt) |
 | [type-fest](https://www.npmjs.com/package/type-fest/v/5.10.0) | 5.10.0 | zxing-wasm 类型依赖，不作为浏览器脚本加载 | MIT 或 CC0-1.0；保留 [MIT](licenses/npm/type-fest-5.10.0-MIT.txt) 及 [CC0](licenses/npm/type-fest-5.10.0-CC0.txt) 原文 |
 | [tagged-tag](https://www.npmjs.com/package/tagged-tag/v/1.0.0) | 1.0.0 | type-fest 类型依赖，不作为浏览器脚本加载 | [MIT](licenses/npm/tagged-tag-1.0.0-MIT.txt) |

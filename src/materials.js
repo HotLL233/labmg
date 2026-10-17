@@ -16,10 +16,11 @@ const STOCK_QR_PREFIX = 'LABOS-STOCK:1:';
 const TABLES = [
   'material_categories', 'material_regions', 'material_catalog', 'material_barcodes', 'material_requests',
   'material_request_items', 'material_request_revisions', 'material_receipts',
-  'material_stock_locations', 'material_issues', 'material_stock_movements',
+  'material_stock_locations', 'material_issues', 'material_stock_movements', 'material_stock_units',
   'material_attachments', 'material_state', 'material_idempotency'
 ];
-const V2_TABLES = TABLES.filter(table => table !== 'material_barcodes');
+const V3_TABLES = TABLES.filter(table => table !== 'material_stock_units');
+const V2_TABLES = V3_TABLES.filter(table => table !== 'material_barcodes');
 const V1_TABLES = V2_TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
 function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx }) {
@@ -37,6 +38,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     CREATE TABLE IF NOT EXISTS material_catalog(
       id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
       spec TEXT NOT NULL, unit TEXT NOT NULL, category_id INTEGER NOT NULL REFERENCES material_categories(id),
+      tracking_mode TEXT NOT NULL DEFAULT 'quantity' CHECK(tracking_mode IN ('quantity','unit')),
       version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
       created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -154,6 +156,27 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
   }
 
+  if (!db.prepare('PRAGMA table_info(material_catalog)').all().some(column => column.name === 'tracking_mode')) {
+    db.exec("ALTER TABLE material_catalog ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'quantity' CHECK(tracking_mode IN ('quantity','unit'))");
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS material_stock_units(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE COLLATE BINARY CHECK(length(code)>0 AND length(code)<=128),
+    sequence INTEGER NOT NULL UNIQUE CHECK(sequence>0),
+    catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), region_id INTEGER NOT NULL REFERENCES material_regions(id),
+    warehouse TEXT NOT NULL, batch TEXT NOT NULL DEFAULT '', expiry_date TEXT NOT NULL DEFAULT '',
+    source_movement_id INTEGER NOT NULL REFERENCES material_stock_movements(id),
+    exit_movement_id INTEGER REFERENCES material_stock_movements(id),
+    status TEXT NOT NULL DEFAULT 'in_stock' CHECK(status IN ('in_stock','issued','void')),
+    created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    CHECK((status='in_stock' AND exit_movement_id IS NULL) OR (status IN ('issued','void') AND exit_movement_id IS NOT NULL))
+  );
+  CREATE INDEX IF NOT EXISTS material_unit_batch ON material_stock_units(catalog_id,region_id,warehouse,batch,expiry_date,status);
+  CREATE INDEX IF NOT EXISTS material_unit_source ON material_stock_units(source_movement_id);
+  CREATE INDEX IF NOT EXISTS material_unit_exit ON material_stock_units(exit_movement_id);`);
+  const defaultUnitRule = { template: 'LAB-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1, actorId: null, updatedAt: '', reason: '' };
+  db.prepare("INSERT OR IGNORE INTO material_state(key,value) VALUES('unit_label_rule',?)").run(JSON.stringify(defaultUnitRule));
+  db.prepare("INSERT OR IGNORE INTO material_state(key,value) VALUES('unit_sequence','0')").run();
+
   const one = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -249,7 +272,31 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   function catalogView(row) {
     return { id: row.id, code: row.code, name: row.name, spec: row.spec, unit: row.unit,
-      categoryId: row.category_id, categoryName: dictionary('material_categories', row.category_id, '分类').name, version: row.version };
+      trackingMode: row.tracking_mode, categoryId: row.category_id, categoryName: dictionary('material_categories', row.category_id, '分类').name, version: row.version };
+  }
+  function trackingMode(value) {
+    if (!['quantity', 'unit'].includes(value)) error(400, '库存管理方式须为quantity或unit');
+    return value;
+  }
+  function unitQuantity(master, quantity, label, maximum) {
+    if (master.tracking_mode === 'unit' && (quantity % 1000 || (maximum && quantity > maximum * 1000))) {
+      error(400, `${label}须为整瓶/整件${maximum ? `，每次最多${maximum}件` : ''}`);
+    }
+    return quantity;
+  }
+  function validateUnitRule(rule) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || typeof rule.template !== 'string' ||
+        rule.template.length < 1 || rule.template.length > 100 || !Number.isInteger(rule.padding) || rule.padding < 1 || rule.padding > 12 ||
+        (rule.template.match(/\{SEQ\}/g) || []).length !== 1 ||
+        !/^[A-Za-z0-9._/-]*$/.test(rule.template.replace(/\{(?:YYYY|MM|DD|SEQ)\}/g, ''))) {
+      error(400, '编号模板须含一个{SEQ}，可用{YYYY}{MM}{DD}及ASCII字母数字._/-，长度最多100，补零位数1至12');
+    }
+    return rule;
+  }
+  function unitRuleView() {
+    const rule = JSON.parse(one("SELECT value FROM material_state WHERE key='unit_label_rule'").value);
+    const { reason, ...view } = rule;
+    return { rule: view, nextSequence: Number(one("SELECT value FROM material_state WHERE key='unit_sequence'").value) + 1, dateBasis: 'UTC' };
   }
   function barcodeCode(value) {
     const code = text(value, '条码内容', 512);
@@ -334,6 +381,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       categoryId: row.category_id, categoryName: row.category_name ?? one('SELECT name FROM material_categories WHERE id=?', row.category_id)?.name ?? '',
       regionId: row.region_id, regionName: row.region_name ?? one('SELECT name FROM material_regions WHERE id=?', row.region_id)?.name ?? '',
       warehouse: row.warehouse, qtyM: row.qty_m, purpose: row.purpose,
+      trackingMode: row.catalog_id ? catalog(row.catalog_id).tracking_mode : 'quantity',
       authorId: row.author_id, authorName: row.author_name ?? actorName(row.author_id), version: row.version,
       identityLocked: counts.exists,
       acceptedQtyM: counts.accepted, closedQtyM: counts.closed, remainingQtyM: remaining,
@@ -356,23 +404,27 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       })
     };
   }
-  function receiptView(row) {
+  function receiptView(row, includeUnits = false) {
+    const sourceId = row.type === 'reversal' ? row.original_receipt_id : row.id;
+    const unitCount = one(`SELECT COUNT(*) AS total FROM material_stock_units u JOIN material_stock_movements m ON m.id=u.source_movement_id WHERE m.receipt_id=?`, sourceId).total;
     return {
       id: row.id, type: row.type, requestId: row.request_id, itemId: row.item_id,
       requestRevision: row.request_revision, snapshot: JSON.parse(row.snapshot),
       qtyM: row.qty_m, rejectedQtyM: row.rejected_qty_m, closedQtyM: row.closed_qty_m, amountCents: row.amount_cents,
       reason: row.reason, rejectedReason: row.rejected_reason, zeroAmountReason: row.zero_amount_reason,
       originalReceiptId: row.original_receipt_id, batch: row.batch, expiryDate: row.expiry_date,
+      unitCount, ...(includeUnits ? { units: all(`SELECT u.* FROM material_stock_units u JOIN material_stock_movements m ON m.id=u.source_movement_id WHERE m.receipt_id=? ORDER BY u.id`, sourceId).map(unitView) } : {}),
       date: row.date, actorId: row.actor_id, actorName: row.actor_name ?? actorName(row.actor_id), createdAt: row.created_at,
       reversed: row.is_reversed === undefined ? Boolean(one("SELECT 1 FROM material_receipts WHERE type='reversal' AND original_receipt_id=?", row.id)) : Boolean(row.is_reversed)
     };
   }
-  function movementView(row) {
+  function movementView(row, includeUnits = false) {
     return {
       id: row.id, type: row.type, catalogId: row.catalog_id, regionId: row.region_id, warehouse: row.warehouse,
       qtyM: row.qty_m, amountCents: row.amount_cents, sourceId: row.receipt_id,
       issueId: row.type === 'issue' ? Number(row.source_key.slice(6)) : null,
       snapshot: JSON.parse(row.snapshot), batch: row.batch, expiryDate: row.expiry_date, date: row.date,
+      ...(includeUnits ? { units: all('SELECT * FROM material_stock_units WHERE source_movement_id=? OR exit_movement_id=? ORDER BY id', row.id, row.id).map(unitView) } : {}),
       reason: row.reason, actorId: row.actor_id, actorName: row.actor_name ?? actorName(row.actor_id), createdAt: row.created_at
     };
   }
@@ -424,7 +476,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       unit: master?.unit ?? text(input.unit ?? old.unit, '单位', 30),
       category_id: categoryId, region_id: regionId,
       warehouse: warehouse(input.warehouse ?? old.warehouse),
-      qty_m: input.quantity === undefined && old.qty_m !== undefined ? old.qty_m : decimal(input.quantity, 3, '申报数量'),
+      qty_m: unitQuantity(master || { tracking_mode: 'quantity' }, input.quantity === undefined && old.qty_m !== undefined ? old.qty_m : decimal(input.quantity, 3, '申报数量'), '申报数量'),
       purpose: text(input.purpose ?? old.purpose ?? '', '用途', 1000, true)
     };
   }
@@ -469,13 +521,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     safeSum([...group.map(entry => entry.qty_m), row.qty_m]);
     safeSum([...group.map(entry => entry.amount_cents), row.amount_cents]);
   }
-  function addMovement(data, user) {
+  function addMovement(data, user, unitInput = {}) {
+    const master = catalog(data.catalog_id), single = master.tracking_mode === 'unit';
+    unitQuantity(master, Math.abs(data.qty_m), '库存数量', 1000);
+    const selected = single && data.qty_m < 0 ? selectUnits(data, -data.qty_m, unitInput) : [];
+    if ((!single || data.qty_m > 0) && (Object.hasOwn(unitInput, 'unitIds') || Object.hasOwn(unitInput, 'unitCodes'))) error(400, '此操作不接受单件选择');
     ensureBalance(data);
     const result = run(`INSERT INTO material_stock_movements(type,catalog_id,region_id,warehouse,qty_m,amount_cents,receipt_id,
       source_key,snapshot,batch,expiry_date,date,reason,actor_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     data.type, data.catalog_id, data.region_id, data.warehouse, data.qty_m, data.amount_cents, data.receipt_id || null,
     data.source_key, JSON.stringify(data.snapshot), data.batch || '', data.expiry_date || '', data.date || today(), data.reason || '', user.id);
-    return movementView(one('SELECT * FROM material_stock_movements WHERE id=?', result.lastInsertRowid));
+    const movement = one('SELECT * FROM material_stock_movements WHERE id=?', result.lastInsertRowid);
+    if (single && data.qty_m > 0) generateUnits(movement, user);
+    for (const unit of selected) {
+      const changed = run("UPDATE material_stock_units SET status=?,exit_movement_id=? WHERE id=? AND status='in_stock' AND exit_movement_id IS NULL",
+        data.type === 'issue' ? 'issued' : 'void', movement.id, unit.id);
+      if (changed.changes !== 1) conflict('单件状态已变化，请重新读取后处理');
+    }
+    return movementView(movement, true);
   }
   function stockIdentity(input) {
     return { catalog_id: catalog(input.catalogId).id, region_id: dictionary('material_regions', input.regionId, '区域').id,
@@ -487,6 +550,75 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const movements = all(`SELECT * FROM material_stock_movements
       WHERE catalog_id=? AND region_id=? AND warehouse=? AND batch=? AND expiry_date=? ORDER BY id`, ...identityArgs(row));
     return { movements, qty: safeSum(movements.map(entry => entry.qty_m)), amount: safeSum(movements.map(entry => entry.amount_cents)) };
+  }
+  function selectUnits(identity, quantity, input) {
+    const hasIds = Object.hasOwn(input, 'unitIds'), hasCodes = Object.hasOwn(input, 'unitCodes');
+    if (hasIds === hasCodes) error(400, '请提供unitIds或unitCodes，且只能选择一种');
+    const values = hasIds ? input.unitIds : input.unitCodes;
+    if (!Array.isArray(values) || values.length !== quantity / 1000 || values.length < 1 || values.length > 1000) error(400, '单件列表须与整数数量完全一致，每次最多1000件');
+    const normalized = values.map(value => {
+      if (hasIds) return integer(value, '单件ID');
+      if (typeof value !== 'string' || !/^[A-Za-z0-9._/-]{1,128}$/.test(value)) error(400, '单件编号格式无效');
+      return value;
+    });
+    if (new Set(normalized).size !== normalized.length) error(400, '同一单件不能重复选择');
+    return normalized.map(value => {
+      const row = one(`SELECT * FROM material_stock_units WHERE ${hasIds ? 'id' : 'code'}=?`, value);
+      if (!row || row.status !== 'in_stock' || identityArgs(row).some((part, index) => part !== identityArgs(identity)[index])) conflict('单件不存在、已出库或不属于当前批次');
+      return row;
+    });
+  }
+  function generateUnits(movement, user) {
+    const rule = validateUnitRule(JSON.parse(one("SELECT value FROM material_state WHERE key='unit_label_rule'").value));
+    let sequence = Number(one("SELECT value FROM material_state WHERE key='unit_sequence'").value);
+    const day = today(), tokens = { YYYY: day.slice(0, 4), MM: day.slice(5, 7), DD: day.slice(8, 10) };
+    for (let index = 0; index < movement.qty_m / 1000; index++) {
+      sequence++;
+      if (!Number.isSafeInteger(sequence) || sequence >= Number.MAX_SAFE_INTEGER) error(400, '单件全局序号已超出范围');
+      const code = rule.template.replace(/\{(YYYY|MM|DD|SEQ)\}/g, (_, token) => token === 'SEQ' ? String(sequence).padStart(rule.padding, '0') : tokens[token]);
+      if (code.length > 128) error(400, '生成的单件编号超过128字符');
+      if (one('SELECT 1 FROM material_barcodes WHERE code=?', code) || one('SELECT 1 FROM material_stock_units WHERE code=?', code)) conflict('生成的单件编号与现有码重复，请调整编号规则');
+      run(`INSERT INTO material_stock_units(code,sequence,catalog_id,region_id,warehouse,batch,expiry_date,source_movement_id,created_by,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`, code, sequence, ...identityArgs(movement), movement.id, user.id, now());
+    }
+    run("UPDATE material_state SET value=? WHERE key='unit_sequence'", String(sequence));
+  }
+  function unitView(row) {
+    const source = one('SELECT * FROM material_stock_movements WHERE id=?', row.source_movement_id), snapshot = JSON.parse(source.snapshot);
+    const exit = row.exit_movement_id ? one('SELECT * FROM material_stock_movements WHERE id=?', row.exit_movement_id) : null;
+    return { id: row.id, code: row.code, sequence: row.sequence, qrPayload: row.code, catalogId: row.catalog_id,
+      catalogCode: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
+      regionId: row.region_id, regionName: dictionary('material_regions', row.region_id, '区域').name,
+      warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date,
+      location: row.status === 'in_stock' ? stockLocation(row)?.location || '' : exit ? JSON.parse(exit.snapshot).location || '' : '',
+      status: row.status, sourceMovementId: row.source_movement_id, exitMovementId: row.exit_movement_id,
+      sourceReceiptId: source.receipt_id, createdAt: row.created_at };
+  }
+  function listUnits(url, user) {
+    const filters = [], args = [];
+    for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse'], ['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
+      if (!url.searchParams.has(parameter)) continue;
+      filters.push(`u.${column}=?`);
+      const value = url.searchParams.get(parameter);
+      args.push(parameter.endsWith('Id') ? integer(value, parameter) : parameter === 'warehouse' ? warehouse(value) : parameter === 'expiryDate' ? date(value, '有效期', true) : text(value, '批号', 100, true));
+    }
+    if (url.searchParams.has('receiptId')) {
+      const receipt = checkedReceipt(url.searchParams.get('receiptId'));
+      filters.push('s.receipt_id=?'); args.push(receipt.type === 'reversal' ? receipt.original_receipt_id : receipt.id);
+    }
+    if (url.searchParams.has('issueId')) {
+      const issue = checkedIssue(url.searchParams.get('issueId'), user); filters.push('e.source_key=?'); args.push(`issue:${issue.id}`);
+    }
+    if (url.searchParams.has('status')) {
+      const status = url.searchParams.get('status'); if (!['in_stock', 'issued', 'void'].includes(status)) error(400, '单件状态无效');
+      filters.push('u.status=?'); args.push(status);
+    }
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    if (q) { filters.push("instr(lower(u.code || ' ' || COALESCE(json_extract(s.snapshot,'$.name'),'') || ' ' || COALESCE(json_extract(s.snapshot,'$.code'),'')),?)>0"); args.push(q); }
+    const from = `FROM material_stock_units u JOIN material_stock_movements s ON s.id=u.source_movement_id
+      LEFT JOIN material_stock_movements e ON e.id=u.exit_movement_id${filters.length ? ' WHERE ' + filters.join(' AND ') : ''}`;
+    const page = pageInput(url), total = one(`SELECT COUNT(*) AS total ${from}`, ...args).total;
+    return { items: all(`SELECT u.* ${from} ORDER BY u.id LIMIT ? OFFSET ?`, ...args, page.pageSize, page.offset).map(unitView), total, page: page.page, pageSize: page.pageSize };
   }
   function stockLocation(row) {
     return one(`SELECT * FROM material_stock_locations
@@ -503,13 +635,16 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (row.created_by !== user.id && !role(user, 'ADMIN') && !role(user, 'MATERIAL')) error(403, '只能查看本人的领用申请');
     return row;
   }
-  function issueView(row, user) {
+  function issueView(row, user, includeUnits = true) {
     const snapshot = JSON.parse(row.snapshot);
     const movement = row.status === 'issued' ? one("SELECT * FROM material_stock_movements WHERE source_key=? AND type='issue'", `issue:${row.id}`) : null;
     const location = row.status === 'pending' ? stockLocation(row)?.location || '' :
       movement ? JSON.parse(movement.snapshot).location || '' : snapshot.location || '';
     return { id: row.id, status: row.status, version: row.version, catalogId: row.catalog_id, regionId: row.region_id,
       warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date, qtyM: row.qty_m, amountCents: row.amount_cents,
+      trackingMode: catalog(row.catalog_id).tracking_mode,
+      unitCount: movement ? one('SELECT COUNT(*) AS total FROM material_stock_units WHERE exit_movement_id=?', movement.id).total : 0,
+      ...(includeUnits ? { units: movement ? all('SELECT * FROM material_stock_units WHERE exit_movement_id=? ORDER BY id', movement.id).map(unitView) : [] } : {}),
       snapshot, location, purpose: row.purpose, reason: row.reason, createdBy: row.created_by, creatorName: actorName(row.created_by),
       processedBy: row.processed_by, processorName: row.processed_by ? actorName(row.processed_by) : '',
       createdAt: row.created_at, processedAt: row.processed_at, movementId: movement?.id || null,
@@ -536,7 +671,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const page = unpaged ? null : pageInput(url);
     const total = page ? one(`SELECT COUNT(*) AS total ${query}`, ...args).total : 0;
     const rows = all(`SELECT i.* ${query} ORDER BY i.id DESC${page ? ' LIMIT ? OFFSET ?' : ''}`,
-      ...args, ...(page ? [page.pageSize, page.offset] : [])).map(row => issueView(row, user));
+      ...args, ...(page ? [page.pageSize, page.offset] : [])).map(row => issueView(row, user, false));
     return page ? { items: rows, total, page: page.page, pageSize: page.pageSize } : rows;
   }
   function issueAmount(quantity, balance) {
@@ -561,7 +696,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         amount = issueAmount(row.qty_m, balance);
         addMovement({ ...row, type: 'issue', qty_m: -row.qty_m, amount_cents: -amount, receipt_id: null,
           source_key: `issue:${row.id}`, snapshot: { ...JSON.parse(row.snapshot), location: stockLocation(row)?.location || '' },
-          date: processedAt.slice(0, 10), reason: row.purpose }, user);
+          date: processedAt.slice(0, 10), reason: row.purpose }, user, input);
       }
       const status = { issue: 'issued', reject: 'rejected', cancel: 'cancelled' }[action];
       run(`UPDATE material_issues SET status=?,version=version+1,amount_cents=?,reason=?,processed_by=?,processed_at=? WHERE id=?`,
@@ -602,6 +737,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (!Number.isSafeInteger(row.qty_m) || !Number.isSafeInteger(row.amount_cents)) error(400, '库存累计数值超出安全整数范围');
       return { id: byBatch ? JSON.stringify([row.catalog_id, row.warehouse, row.region_id, row.batch, row.expiry_date]) : `${row.catalog_id}:${row.warehouse}:${row.region_id}`, catalogId: row.catalog_id,
         code: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
+        trackingMode: catalog(row.catalog_id).tracking_mode,
         regionId: row.region_id, regionName: row.region_name, warehouse: row.warehouse,
         ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date, categoryId: snapshot.categoryId, categoryName: snapshot.categoryName,
           location: stockLocation(row)?.location || '', locationVersion: stockLocation(row)?.version || 0,
@@ -650,6 +786,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         if (one("SELECT 1 FROM material_receipts WHERE type='reversal' AND original_receipt_id=?", original.id)) conflict('原验收已经冲正，不能再次冲正');
         const movement = one('SELECT * FROM material_stock_movements WHERE receipt_id=?', original.id);
         if (!movement) error(409, '原验收缺少来源流水，不能冲正');
+        const units = catalog(movement.catalog_id).tracking_mode === 'unit' ?
+          all('SELECT * FROM material_stock_units WHERE source_movement_id=? ORDER BY id', movement.id) : null;
+        if (units && (units.length !== original.qty_m / 1000 || units.some(unit => unit.status !== 'in_stock'))) conflict('原验收单件已出库或调整，不能整笔冲正');
         event = insertReceipt({ type: 'reversal', request_id: order.id, item_id: line.id,
           request_revision: order.revision, snapshot: JSON.parse(original.snapshot),
           qty_m: -original.qty_m, amount_cents: -original.amount_cents,
@@ -657,10 +796,12 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           batch: original.batch, expiry_date: original.expiry_date }, user);
         addMovement({ ...movement, type: 'reversal', qty_m: -movement.qty_m,
           amount_cents: -movement.amount_cents, receipt_id: event.id, source_key: `receipt:${event.id}`,
-          snapshot: JSON.parse(movement.snapshot), reason: event.reason, date: today() }, user);
+          snapshot: JSON.parse(movement.snapshot), reason: event.reason, date: today() }, user, units ? { unitIds: units.map(unit => unit.id) } : {});
       } else {
         const quantity = decimal(input.quantity, 3, '合格数量', true);
         const rejected = decimal(input.rejectedQuantity ?? '0', 3, '拒收数量', true);
+        const master = catalog(line.catalog_id);
+        unitQuantity(master, quantity, '合格数量', 1000); unitQuantity(master, rejected, '拒收数量');
         const amount = decimal(input.amount, 2, '本批总金额', true);
         if (quantity === 0 && rejected === 0) error(400, '合格数量与拒收数量不能同时为零');
         if (safeSum([quantity, rejected]) > remaining) conflict('本次合格与拒收数量超过当前剩余待处理量');
@@ -683,7 +824,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }
       bump(order.id, line.id);
       log(user, event.type.toUpperCase(), 'material_receipts', event.id, order.no);
-      return { receipt: receiptView(event), request: requestView(order.id, user) };
+      return { receipt: receiptView(event, true), request: requestView(order.id, user) };
     });
   }
   function attachmentInput(input) {
@@ -828,6 +969,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (route === '/meta' && method === 'GET') return reply({ capabilities: capability(user), warehouses: WAREHOUSES,
       openingClosed: openingClosed(), quantityScale: 1000, amountScale: 100 });
 
+    if (route === '/unit-label-rule') {
+      if (method === 'GET') return reply(unitRuleView());
+      if (method === 'PUT') {
+        requireManager(user, 'materials.catalog.write');
+        const saved = transaction(() => {
+          const current = unitRuleView().rule;
+          if (!Number.isSafeInteger(input.version) || input.version !== current.version) conflict('编号规则已变化，请重新读取');
+          const reason = text(input.reason, '编号规则修改原因', 1000);
+          const rule = validateUnitRule({ template: input.template, padding: input.padding, version: current.version + 1, actorId: user.id, updatedAt: now(), reason });
+          if (!Number.isSafeInteger(rule.version)) error(400, '编号规则版本超出范围');
+          run("UPDATE material_state SET value=? WHERE key='unit_label_rule'", JSON.stringify(rule));
+          log(user, 'UNIT_LABEL_RULE', 'material_state', 0, JSON.stringify(rule));
+          return unitRuleView();
+        });
+        return reply(saved);
+      }
+    }
+
     if ((match = route.match(/^\/(categories|regions)$/))) {
       const table = match[1] === 'categories' ? 'material_categories' : 'material_regions';
       if (method === 'GET') {
@@ -846,6 +1005,22 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         return reply({ id: inserted.id, name: inserted.name, createdBy: inserted.created_by, createdAt: inserted.created_at }, 201);
       }
     }
+    if ((match = route.match(/^\/catalog\/(\d+)\/tracking-mode$/)) && method === 'PUT') {
+      requireManager(user, 'materials.catalog.write');
+      const saved = transaction(() => {
+        const master = catalog(match[1]), mode = trackingMode(input.trackingMode), reason = text(input.reason, '管理方式修改原因', 1000);
+        if (!Number.isSafeInteger(input.version) || input.version !== master.version) conflict('物资主档版本已变化，请重新读取');
+        if (mode === master.tracking_mode) return catalogView(master);
+        if (one('SELECT 1 FROM material_stock_movements WHERE catalog_id=? LIMIT 1', master.id) ||
+            one('SELECT 1 FROM material_receipts e JOIN material_request_items i ON i.id=e.item_id WHERE i.catalog_id=? LIMIT 1', master.id) ||
+            one('SELECT 1 FROM material_issues WHERE catalog_id=? LIMIT 1', master.id)) conflict('已有库存、验收或领用历史，不能切换管理方式');
+        if (mode === 'unit' && one('SELECT 1 FROM material_request_items WHERE catalog_id=? AND qty_m%1000<>0 LIMIT 1', master.id)) conflict('已有非整数申报数量，不能切换为单件管理');
+        run('UPDATE material_catalog SET tracking_mode=?,version=version+1 WHERE id=?', mode, master.id);
+        log(user, 'TRACKING_MODE', 'material_catalog', master.id, JSON.stringify({ before: master.tracking_mode, after: mode, reason }));
+        return catalogView(catalog(master.id));
+      });
+      return reply({ catalog: saved });
+    }
     if ((match = route.match(/^\/catalog\/(\d+)\/barcodes$/))) {
       const master = catalog(match[1]);
       if (method === 'GET') return reply(paginate(all('SELECT * FROM material_barcodes WHERE catalog_id=? ORDER BY id', master.id).map(barcodeView), url));
@@ -853,6 +1028,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         requireManager(user, 'materials.catalog.write');
         const code = packageBarcode(input.code), reason = text(input.reason, '条码绑定原因', 1000);
         const result = transaction(() => {
+          if (one('SELECT 1 FROM material_stock_units WHERE code=?', code)) conflict('该编号已用于独立单件，不能绑定为包装码');
           const existing = one('SELECT * FROM material_barcodes WHERE code=?', code);
           if (existing) {
             if (existing.catalog_id !== master.id) conflict('该条码已绑定其他物资，请核对后先解除原绑定');
@@ -878,6 +1054,12 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     if (route === '/scan/resolve' && method === 'POST') {
       const code = barcodeCode(input.code);
+      const unit = one('SELECT * FROM material_stock_units WHERE code=?', code);
+      if (unit) {
+        const query = new URL('http://materials.local/stock/batches');
+        for (const [key, value] of Object.entries({ catalogId: unit.catalog_id, regionId: unit.region_id, warehouse: unit.warehouse, batch: unit.batch, expiryDate: unit.expiry_date })) query.searchParams.set(key, value);
+        return reply({ kind: 'unit', catalog: catalogView(catalog(unit.catalog_id)), unit: unitView(unit), batch: stockRows(query, false, true)[0] });
+      }
       if (code.startsWith('LABOS-STOCK:')) {
         if (!code.startsWith(STOCK_QR_PREFIX)) error(400, '系统库存二维码版本不支持');
         let saved;
@@ -904,8 +1086,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (route === '/catalog') {
       if (method === 'GET') {
         let rows = all(`SELECT c.*,d.name AS category_name FROM material_catalog c JOIN material_categories d ON d.id=c.category_id ORDER BY c.id`)
-          .map(row => ({ id: row.id, code: row.code, name: row.name, spec: row.spec, unit: row.unit,
-            categoryId: row.category_id, categoryName: row.category_name, version: row.version }));
+          .map(catalogView);
         if (url.searchParams.has('categoryId')) rows = rows.filter(row => String(row.categoryId) === url.searchParams.get('categoryId'));
         return reply(paginate(search(rows, url, ['code', 'name', 'spec']), url));
       }
@@ -914,14 +1095,15 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const code = text(input.code, '物资编码', 64).toUpperCase();
         if (!/^[A-Z0-9][A-Z0-9._/-]*$/.test(code)) error(400, '编码须由英文字母、数字及 . _ / - 组成');
         const name = text(input.name, '物资名称'), spec = text(input.spec, '规格'), unit = text(input.unit, '单位', 30);
+        const mode = trackingMode(input.trackingMode ?? 'quantity');
         const category = dictionary('material_categories', input.categoryId, '分类');
         if (one('SELECT 1 FROM material_catalog WHERE code=?', code)) error(409, '物资编码已存在，不能重新定义');
         const result = transaction(() => {
-          const inserted = run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by) VALUES(?,?,?,?,?,?)', code, name, spec, unit, category.id, user.id);
+          const inserted = run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode) VALUES(?,?,?,?,?,?,?)', code, name, spec, unit, category.id, user.id, mode);
           log(user, 'CREATE', 'material_catalog', inserted.lastInsertRowid, code);
           return Number(inserted.lastInsertRowid);
         });
-        return reply({ id: result, code, name, spec, unit, categoryId: category.id, categoryName: category.name, version: 1 }, 201);
+        return reply(catalogView(catalog(result)), 201);
       }
     }
     if (route === '/requests') {
@@ -1037,7 +1219,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const rows = all(`SELECT e.*,u.display_name AS actor_name,
           EXISTS(SELECT 1 FROM material_receipts x WHERE x.type='reversal' AND x.original_receipt_id=e.id) AS is_reversed
           FROM material_receipts e JOIN users u ON u.id=e.actor_id${where} ORDER BY e.id DESC LIMIT ? OFFSET ?`, ...args, pageSize, offset);
-        return reply({ items: rows.map(receiptView), total, page, pageSize });
+        return reply({ items: rows.map(row => receiptView(row)), total, page, pageSize });
       }
       if (method === 'POST') {
         const result = receiptAction(user, input, route, 'receive');
@@ -1058,6 +1240,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const result = idempotent(user, route, input, () => {
         const identity = stockIdentity(input), balance = batchBalance(identity);
         const quantity = decimal(input.quantity, 3, '领用数量');
+        unitQuantity(catalog(identity.catalog_id), quantity, '领用数量', 1000);
+        if (Object.hasOwn(input, 'unitIds') || Object.hasOwn(input, 'unitCodes')) error(400, '申请不预占具体单件，请在发放时选择');
         if (balance.qty < quantity) conflict('该批次可用库存不足，不能提交领用申请');
         const purpose = text(input.purpose, '领用用途', 1000);
         const snapshot = { ...JSON.parse(balance.movements[0].snapshot), batch: identity.batch, expiryDate: identity.expiry_date,
@@ -1094,6 +1278,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     if (route === '/stock' && method === 'GET') return reply(stockRows(url, true));
     if (route === '/stock/batches' && method === 'GET') return reply(stockRows(url, true, true));
+    if (route === '/stock/units' && method === 'GET') return reply(listUnits(url, user));
     if (route === '/stock/movements' && method === 'GET') {
       const filters = [], args = [];
       for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse'], ['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
@@ -1109,7 +1294,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const { page, pageSize, offset } = pageInput(url);
       const rows = all(`SELECT m.*,u.display_name AS actor_name FROM material_stock_movements m JOIN users u ON u.id=m.actor_id
         ${where} ORDER BY m.id DESC LIMIT ? OFFSET ?`, ...args, pageSize, offset);
-      return reply({ items: rows.map(movementView), total, page, pageSize });
+      return reply({ items: rows.map(row => movementView(row)), total, page, pageSize });
     }
     if (route === '/stock/opening/close' && method === 'POST') {
       requireMaterial(user, 'materials.stock.initialize');
@@ -1131,12 +1316,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const direction = isOpening || input.direction === 'increase' ? 1 : input.direction === 'decrease' ? -1 : 0;
         if (!direction) error(400, '调整方向须为increase或decrease');
         const snapshot = { catalogId: master.id, code: master.code, name: master.name, spec: master.spec, unit: master.unit,
+          trackingMode: master.tracking_mode,
           categoryId: category.id, categoryName: category.name, regionId: region.id, regionName: region.name, warehouse: target };
         const movement = addMovement({ type: isOpening ? 'opening' : 'adjustment', catalog_id: master.id,
           region_id: region.id, warehouse: target, qty_m: direction * quantity, amount_cents: direction * amount,
           source_key: `${isOpening ? 'opening' : 'adjustment'}:${user.id}:${key}`, snapshot,
           batch: text(input.batch ?? '', '批号', 100, true), expiry_date: date(input.expiryDate, '有效期', true),
-          date: date(input.date), reason }, user);
+          date: date(input.date), reason }, user, input);
         log(user, isOpening ? 'OPENING' : 'ADJUST', 'material_stock_movements', movement.id, reason);
         return { movement, openingClosed: openingClosed() };
       });
@@ -1222,7 +1408,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 3, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 4, generatedAt: now(),
       users: all('SELECT id,username FROM users ORDER BY id'), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
@@ -1240,6 +1426,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }));
   }
   function validateRestoredLedger() {
+    for (const row of all('SELECT * FROM material_catalog')) trackingMode(row.tracking_mode);
+    for (const row of all('SELECT * FROM material_request_items WHERE catalog_id IS NOT NULL')) unitQuantity(catalog(row.catalog_id), row.qty_m, '申报数量');
     for (const row of all('SELECT * FROM material_barcodes')) {
       if (packageBarcode(row.code) !== row.code) error(400, '条码内容未规范化');
       catalog(row.catalog_id);
@@ -1263,6 +1451,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     for (const event of all('SELECT * FROM material_receipts')) {
       const order = request(event.request_id), line = item(order.id, event.item_id), snapshot = JSON.parse(event.snapshot);
+      const master = catalog(line.catalog_id);
+      for (const quantity of [event.qty_m, event.rejected_qty_m, event.closed_qty_m]) unitQuantity(master, Math.abs(quantity), '验收数量');
       if (event.request_revision < 1 || event.request_revision > order.revision || !Number.isSafeInteger(event.request_revision)) error(400, '验收引用的申报修订号无效');
       if (snapshot.catalogId !== line.catalog_id || snapshot.regionId !== line.region_id || snapshot.warehouse !== line.warehouse || snapshot.unit !== line.unit) error(400, '历史验收物资身份与受保护申报行不一致');
       if (event.type === 'acceptance' || event.type === 'reversal') {
@@ -1288,6 +1478,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (!validTimestamp(row.updated_at)) error(400, '库存位置时间无效');
     }
     for (const row of all('SELECT * FROM material_issues')) {
+      unitQuantity(catalog(row.catalog_id), row.qty_m, '领用数量', 1000);
       warehouse(row.warehouse);
       if (text(row.batch, '批号', 100, true) !== row.batch || date(row.expiry_date, '有效期', true) !== row.expiry_date ||
           row.qty_m <= 0 || row.amount_cents < 0 || !validTimestamp(row.created_at)) error(400, '领用数量、批次或时间无效');
@@ -1321,9 +1512,12 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     const batches = new Map();
     for (const row of all('SELECT * FROM material_stock_movements ORDER BY id')) {
+      const master = catalog(row.catalog_id);
+      unitQuantity(master, Math.abs(row.qty_m), '库存数量', 1000);
       warehouse(row.warehouse);
       const snapshot = JSON.parse(row.snapshot);
       if (!snapshot || snapshot.catalogId !== row.catalog_id || snapshot.regionId !== row.region_id || snapshot.warehouse !== row.warehouse) error(400, '库存快照与流水归属不一致');
+      if ((snapshot.trackingMode ?? 'quantity') !== master.tracking_mode) error(400, '库存快照与单件管理方式不一致');
       if (['receipt', 'reversal'].includes(row.type) !== Boolean(row.receipt_id)) error(400, '库存来源引用无效');
       if (row.receipt_id && row.source_key !== `receipt:${row.receipt_id}`) error(400, '验收库存来源键无效');
       const key = JSON.stringify([row.catalog_id, row.region_id, row.warehouse, row.batch, row.expiry_date]);
@@ -1336,6 +1530,46 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const qty = safeSum([previous.qty, row.qty_m]), amount = safeSum([previous.amount, row.amount_cents]);
       if (qty < 0 || amount < 0) error(400, '备份存在负库存或无来源冲减');
       batches.set(key, { qty, amount });
+    }
+    const unitRows = all('SELECT * FROM material_stock_units ORDER BY sequence'), unitCounts = new Map();
+    for (const [index, row] of unitRows.entries()) {
+      if (!/^[A-Za-z0-9._/-]{1,128}$/.test(row.code) || row.sequence !== index + 1 || !validTimestamp(row.created_at) ||
+          catalog(row.catalog_id).tracking_mode !== 'unit' || one('SELECT 1 FROM material_barcodes WHERE code=?', row.code)) error(400, '单件编号、全局序号、时间或管理方式无效');
+      const source = one('SELECT * FROM material_stock_movements WHERE id=?', row.source_movement_id);
+      if (!source || source.qty_m <= 0 || !['opening', 'receipt', 'adjustment'].includes(source.type) || source.actor_id !== row.created_by ||
+          identityArgs(row).some((value, part) => value !== identityArgs(source)[part])) error(400, '单件缺少一致的正向入库来源');
+      unitCounts.set(source.id, (unitCounts.get(source.id) || 0) + 1);
+      if (row.status !== 'in_stock') {
+        const exit = one('SELECT * FROM material_stock_movements WHERE id=?', row.exit_movement_id);
+        if (!exit || exit.id <= source.id || exit.qty_m >= 0 || !['issue', 'adjustment', 'reversal'].includes(exit.type) ||
+            identityArgs(row).some((value, part) => value !== identityArgs(exit)[part]) ||
+            row.status !== (exit.type === 'issue' ? 'issued' : 'void')) error(400, '单件退出状态与负向流水不一致');
+        if (exit.type === 'reversal') {
+          const reversal = checkedReceipt(exit.receipt_id);
+          if (source.type !== 'receipt' || reversal.original_receipt_id !== source.receipt_id) error(400, '冲正单件不是原验收来源');
+        }
+        unitCounts.set(exit.id, (unitCounts.get(exit.id) || 0) + 1);
+      } else if (row.exit_movement_id !== null) error(400, '在库单件不能有退出流水');
+    }
+    for (const row of all('SELECT * FROM material_stock_movements')) {
+      if (catalog(row.catalog_id).tracking_mode === 'unit' && (unitCounts.get(row.id) || 0) !== Math.abs(row.qty_m) / 1000) error(400, '单件数量与库存来源流水不一致');
+    }
+    for (const row of all(`SELECT catalog_id,region_id,warehouse,batch,expiry_date,COUNT(*) AS total FROM material_stock_units
+      WHERE status='in_stock' GROUP BY catalog_id,region_id,warehouse,batch,expiry_date`)) {
+      if (row.total * 1000 !== batchBalance(row).qty) error(400, '在库单件与批次余额不一致');
+    }
+    const sequence = one("SELECT value FROM material_state WHERE key='unit_sequence'")?.value;
+    if (!/^(?:0|[1-9]\d*)$/.test(sequence || '') || !Number.isSafeInteger(Number(sequence)) || Number(sequence) >= Number.MAX_SAFE_INTEGER || Number(sequence) !== unitRows.length) error(400, '单件全局序号与历史编号不一致');
+    let rule;
+    try { rule = JSON.parse(one("SELECT value FROM material_state WHERE key='unit_label_rule'")?.value); } catch { error(400, '单件编号规则无效'); }
+    validateUnitRule(rule);
+    if (Object.keys(rule).length !== 6 || !['template', 'padding', 'version', 'actorId', 'updatedAt', 'reason'].every(key => Object.hasOwn(rule, key)) ||
+        !Number.isSafeInteger(rule.version) || rule.version < 1) error(400, '单件编号规则字段或版本无效');
+    if (rule.version === 1) {
+      if (stableJson(rule) !== stableJson(defaultUnitRule)) error(400, '初始单件编号规则无效');
+    } else {
+      integer(rule.actorId, '规则操作人'); if (!one('SELECT 1 FROM users WHERE id=?', rule.actorId) || !validTimestamp(rule.updatedAt)) error(400, '单件编号规则操作人或时间无效');
+      text(rule.reason, '规则修改原因', 1000);
     }
     stockRows();
     const badForeignKeys = all('PRAGMA foreign_key_check').filter(row => row.table.startsWith('material_'));
@@ -1350,10 +1584,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2, 3].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
-    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : TABLES;
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : TABLES;
     if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
         Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
@@ -1377,6 +1611,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const columns = all(`PRAGMA table_info(${table})`);
       const allowed = new Map(columns.map(column => [column.name, column]));
       normalized[table] = (payload.data[table] || []).map(source => {
+        if (payload.schemaVersion < 4 && table === 'material_catalog' && source && typeof source === 'object') {
+          if (Object.hasOwn(source, 'tracking_mode')) error(400, '旧版备份不能包含新版管理方式字段');
+          source = { ...source, tracking_mode: 'quantity' };
+        }
         if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => !allowed.has(key)) || columns.some(column => !Object.hasOwn(source, column.name))) error(400, `备份表 ${table} 字段无效`);
         const row = {};
         for (const [key, value] of Object.entries(source)) {
@@ -1386,7 +1624,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           if (userColumns.has(key) && value !== null) {
             if (!mapping.has(value)) error(400, '备份业务数据引用了未映射用户');
             row[key] = mapping.get(value);
-          } else if (jsonColumns.has(key) && value !== null) {
+          } else if ((jsonColumns.has(key) || (table === 'material_state' && source.key === 'unit_label_rule' && key === 'value')) && value !== null) {
             let parsed;
             try { parsed = JSON.parse(value); } catch { error(400, '备份快照JSON无效'); }
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) error(400, '备份快照必须是对象');
@@ -1396,12 +1634,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         return row;
       });
     }
-    if (normalized.material_state.some(row => !['opening_closed', 'restored_once'].includes(row.key) || !['0', '1'].includes(row.value)) ||
+    if (payload.schemaVersion < 4) {
+      if (normalized.material_state.some(row => !['opening_closed', 'restored_once'].includes(row.key))) error(400, '旧版备份包含新版状态');
+      normalized.material_state.push({ key: 'unit_label_rule', value: JSON.stringify(defaultUnitRule) }, { key: 'unit_sequence', value: '0' });
+    }
+    if (normalized.material_state.some(row => !['opening_closed', 'restored_once', 'unit_label_rule', 'unit_sequence'].includes(row.key) ||
+        (['opening_closed', 'restored_once'].includes(row.key) && !['0', '1'].includes(row.value))) ||
+        normalized.material_state.filter(row => row.key === 'unit_label_rule').length !== 1 || normalized.material_state.filter(row => row.key === 'unit_sequence').length !== 1 ||
         normalized.material_state.filter(row => row.key === 'opening_closed').length !== 1) error(400, '备份期初状态无效');
     const barcodeCodes = new Set();
     for (const row of normalized.material_barcodes) {
       if (packageBarcode(row.code) !== row.code || barcodeCodes.has(row.code)) error(400, '备份条码未规范化或存在重复绑定');
       barcodeCodes.add(row.code);
+    }
+    const unitCodes = new Set(), unitSequences = new Set(), unitIds = new Set();
+    for (const row of normalized.material_stock_units) {
+      if (!/^[A-Za-z0-9._/-]{1,128}$/.test(row.code) || unitCodes.has(row.code) || barcodeCodes.has(row.code) ||
+          unitSequences.has(row.sequence) || unitIds.has(row.id)) error(400, '备份单件编号、序号或身份重复或无效');
+      unitCodes.add(row.code); unitSequences.add(row.sequence); unitIds.add(row.id);
     }
     const contents = new Map();
     let byteCount = 0;
@@ -1491,7 +1741,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       });
       const ids = new Set(orders.map(order => order.id));
       const items = orders.flatMap(order => order.items.map(line => ({ order, line })));
-      const receipts = all('SELECT * FROM material_receipts ORDER BY id').filter(row => ids.has(row.request_id)).map(receiptView);
+      const receipts = all('SELECT * FROM material_receipts ORDER BY id').filter(row => ids.has(row.request_id)).map(row => receiptView(row));
       const revisions = all('SELECT * FROM material_request_revisions ORDER BY request_id,revision').filter(row => ids.has(row.request_id));
       if (orders.length > 1000 || items.length > 5000 || receipts.length > 5000 || revisions.length > 5000) error(413, '导出记录过多，请按日期或单据缩小范围');
       sheets = [

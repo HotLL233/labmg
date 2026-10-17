@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const execute = promisify(execFile);
 const image = process.env.LABOS_DOCKER_IMAGE;
 
-test('Compose initializes a new volume for a non-root user and preserves setup, records, attachments and material issues', {
+test('Compose initializes a new volume for a non-root user and preserves setup, records, attachments, material issues and unit labels', {
   skip: image ? false : 'set LABOS_DOCKER_IMAGE to test a locally built image', timeout: 420000
 }, async () => {
   const root = path.resolve(__dirname, '..');
@@ -211,6 +211,55 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
       assert.equal(rows.reduce((sum, row) => sum + row.amountCents, 0), 925);
     };
     await assertIssueMovements(first.base, cookie);
+    const unitCatalog = await post('/api/materials/catalog', {
+      code: 'DOCKER-UNIT', name: '容器独立瓶', spec: '500 mL', unit: '瓶', categoryId: category.id, trackingMode: 'unit'
+    });
+    assert.equal(unitCatalog.trackingMode, 'unit');
+    await request(first.base, '/api/materials/unit-label-rule', {
+      method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: 'DOCKER-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1, reason: '容器独立瓶编号规则' })
+    });
+    let unitRequest = await post('/api/materials/requests', { title: '容器独立瓶验收' });
+    unitRequest = await post(`/api/materials/requests/${unitRequest.id}/items`, {
+      requestVersion: unitRequest.version, catalogId: unitCatalog.id, name: unitCatalog.name, spec: unitCatalog.spec,
+      unit: unitCatalog.unit, categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '3'
+    });
+    unitRequest = await post(`/api/materials/requests/${unitRequest.id}/submit`, { requestVersion: unitRequest.version }, 200);
+    const unitIdentity = { catalogId: unitCatalog.id, regionId: region.id, warehouse: 'MAIN', batch: 'DOCKER-UNIT-BATCH', expiryDate: '2028-12-31' };
+    const unitReceiptPayload = {
+      requestId: unitRequest.id, itemId: unitRequest.items[0].id, requestVersion: unitRequest.version,
+      version: unitRequest.items[0].version, requestIdempotencyKey: crypto.randomUUID(),
+      quantity: '3', amount: '1', batch: unitIdentity.batch, expiryDate: unitIdentity.expiryDate
+    };
+    const unitReceipt = (await post('/api/materials/receipts', unitReceiptPayload)).receipt;
+    assert.equal(unitReceipt.unitCount, 3); assert.equal(unitReceipt.units.length, 3);
+    assert.deepEqual(unitReceipt.units.map(unit => unit.sequence), [1, 2, 3]);
+    assert.equal(new Set(unitReceipt.units.map(unit => unit.code)).size, 3);
+    for (const unit of unitReceipt.units) {
+      assert.match(unit.code, /^DOCKER-\d{8}-\d{6}$/);
+      assert.equal(unit.status, 'in_stock'); assert.equal(unit.sourceReceiptId, unitReceipt.id);
+    }
+    assert.deepEqual((await post('/api/materials/receipts', unitReceiptPayload, 200)).receipt.units, unitReceipt.units);
+    const selectedUnit = unitReceipt.units[1];
+    const unitScan = await (await request(first.base, '/api/materials/scan/resolve', {
+      method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: selectedUnit.code })
+    })).json();
+    assert.equal(unitScan.kind, 'unit'); assert.equal(unitScan.unit.id, selectedUnit.id);
+    assert.equal(unitScan.batch.qtyM, 3000); assert.equal(unitScan.batch.amountCents, undefined);
+    const unitApplication = (await (await request(first.base, '/api/materials/issues', {
+      method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...unitIdentity, quantity: '1', purpose: '指定独立瓶领用', requestIdempotencyKey: crypto.randomUUID() })
+    }, 201)).json()).issue;
+    const unitIssuePayload = { version: unitApplication.version, requestIdempotencyKey: crypto.randomUUID(), unitIds: [selectedUnit.id] };
+    const unitIssued = (await post(`/api/materials/issues/${unitApplication.id}/issue`, unitIssuePayload)).issue;
+    assert.equal(unitIssued.amountCents, 33); assert.equal(unitIssued.units.length, 1);
+    assert.equal(unitIssued.units[0].id, selectedUnit.id); assert.equal(unitIssued.units[0].status, 'issued');
+    assert.equal((await post(`/api/materials/issues/${unitApplication.id}/issue`, unitIssuePayload, 200)).issue.id, unitApplication.id);
+    const unitRoute = `/api/materials/stock/units?catalogId=${unitCatalog.id}`;
+    const expectedUnits = (await (await request(first.base, unitRoute, { headers: { Cookie: cookie } })).json()).items;
+    assert.equal(expectedUnits.length, 3); assert.equal(expectedUnits.filter(unit => unit.status === 'in_stock').length, 2);
+    const expectedRule = await (await request(first.base, '/api/materials/unit-label-rule', { headers: { Cookie: cookie } })).json();
+    assert.equal(expectedRule.nextSequence, 4);
     const workbook = await request(first.base, `/api/materials/export.xlsx?type=requests&requestId=${materialRequest.id}`, { headers: { Cookie: cookie } });
     assert.match(workbook.headers.get('content-type'), /spreadsheetml/);
     assert.equal(Buffer.from(await workbook.arrayBuffer()).readUInt32LE(0), 0x04034b50, 'Linux dependencies must generate an actual XLSX ZIP');
@@ -242,8 +291,9 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     const persistedMaterial = (await materialStock.json()).items.find(row => row.catalogId === catalog.id && row.regionId === region.id);
     assert.equal(persistedMaterial.qtyM, 750); assert.equal(persistedMaterial.amountCents, 925);
     const persistedBatches = (await (await request(second.base, '/api/materials/stock/batches', { headers: { Cookie: secondCookie } })).json()).items;
-    assert.equal(persistedBatches[0].location, location); assert.equal(persistedBatches[0].locationVersion, 1);
-    assert.equal(persistedBatches[0].qtyM, 750); assert.equal(persistedBatches[0].amountCents, 925);
+    const persistedBatch = persistedBatches.find(row => row.catalogId === catalog.id);
+    assert.equal(persistedBatch.location, location); assert.equal(persistedBatch.locationVersion, 1);
+    assert.equal(persistedBatch.qtyM, 750); assert.equal(persistedBatch.amountCents, 925);
     assert.equal((await postAfterRestart('/api/materials/scan/resolve', { code: packagingCode })).catalog.id, catalog.id);
     const rescanned = await postAfterRestart('/api/materials/scan/resolve', scanPayload);
     assert.equal(rescanned.batch.qtyM, 750); assert.equal(rescanned.batch.amountCents, 925);
@@ -253,10 +303,22 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     const persistedIssue = (await (await request(second.base, `/api/materials/issues/${application.id}`, { headers: { Cookie: secondCookie } })).json()).issue;
     assert.equal(persistedIssue.status, 'issued'); assert.equal(persistedIssue.amountCents, 309); assert.equal(persistedIssue.snapshot.location, location);
     await assertIssueMovements(second.base, secondCookie);
+    assert.deepEqual((await (await request(second.base, unitRoute, { headers: { Cookie: secondCookie } })).json()).items, expectedUnits);
+    assert.deepEqual(await (await request(second.base, '/api/materials/unit-label-rule', { headers: { Cookie: secondCookie } })).json(), expectedRule);
+    assert.equal((await postAfterRestart('/api/materials/receipts', unitReceiptPayload)).receipt.id, unitReceipt.id);
+    assert.equal((await postAfterRestart(`/api/materials/issues/${unitApplication.id}/issue`, unitIssuePayload)).issue.units[0].id, selectedUnit.id);
+    const persistedUnitStock = (await (await request(second.base, '/api/materials/stock', { headers: { Cookie: secondCookie } })).json()).items.find(row => row.catalogId === unitCatalog.id);
+    assert.equal(persistedUnitStock.qtyM, 2000); assert.equal(persistedUnitStock.amountCents, 67);
+    const persistedUnitScan = await postAfterRestart('/api/materials/scan/resolve', { code: selectedUnit.code });
+    assert.equal(persistedUnitScan.unit.status, 'issued'); assert.equal(persistedUnitScan.unit.code, selectedUnit.code);
     const secondRequesterCookie = await login(second.base, requesterCredentials);
     const ownIssues = (await (await request(second.base, '/api/materials/issues', { headers: { Cookie: secondRequesterCookie } })).json()).items;
-    assert.equal(ownIssues.length, 1); assert.equal(ownIssues[0].id, application.id); assert.equal(ownIssues[0].status, 'issued');
-    assert.equal(ownIssues[0].amountCents, undefined, 'ordinary issue history must remain amount-redacted after recreation');
+    assert.equal(ownIssues.length, 2);
+    for (const issueId of [application.id, unitApplication.id]) {
+      const ownIssue = ownIssues.find(row => row.id === issueId);
+      assert.equal(ownIssue.status, 'issued');
+      assert.equal(ownIssue.amountCents, undefined, 'ordinary issue history must remain amount-redacted after recreation');
+    }
     const records = await request(second.base, '/api/records?module=archives', { headers: { Cookie: secondCookie } });
     assert.ok((await records.json()).some(row => row.id === record.id && row.title === title));
     const files = await request(second.base, `/api/files?record_id=${record.id}`, { headers: { Cookie: secondCookie } });
