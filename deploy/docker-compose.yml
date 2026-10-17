@@ -1,8 +1,9 @@
+# 0.3.2 开发模板：配套镜像尚未发布。现有部署继续使用 v0.3.1 Release 的文件。
 version: '3.8'
 
 services:
   labos-init:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.1}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.2}"
     user: "0:0"
     restart: "no"
     command: ["node", "src/init-runtime.js"]
@@ -12,10 +13,10 @@ services:
     healthcheck:
       disable: true
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.3.1}:/var/lib/labos"
+      - "${LABOS_DATA_DIR:-labos-runtime-0.3.2}:/var/lib/labos"
 
   labos:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.1}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.2}"
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:
       labos-init:
@@ -30,7 +31,7 @@ services:
       LABOS_RUNTIME_DIR: /var/lib/labos
       LABOS_ADMIN_USER: "${LABOS_ADMIN_USER:-admin}"
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.3.1}:/var/lib/labos"
+      - "${LABOS_DATA_DIR:-labos-runtime-0.3.2}:/var/lib/labos"
     logging:
       driver: json-file
       options:
@@ -38,4 +39,4 @@ services:
         max-file: "3"
 
 volumes:
-  labos-runtime-0.3.1: {}
+  labos-runtime-0.3.2: {}

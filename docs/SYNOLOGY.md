@@ -1,6 +1,6 @@
 # 群晖 Docker 部署
 
-本版为 `0.3.1` 物资业务版，可下载的镜像、附件和验证结果以 [0.3.1 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 实际记录为准。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
+本文部署步骤对应已发布的 `0.3.1`，可下载的镜像、附件和验证结果以 [0.3.1 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 实际记录为准。当前源码已进入 `0.3.2` 位置与领用开发，仓库 `deploy/` 为该开发版模板，配套镜像尚未发布；现行部署请使用 0.3.1 Release 附件。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
 
 本版沿用 rc.5 的 Docker 管理的数据卷，自动准备运行目录，无需先在 NAS 手工创建数据文件夹。YML 有两个服务：`labos-init` 以 root 一次性准备目录，成功后退出；`labos` 以非 root 用户运行应用。空数据库首次打开网页时设置管理员密码，没有默认密码。
 
@@ -24,7 +24,7 @@
 
 ## 首次在线部署
 
-1. 在本版发布后取得配套 `docker-compose.yml` 和环境示例；仓库对应文件在 [deploy/](../deploy/)。GitHub 附件示例名可能为 `env.example`，源码中为 `.env.example`。
+1. 从 [0.3.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 取得配套 `docker-compose.yml` 和环境示例；当前仓库 `deploy/` 已是未发布的 0.3.2 开发模板。GitHub 附件示例名可能为 `env.example`，源码中为 `.env.example`。
 2. 在“Container Manager → 项目 → 新增”中选择保存 YML 的项目目录。配置文件需要一个项目目录，应用数据目录由 Docker 自动创建，不需另外准备 `/volume1/.../runtime/`。
 3. `.env` 可选。需要自定义端口或用户时，将环境示例复制为项目同目录的 `.env`；首次部署保留 `LABOS_DATA_DIR` 为未设置状态。例如：
 
@@ -182,14 +182,15 @@ docker run --rm --pull=never --user 0:0 --entrypoint tar --mount type=volume,sou
 
 GitHub Actions 按版本标签发布 amd64/arm64，最终可用性以实际 Release、Actions 和匿名拉取结果为准。仓库维护者使用 PowerShell 7 执行 `npm run package:docker`，生成源码 ZIP、两架构 TAR/清单及独立部署文件；缓存统一在 `artifacts/cache/<version>/`，不覆盖旧版本。
 
-自行构建可在源码根目录使用 PowerShell 7 执行：
+自行构建可在源码根目录使用 PowerShell 7 执行，标签与构建版本读取该份源码的实际版本（当前开发源码为 0.3.2；需要 0.3.1 时使用其发布源码）：
 
 ```powershell
-docker build --platform linux/amd64 --build-arg VERSION=0.3.1 -f deploy/Dockerfile -t labos:0.3.1 .
+$labosVersion = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+docker build --platform linux/amd64 --build-arg "VERSION=$labosVersion" -f deploy/Dockerfile -t "labos:$labosVersion" .
 if ($LASTEXITCODE -ne 0) { throw '构建失败' }
 ```
 
-ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。基础镜像为 `node:24-bookworm-slim`，自行构建需要下载基础镜像；导入现成 TAR 无需下载它。构建后设置 `LABOS_IMAGE=labos:0.3.1`。
+ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。基础镜像为 `node:24-bookworm-slim`，自行构建需要下载基础镜像；导入现成 TAR 无需下载它。构建后在 `.env` 设置 `LABOS_IMAGE=labos:<实际版本>`。
 
 推荐用配套项目 YML；单独从 GUI 创建一个应用容器不会执行 `labos-init`，不能自动获得同样的目录准备流程。自行管理容器时须另行准备存储及 UID/GID，内部端口保持 3000、运行目录保持 `/var/lib/labos`。应用镜像默认用户为非 root `node`，初始化服务的 root 权限仅用于准备挂载目录，不开放 Web 服务。
 

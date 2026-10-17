@@ -35,6 +35,10 @@ async function fixture(t, legacy = false, options = {}) {
       db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(1, 'sample.txt', 'sample.txt', 'text/plain', 6);
       db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('LEGACY', '["samples.read"]');
       db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('MATERIAL', JSON.stringify(options.materialPermissions || ['materials.read', 'materials.reagent.read']));
+      if (options.materialMigrations) {
+        db.exec('CREATE TABLE schema_migrations(name TEXT PRIMARY KEY,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+        for (const name of options.materialMigrations) db.prepare('INSERT INTO schema_migrations(name) VALUES(?)').run(name);
+      }
     });
     fs.writeFileSync(path.join(runtime, 'uploads/sample.txt'), 'sample');
   }
@@ -189,13 +193,50 @@ test('unchanged legacy MATERIAL defaults gain workflow permissions once and expl
   const f = await fixture(t, true, { materialPermissions: previous });
   const material = await f.user('upgraded-material', ['MATERIAL']);
   const permissions = (await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions;
-  for (const permission of ['materials.request.submit', 'materials.request.edit_submitted', 'materials.acceptance.write', 'materials.amount.read', 'materials.export']) assert.ok(permissions.includes(permission));
+  for (const permission of ['materials.request.submit', 'materials.request.edit_submitted', 'materials.acceptance.write', 'materials.amount.read', 'materials.export', 'materials.stock.location', 'materials.issue.write']) assert.ok(permissions.includes(permission));
   assert.equal((await f.request('GET', '/api/materials/meta', material.cookie)).data.capabilities.submitRequest, true);
   await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin.cookie, { permissions: previous });
   await f.restart();
   assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, previous);
   assert.equal((await f.request('GET', '/api/materials/meta', material.cookie)).data.capabilities.submitRequest, false);
   assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.0-material-permissions').n), 1);
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+});
+
+const materialDefaults031 = ['dashboard.read', 'materials.read', 'materials.write',
+  'materials.categories.write', 'materials.regions.write', 'materials.catalog.write', 'materials.request.submit',
+  'materials.request.edit_submitted', 'materials.acceptance.write', 'materials.stock.initialize', 'materials.stock.adjust',
+  'materials.amount.read', 'materials.export'];
+
+test('unchanged 0.3.1 MATERIAL defaults gain issue and location permissions once, including reordered grants', { timeout: 30000 }, async t => {
+  const previous = [...materialDefaults031].reverse();
+  const f = await fixture(t, true, { materialPermissions: previous, materialMigrations: ['0.3.0-material-permissions'] });
+  const material = await f.user('issue-material', ['MATERIAL']);
+  const expected = [...previous, 'materials.stock.location', 'materials.issue.write'];
+  assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, expected);
+  const catalog = (await f.request('GET', '/api/permissions', f.admin.cookie)).data.catalog;
+  assert.ok(catalog.includes('materials.stock.location'));
+  assert.ok(catalog.includes('materials.issue.write'));
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin.cookie, { permissions: previous });
+  await f.restart();
+  assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, previous, 'revoked 0.3.2 permissions must stay revoked');
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+});
+
+test('0.3.2 leaves customized or previously revoked MATERIAL grants unchanged and new databases use new defaults', { timeout: 30000 }, async t => {
+  for (const previous of [materialDefaults031.filter(permission => permission !== 'materials.stock.adjust'),
+    [...materialDefaults031, 'audit.read'], ['dashboard.read', 'materials.read', 'materials.write']]) {
+    const f = await fixture(t, true, { materialPermissions: previous, materialMigrations: ['0.3.0-material-permissions'] });
+    const permissions = () => f.sql(db => JSON.parse(db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL').permissions));
+    assert.deepEqual(permissions(), previous);
+    await f.restart();
+    assert.deepEqual(permissions(), previous);
+    assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+  }
+  const f = await fixture(t);
+  const material = await f.user('new-issue-material', ['MATERIAL']);
+  assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions,
+    [...materialDefaults031, 'materials.stock.location', 'materials.issue.write']);
 });
 
 test('logout and password resets revoke sessions, imports preserve omitted passwords, last admin survives', { timeout: 30000 }, async t => {

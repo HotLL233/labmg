@@ -82,3 +82,17 @@
 选定一个候选后，用隔离环境验证：两名普通用户在同一申请加行和本人行权限 → 未建档物资先提交 → 提交后的原因修订/原版导出 → 分两次录入不同数量与本批金额 → 拒收、差缺结案、重复冲正拦截 → 不同区域库存及金额隔离 → 期初关闭 → 历史 Excel、备份恢复与容器重建。验证通过后再决定迁移或仅参考模块设计。
 
 本次交付为选型记录，业务版本保持 0.3.1；没有新镜像、YML 变更、数据库迁移或系统替换。
+
+## 后续采纳：0.3.2 位置与领用开发（2026-10-17）
+
+以上是调研阶段的历史结论。用户随后要求参考这些项目的逻辑完善 LabOS，并新增存放位置和物资领用，确认采用“人员申请，物资管理员发放”。本轮保留现有 Node.js/SQLite 结构独立实现，未复制候选业务源码，也未引入上游服务或依赖。
+
+| 参考依据 | 在 LabOS 的应用 | 保留本项目规则的区别 |
+| --- | --- | --- |
+| InvenTree 1.5.7 的 [`can_merge` / `merge_stock_items`](https://github.com/inventree/InvenTree/blob/1.5.7/src/backend/InvenTree/stock/models.py#L2614)、[`add_tracking_entry`](https://github.com/inventree/InvenTree/blob/1.5.7/src/backend/InvenTree/stock/models.py#L2338) | 库存详情增加批次余额，并能钻取该批号、有效期的来源流水；存放位置按实际批次维护 | 不物理删除被合并库存，不照搬供应商/状态合并规则；继续按物资+仓库+区域汇总，批号+有效期独立核对 |
+| InvenTree 1.5.7 的 [`take_stock`](https://github.com/inventree/InvenTree/blob/1.5.7/src/backend/InvenTree/stock/models.py#L3380) | 发放时在事务内重新读取当前余额、扣减并记录操作者及来源 | 上游会将移除量限制到现存量；LabOS 对不足的领用整笔拒绝，不静默少发。申请不预占，发放全量处理；金额用整数比例分摊并在领完时清零 |
+| OpenBoxes [Partial Receiving](https://help.openboxes.com/article/300-partial-receiving) 的本次/累计/剩余、批号与有效期展示 | 验收保留实际合格量与拒收量；库存和领用明确显示批次余量、位置、业务日期和原因 | 不把取消剩余当作合格收货，不扩大为新的采购模块；该来源是已核验文档，不冒称已验证固定版 Groovy 服务 |
+| jshERP [请购界面](https://github.com/jishenghua/jshERP/blob/master/jshERP-web/src/views/bill/PurchaseApplyList.vue) 与审核后动作约束 | 领用状态与申请/发放/驳回/取消入口对应，服务端再次校验角色、状态和版本；申报补充提交资格提示 | 不采用反审核覆盖原单或整单删明细重写；原提交及原因修订继续保留 |
+| ERPNext [不可变库存账本](https://docs.frappe.io/erpnext/immutable-ledger-in-erpnext) 与显式库存维度 | 领用产生独立负向来源流水，库存仍由完整流水汇总；备份及 Excel 包含新增业务 | 不接入 Frappe，不改变本批含税总金额和区域独立汇总，也不把版本差异日志当完整原版快照 |
+
+首期为单物资、单批次申请，一个库存批次维护一个文字位置；部分发放、预占、多货架分摊及领用单冲正未纳入本轮。已发放记录不直接修改或删除，录错通过有原因的库存调整留痕纠正。实际实现合同见[物资 API](../MATERIAL_API.md)，验证结果见[版本说明](../CHANGELOG.md)“未发布”。本轮不创建镜像标签，现行 0.3.1 部署不会因此自动升级。

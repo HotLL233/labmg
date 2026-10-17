@@ -15,8 +15,10 @@ const BACKUP_LIMIT = 20 * 1024 * 1024;
 const TABLES = [
   'material_categories', 'material_regions', 'material_catalog', 'material_requests',
   'material_request_items', 'material_request_revisions', 'material_receipts',
-  'material_stock_movements', 'material_attachments', 'material_state', 'material_idempotency'
+  'material_stock_locations', 'material_issues', 'material_stock_movements',
+  'material_attachments', 'material_state', 'material_idempotency'
 ];
+const V1_TABLES = TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
 function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx }) {
   db.exec(`
@@ -74,8 +76,26 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         (type='reversal' AND qty_m<0 AND amount_cents<=0 AND original_receipt_id IS NOT NULL))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS material_one_reversal ON material_receipts(original_receipt_id) WHERE type='reversal';
+    CREATE TABLE IF NOT EXISTS material_stock_locations(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), region_id INTEGER NOT NULL REFERENCES material_regions(id),
+      warehouse TEXT NOT NULL, batch TEXT NOT NULL DEFAULT '', expiry_date TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL CHECK(length(location)<=200), version INTEGER NOT NULL CHECK(version>0),
+      reason TEXT NOT NULL, actor_id INTEGER NOT NULL REFERENCES users(id), updated_at TEXT NOT NULL,
+      UNIQUE(catalog_id,warehouse,region_id,batch,expiry_date)
+    );
+    CREATE TABLE IF NOT EXISTS material_issues(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','issued','rejected','cancelled')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+      catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), region_id INTEGER NOT NULL REFERENCES material_regions(id),
+      warehouse TEXT NOT NULL, batch TEXT NOT NULL DEFAULT '', expiry_date TEXT NOT NULL DEFAULT '',
+      qty_m INTEGER NOT NULL CHECK(qty_m>0), amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(amount_cents>=0),
+      snapshot TEXT NOT NULL, purpose TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+      created_by INTEGER NOT NULL REFERENCES users(id), processed_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL, processed_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS material_stock_movements(
-      id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('opening','receipt','reversal','adjustment')),
+      id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('opening','receipt','reversal','adjustment','issue')),
       catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), region_id INTEGER NOT NULL REFERENCES material_regions(id),
       warehouse TEXT NOT NULL, qty_m INTEGER NOT NULL CHECK(qty_m<>0), amount_cents INTEGER NOT NULL,
       receipt_id INTEGER REFERENCES material_receipts(id), source_key TEXT NOT NULL UNIQUE, snapshot TEXT NOT NULL,
@@ -101,7 +121,31 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     CREATE INDEX IF NOT EXISTS material_receipt_item ON material_receipts(item_id,id);
     CREATE INDEX IF NOT EXISTS material_stock_key ON material_stock_movements(catalog_id,warehouse,region_id);
     CREATE INDEX IF NOT EXISTS material_attachment_request ON material_attachments(request_id,receipt_id);
+    CREATE INDEX IF NOT EXISTS material_issue_owner ON material_issues(created_by,status,id);
   `);
+
+  // SQLite cannot alter a CHECK constraint. No table points to movements, so foreign keys stay enabled.
+  if (!db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='material_stock_movements'").get().sql.includes("'issue'")) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const sequence = db.prepare("SELECT seq FROM sqlite_sequence WHERE name='material_stock_movements'").get()?.seq || 0;
+      const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='material_stock_movements' AND type IN ('index','trigger') AND sql IS NOT NULL").all();
+      const definition = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='material_stock_movements'").get().sql;
+      db.exec(definition.replace(/\bmaterial_stock_movements\b/, 'material_stock_movements_upgrade')
+        .replace("'adjustment'", "'adjustment','issue'"));
+      db.exec(`INSERT INTO material_stock_movements_upgrade SELECT * FROM material_stock_movements;
+        DROP TABLE material_stock_movements;
+        ALTER TABLE material_stock_movements_upgrade RENAME TO material_stock_movements;`);
+      for (const object of objects) db.exec(object.sql);
+      const currentSequence = db.prepare("SELECT seq FROM sqlite_sequence WHERE name='material_stock_movements'").get();
+      if (currentSequence) db.prepare("UPDATE sqlite_sequence SET seq=? WHERE name='material_stock_movements'").run(Math.max(sequence, currentSequence.seq));
+      else db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('material_stock_movements',?)").run(sequence);
+      db.exec('COMMIT');
+    } catch (failure) {
+      db.exec('ROLLBACK');
+      throw failure;
+    }
+  }
 
   const one = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -234,6 +278,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       reverseReceipt: material(user, 'materials.acceptance.write'),
       initialize: material(user, 'materials.stock.initialize'),
       adjustStock: material(user, 'materials.stock.adjust'), viewAmount: permit(user, 'materials.amount.read'),
+      createIssue: Boolean(user), manageLocation: manager(user, 'materials.stock.location'),
+      issueStock: material(user, 'materials.issue.write'), viewAllIssues: role(user, 'ADMIN') || role(user, 'MATERIAL'),
       export: permit(user, 'materials.export'), backup: permit(user, 'backup.read') && permit(user, 'materials.amount.read'),
       restore: permit(user, 'backup.restore') && permit(user, 'materials.amount.read'), legacyRead: permit(user, 'materials.read')
     };
@@ -300,6 +346,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return {
       id: row.id, type: row.type, catalogId: row.catalog_id, regionId: row.region_id, warehouse: row.warehouse,
       qtyM: row.qty_m, amountCents: row.amount_cents, sourceId: row.receipt_id,
+      issueId: row.type === 'issue' ? Number(row.source_key.slice(6)) : null,
       snapshot: JSON.parse(row.snapshot), batch: row.batch, expiryDate: row.expiry_date, date: row.date,
       reason: row.reason, actorId: row.actor_id, actorName: row.actor_name ?? actorName(row.actor_id), createdAt: row.created_at
     };
@@ -405,17 +452,116 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     data.source_key, JSON.stringify(data.snapshot), data.batch || '', data.expiry_date || '', data.date || today(), data.reason || '', user.id);
     return movementView(one('SELECT * FROM material_stock_movements WHERE id=?', result.lastInsertRowid));
   }
-  function stockRows(url, paged = false) {
+  function stockIdentity(input) {
+    return { catalog_id: catalog(input.catalogId).id, region_id: dictionary('material_regions', input.regionId, '区域').id,
+      warehouse: warehouse(input.warehouse), batch: text(input.batch ?? '', '批号', 100, true),
+      expiry_date: date(input.expiryDate, '有效期', true) };
+  }
+  const identityArgs = row => [row.catalog_id, row.region_id, row.warehouse, row.batch, row.expiry_date];
+  function batchBalance(row) {
+    const movements = all(`SELECT * FROM material_stock_movements
+      WHERE catalog_id=? AND region_id=? AND warehouse=? AND batch=? AND expiry_date=? ORDER BY id`, ...identityArgs(row));
+    return { movements, qty: safeSum(movements.map(entry => entry.qty_m)), amount: safeSum(movements.map(entry => entry.amount_cents)) };
+  }
+  function stockLocation(row) {
+    return one(`SELECT * FROM material_stock_locations
+      WHERE catalog_id=? AND region_id=? AND warehouse=? AND batch=? AND expiry_date=?`, ...identityArgs(row));
+  }
+  function locationView(row) {
+    return { id: row.id, catalogId: row.catalog_id, regionId: row.region_id, warehouse: row.warehouse,
+      batch: row.batch, expiryDate: row.expiry_date, location: row.location, version: row.version,
+      reason: row.reason, actorId: row.actor_id, actorName: actorName(row.actor_id), updatedAt: row.updated_at };
+  }
+  function checkedIssue(id, user) {
+    const row = one('SELECT * FROM material_issues WHERE id=?', integer(id));
+    if (!row) error(404, '领用申请不存在');
+    if (row.created_by !== user.id && !role(user, 'ADMIN') && !role(user, 'MATERIAL')) error(403, '只能查看本人的领用申请');
+    return row;
+  }
+  function issueView(row, user) {
+    const snapshot = JSON.parse(row.snapshot);
+    const movement = row.status === 'issued' ? one("SELECT * FROM material_stock_movements WHERE source_key=? AND type='issue'", `issue:${row.id}`) : null;
+    const location = row.status === 'pending' ? stockLocation(row)?.location || '' :
+      movement ? JSON.parse(movement.snapshot).location || '' : snapshot.location || '';
+    return { id: row.id, status: row.status, version: row.version, catalogId: row.catalog_id, regionId: row.region_id,
+      warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date, qtyM: row.qty_m, amountCents: row.amount_cents,
+      snapshot, location, purpose: row.purpose, reason: row.reason, createdBy: row.created_by, creatorName: actorName(row.created_by),
+      processedBy: row.processed_by, processorName: row.processed_by ? actorName(row.processed_by) : '',
+      createdAt: row.created_at, processedAt: row.processed_at, movementId: movement?.id || null,
+      canIssue: row.status === 'pending' && material(user, 'materials.issue.write'),
+      canReject: row.status === 'pending' && material(user, 'materials.issue.write'),
+      canCancel: row.status === 'pending' && row.created_by === user.id };
+  }
+  function listIssues(url, user, unpaged = false) {
+    const filters = [], args = [];
+    if (!role(user, 'ADMIN') && !role(user, 'MATERIAL')) { filters.push('i.created_by=?'); args.push(user.id); }
+    const status = url.searchParams.get('status');
+    if (status) {
+      if (!['pending', 'issued', 'rejected', 'cancelled'].includes(status)) error(400, '领用状态无效');
+      filters.push('i.status=?'); args.push(status);
+    }
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    if (q) {
+      filters.push(`instr(lower(COALESCE(json_extract(i.snapshot,'$.code'),'') || ' ' ||
+        COALESCE(json_extract(i.snapshot,'$.name'),'') || ' ' || COALESCE(json_extract(i.snapshot,'$.spec'),'') || ' ' ||
+        COALESCE(json_extract(i.snapshot,'$.regionName'),'') || ' ' || i.purpose || ' ' || i.batch || ' ' || u.display_name),?)>0`);
+      args.push(q);
+    }
+    const query = `FROM material_issues i JOIN users u ON u.id=i.created_by${filters.length ? ' WHERE ' + filters.join(' AND ') : ''}`;
+    const page = unpaged ? null : pageInput(url);
+    const total = page ? one(`SELECT COUNT(*) AS total ${query}`, ...args).total : 0;
+    const rows = all(`SELECT i.* ${query} ORDER BY i.id DESC${page ? ' LIMIT ? OFFSET ?' : ''}`,
+      ...args, ...(page ? [page.pageSize, page.offset] : [])).map(row => issueView(row, user));
+    return page ? { items: rows, total, page: page.page, pageSize: page.pageSize } : rows;
+  }
+  function issueAmount(quantity, balance) {
+    if (quantity > balance.qty || balance.qty <= 0) conflict('该批次可用库存不足，请重新读取库存后处理');
+    return quantity === balance.qty ? balance.amount :
+      Number((BigInt(balance.amount) * BigInt(quantity) + BigInt(balance.qty) / 2n) / BigInt(balance.qty));
+  }
+  function issueAction(user, id, input, route, action) {
+    const visible = checkedIssue(id, user);
+    if (action === 'cancel') {
+      if (visible.created_by !== user.id) error(403, '只有申请人可以取消自己的领用申请');
+    } else requireMaterial(user, 'materials.issue.write');
+    return idempotent(user, route, input, () => {
+      const row = checkedIssue(id, user);
+      if (!Number.isSafeInteger(input.version) || input.version <= 0) error(400, '请提供读取时的整数版本');
+      if (row.status !== 'pending' || row.version !== input.version) conflict('领用申请状态或版本已变化，请重新读取');
+      const reason = action === 'issue' ? '' : text(input.reason, '处理原因', 1000);
+      const processedAt = now();
+      let amount = 0;
+      if (action === 'issue') {
+        const balance = batchBalance(row);
+        amount = issueAmount(row.qty_m, balance);
+        addMovement({ ...row, type: 'issue', qty_m: -row.qty_m, amount_cents: -amount, receipt_id: null,
+          source_key: `issue:${row.id}`, snapshot: { ...JSON.parse(row.snapshot), location: stockLocation(row)?.location || '' },
+          date: processedAt.slice(0, 10), reason: row.purpose }, user);
+      }
+      const status = { issue: 'issued', reject: 'rejected', cancel: 'cancelled' }[action];
+      run(`UPDATE material_issues SET status=?,version=version+1,amount_cents=?,reason=?,processed_by=?,processed_at=? WHERE id=?`,
+        status, amount, reason, user.id, processedAt, row.id);
+      log(user, action === 'issue' ? 'ISSUE' : action === 'reject' ? 'REJECT_ISSUE' : 'CANCEL_ISSUE', 'material_issues', row.id, reason || row.purpose);
+      return { issue: issueView(checkedIssue(row.id, user), user) };
+    });
+  }
+  function stockRows(url, paged = false, byBatch = false) {
     const filters = [], args = [];
     for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse']]) {
       if (!url?.searchParams.has(parameter)) continue;
       filters.push(`${column}=?`);
       args.push(parameter === 'warehouse' ? warehouse(url.searchParams.get(parameter)) : integer(url.searchParams.get(parameter), parameter));
     }
+    if (byBatch) for (const [parameter, column] of [['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
+      if (!url?.searchParams.has(parameter)) continue;
+      filters.push(`${column}=?`);
+      args.push(parameter === 'batch' ? text(url.searchParams.get(parameter), '批号', 100, true) : date(url.searchParams.get(parameter), '有效期', true));
+    }
+    const batchColumns = byBatch ? ', batch, expiry_date' : '';
     const query = `WITH balances AS (
-      SELECT catalog_id, warehouse, region_id, SUM(qty_m) AS qty_m, SUM(amount_cents) AS amount_cents,
+      SELECT catalog_id, warehouse, region_id${batchColumns}, SUM(qty_m) AS qty_m, SUM(amount_cents) AS amount_cents,
         MIN(id) AS first_id, MAX(id) AS last_id FROM material_stock_movements
-      ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''} GROUP BY catalog_id, warehouse, region_id
+      ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''} GROUP BY catalog_id, warehouse, region_id${batchColumns}
     ) SELECT b.*, first.snapshot, r.name AS region_name, last.created_at AS last_movement_at
       FROM balances b JOIN material_stock_movements first ON first.id=b.first_id
       JOIN material_stock_movements last ON last.id=b.last_id JOIN material_regions r ON r.id=b.region_id`;
@@ -429,9 +575,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       ...args, ...(page ? [page.pageSize, page.offset] : [])).map(row => {
       const snapshot = JSON.parse(row.snapshot);
       if (!Number.isSafeInteger(row.qty_m) || !Number.isSafeInteger(row.amount_cents)) error(400, '库存累计数值超出安全整数范围');
-      return { id: `${row.catalog_id}:${row.warehouse}:${row.region_id}`, catalogId: row.catalog_id,
+      return { id: byBatch ? JSON.stringify([row.catalog_id, row.warehouse, row.region_id, row.batch, row.expiry_date]) : `${row.catalog_id}:${row.warehouse}:${row.region_id}`, catalogId: row.catalog_id,
         code: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
         regionId: row.region_id, regionName: row.region_name, warehouse: row.warehouse,
+        ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date, categoryId: snapshot.categoryId, categoryName: snapshot.categoryName,
+          location: stockLocation(row)?.location || '', locationVersion: stockLocation(row)?.version || 0 } : {}),
         qtyM: row.qty_m, amountCents: row.amount_cents, lastMovementAt: row.last_movement_at };
     });
     return page ? { items: rows, total, page: page.page, pageSize: page.pageSize } : rows;
@@ -816,13 +964,56 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const result = receiptAction(user, input, route, 'reverse', null, null, match[1]);
       return reply(result.value, result.status);
     }
+    if (route === '/issues' && method === 'GET') return reply(listIssues(url, user));
+    if ((match = route.match(/^\/issues\/(\d+)$/)) && method === 'GET') return reply({ issue: issueView(checkedIssue(match[1], user), user) });
+    if (route === '/issues' && method === 'POST') {
+      const result = idempotent(user, route, input, () => {
+        const identity = stockIdentity(input), balance = batchBalance(identity);
+        const quantity = decimal(input.quantity, 3, '领用数量');
+        if (balance.qty < quantity) conflict('该批次可用库存不足，不能提交领用申请');
+        const purpose = text(input.purpose, '领用用途', 1000);
+        const snapshot = { ...JSON.parse(balance.movements[0].snapshot), batch: identity.batch, expiryDate: identity.expiry_date,
+          location: stockLocation(identity)?.location || '', createdBy: user.id };
+        const result = run(`INSERT INTO material_issues(catalog_id,region_id,warehouse,batch,expiry_date,qty_m,snapshot,purpose,created_by,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?)`, ...identityArgs(identity), quantity, JSON.stringify(snapshot), purpose, user.id, now());
+        const issue = issueView(checkedIssue(result.lastInsertRowid, user), user);
+        log(user, 'CREATE_ISSUE', 'material_issues', issue.id, purpose);
+        return { issue };
+      });
+      return reply(result.value, result.status);
+    }
+    if ((match = route.match(/^\/issues\/(\d+)\/(issue|reject|cancel)$/)) && method === 'POST') {
+      const result = issueAction(user, match[1], input, route, match[2]);
+      return reply(result.value, result.status);
+    }
+    if (route === '/stock/location' && method === 'PUT') {
+      requireManager(user, 'materials.stock.location');
+      const location = transaction(() => {
+        const identity = stockIdentity(input), current = stockLocation(identity);
+        if (!Number.isSafeInteger(input.version) || input.version < 0) error(400, '请提供读取时的位置整数版本');
+        if (input.version !== (current?.version || 0)) conflict('库存位置已变化，请重新读取后修改');
+        if (!batchBalance(identity).movements.length) error(400, '只能维护已有库存流水批次的位置');
+        const value = text(input.location, '库存位置', 200, true), reason = text(input.reason, '位置修改原因', 1000);
+        run(`INSERT INTO material_stock_locations(catalog_id,region_id,warehouse,batch,expiry_date,location,version,reason,actor_id,updated_at)
+          VALUES(?,?,?,?,?,?,1,?,?,?) ON CONFLICT(catalog_id,warehouse,region_id,batch,expiry_date)
+          DO UPDATE SET location=excluded.location,version=material_stock_locations.version+1,reason=excluded.reason,actor_id=excluded.actor_id,updated_at=excluded.updated_at`,
+        ...identityArgs(identity), value, reason, user.id, now());
+        const saved = stockLocation(identity);
+        log(user, 'LOCATION', 'material_stock_locations', saved.id, reason);
+        return locationView(saved);
+      });
+      return reply({ location });
+    }
     if (route === '/stock' && method === 'GET') return reply(stockRows(url, true));
+    if (route === '/stock/batches' && method === 'GET') return reply(stockRows(url, true, true));
     if (route === '/stock/movements' && method === 'GET') {
       const filters = [], args = [];
-      for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse']]) {
+      for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse'], ['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
         if (url.searchParams.has(parameter)) {
           filters.push(`m.${column}=?`);
-          args.push(parameter === 'warehouse' ? warehouse(url.searchParams.get(parameter)) : integer(url.searchParams.get(parameter)));
+          const value = url.searchParams.get(parameter);
+          args.push(parameter === 'warehouse' ? warehouse(value) : parameter === 'batch' ? text(value, '批号', 100, true) :
+            parameter === 'expiryDate' ? date(value, '有效期', true) : integer(value));
         }
       }
       const where = filters.length ? ' WHERE ' + filters.join(' AND ') : '';
@@ -943,13 +1134,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 1, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 2, generatedAt: now(),
       users: all('SELECT id,username FROM users ORDER BY id'), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
   }
   function remapSnapshot(value, mapping) {
-    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId']);
+    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId', 'processedBy']);
     if (Array.isArray(value)) return value.map(entry => remapSnapshot(entry, mapping));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
@@ -996,14 +1187,60 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           original.qty_m !== -event.qty_m || original.amount_cents !== -event.amount_cents) error(400, '冲正没有精确对应原验收');
       }
     }
+    for (const row of all('SELECT * FROM material_stock_locations')) {
+      warehouse(row.warehouse);
+      if (text(row.batch, '批号', 100, true) !== row.batch || date(row.expiry_date, '有效期', true) !== row.expiry_date ||
+          text(row.location, '库存位置', 200, true) !== row.location || row.version < 1) error(400, '库存位置数据无效');
+      text(row.reason, '位置修改原因', 1000);
+      if (!batchBalance(row).movements.length) error(400, '库存位置没有对应的批次流水');
+      if (!validTimestamp(row.updated_at)) error(400, '库存位置时间无效');
+    }
+    for (const row of all('SELECT * FROM material_issues')) {
+      warehouse(row.warehouse);
+      if (text(row.batch, '批号', 100, true) !== row.batch || date(row.expiry_date, '有效期', true) !== row.expiry_date ||
+          row.qty_m <= 0 || row.amount_cents < 0 || !validTimestamp(row.created_at)) error(400, '领用数量、批次或时间无效');
+      text(row.purpose, '领用用途', 1000);
+      const snapshot = JSON.parse(row.snapshot);
+      if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== 'object' || snapshot.catalogId !== row.catalog_id ||
+          snapshot.regionId !== row.region_id || snapshot.warehouse !== row.warehouse || snapshot.batch !== row.batch ||
+          snapshot.expiryDate !== row.expiry_date || snapshot.createdBy !== row.created_by) error(400, '领用申请快照身份无效');
+      for (const key of ['code', 'name', 'spec', 'unit', 'categoryName', 'regionName']) text(snapshot[key], '领用快照物资信息', 200);
+      dictionary('material_categories', snapshot.categoryId, '快照分类');
+      text(snapshot.location, '申请时位置', 200, true);
+      const movements = all("SELECT * FROM material_stock_movements WHERE source_key=?", `issue:${row.id}`);
+      if (row.status === 'pending') {
+        if (row.version !== 1 || row.processed_by !== null || row.processed_at !== null || row.reason !== '' || row.amount_cents !== 0 || movements.length) error(400, '待发放申请不能包含处理或库存记录');
+      } else {
+        if (row.version !== 2 || row.processed_by === null || !validTimestamp(row.processed_at) || row.processed_at < row.created_at) error(400, '领用处理信息无效');
+        if (row.status === 'issued') {
+          if (row.reason !== '' || movements.length !== 1) error(400, '发放申请缺少唯一来源流水');
+          const movement = movements[0], saved = JSON.parse(movement.snapshot);
+          if (movement.type !== 'issue' || movement.qty_m !== -row.qty_m || movement.amount_cents !== -row.amount_cents ||
+              movement.catalog_id !== row.catalog_id || movement.region_id !== row.region_id || movement.warehouse !== row.warehouse ||
+              movement.batch !== row.batch || movement.expiry_date !== row.expiry_date || movement.actor_id !== row.processed_by ||
+              movement.date !== row.processed_at.slice(0, 10) || stableJson({ ...saved, location: snapshot.location }) !== stableJson(snapshot)) error(400, '领用申请与发放流水无法对账');
+          text(saved.location, '发放时位置', 200, true);
+        } else {
+          if (!['rejected', 'cancelled'].includes(row.status) || movements.length || row.amount_cents !== 0 ||
+              (row.status === 'cancelled' && row.processed_by !== row.created_by)) error(400, '取消或驳回申请不能产生库存流水');
+          text(row.reason, '处理原因', 1000);
+        }
+      }
+    }
     const batches = new Map();
     for (const row of all('SELECT * FROM material_stock_movements ORDER BY id')) {
       warehouse(row.warehouse);
       const snapshot = JSON.parse(row.snapshot);
-      if (snapshot.catalogId !== row.catalog_id || snapshot.regionId !== row.region_id || snapshot.warehouse !== row.warehouse) error(400, '库存快照与流水归属不一致');
+      if (!snapshot || snapshot.catalogId !== row.catalog_id || snapshot.regionId !== row.region_id || snapshot.warehouse !== row.warehouse) error(400, '库存快照与流水归属不一致');
       if (['receipt', 'reversal'].includes(row.type) !== Boolean(row.receipt_id)) error(400, '库存来源引用无效');
+      if (row.receipt_id && row.source_key !== `receipt:${row.receipt_id}`) error(400, '验收库存来源键无效');
       const key = JSON.stringify([row.catalog_id, row.region_id, row.warehouse, row.batch, row.expiry_date]);
       const previous = batches.get(key) || { qty: 0, amount: 0 };
+      if (row.type === 'issue') {
+        const match = row.source_key.match(/^issue:([1-9]\d*)$/), issue = match && one('SELECT * FROM material_issues WHERE id=?', Number(match[1]));
+        if (!issue || issue.status !== 'issued' || row.qty_m >= 0 || -row.qty_m > previous.qty || previous.qty <= 0 ||
+            row.amount_cents !== -issueAmount(-row.qty_m, previous)) error(400, '领用流水缺少申请或成本分摊不一致');
+      } else if (row.source_key.startsWith('issue:')) error(400, '非领用流水不能占用领用来源');
       const qty = safeSum([previous.qty, row.qty_m]), amount = safeSum([previous.amount, row.amount_cents]);
       if (qty < 0 || amount < 0) error(400, '备份存在负库存或无来源冲减');
       batches.set(key, { qty, amount });
@@ -1012,17 +1249,23 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const badForeignKeys = all('PRAGMA foreign_key_check').filter(row => row.table.startsWith('material_'));
     if (badForeignKeys.length) error(400, '备份业务关联不完整');
   }
+  function validTimestamp(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+      Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+  }
   function restore(payload, user) {
     if (!permit(user, 'backup.restore') || !permit(user, 'materials.amount.read')) error(403, '完整物资恢复需要恢复及金额读取权限');
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || payload.schemaVersion !== 1 || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
-        !Array.isArray(payload.users) || !Array.isArray(payload.files) || TABLES.some(table => !Array.isArray(payload.data[table]))) error(400, '无效的完整物资备份格式');
+        !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : TABLES;
+    if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
+        Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
         !Number.isFinite(Date.parse(payload.generatedAt)) || new Date(payload.generatedAt).toISOString() !== payload.generatedAt) error(400, '备份生成时间无效');
-    if (Object.keys(payload.data).some(key => !TABLES.includes(key))) error(400, '备份包含未知业务表');
     if (Buffer.byteLength(JSON.stringify(payload)) > 25 * 1024 * 1024) error(413, '在线恢复上限为25 MiB，请使用完整运行目录恢复');
     const mapping = new Map(), usernames = new Set();
     for (const source of payload.users) {
@@ -1035,13 +1278,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       mapping.set(id, current.id);
       usernames.add(username);
     }
-    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id']);
+    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id', 'processed_by']);
     const jsonColumns = new Set(['original_snapshot', 'before_snapshot', 'after_snapshot', 'snapshot', 'response']);
     const normalized = {};
     for (const table of TABLES) {
       const columns = all(`PRAGMA table_info(${table})`);
       const allowed = new Map(columns.map(column => [column.name, column]));
-      normalized[table] = payload.data[table].map(source => {
+      normalized[table] = (payload.data[table] || []).map(source => {
         if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => !allowed.has(key)) || columns.some(column => !Object.hasOwn(source, column.name))) error(400, `备份表 ${table} 字段无效`);
         const row = {};
         for (const [key, value] of Object.entries(source)) {
@@ -1054,6 +1297,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           } else if (jsonColumns.has(key) && value !== null) {
             let parsed;
             try { parsed = JSON.parse(value); } catch { error(400, '备份快照JSON无效'); }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) error(400, '备份快照必须是对象');
             row[key] = JSON.stringify(remapSnapshot(parsed, mapping));
           } else row[key] = value;
         }
@@ -1123,11 +1367,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       return prefix + note;
     };
     let sheets;
-    if ((url.searchParams.get('type') || 'requests') === 'stock') {
+    if (url.searchParams.get('type') === 'issues') {
+      const rows = listIssues(url, user, true);
+      if (rows.length > 5000) error(413, '一次最多导出5000条领用申请，请缩小筛选范围');
+      sheets = [sheet('领用申请', ['申请ID', '状态', '物资编码', '名称', '规格', '单位', '分类', '仓库', '区域', '批号', '有效期',
+        '申请时位置', '当前位置或发放时位置', '领用数量', ...(amount ? ['发放金额（元）'] : []), '用途', '申请人', '申请时间', '处理人', '处理时间', '处理原因'],
+      rows.map(row => [row.id, row.status, row.snapshot.code, row.snapshot.name, row.snapshot.spec, row.snapshot.unit,
+        row.snapshot.categoryName, row.warehouse, row.snapshot.regionName, row.batch, row.expiryDate, row.snapshot.location, row.location,
+        row.qtyM / 1000, ...(amount ? [row.status === 'issued' ? row.amountCents / 100 : null] : []), row.purpose, row.creatorName, row.createdAt, row.processorName, row.processedAt, row.reason]))];
+    } else if (url.searchParams.get('type') === 'stock') {
       const rows = stockRows(url);
-      if (rows.length > 5000) error(413, '一次最多导出5000条库存，请缩小筛选范围');
-      sheets = [sheet('库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '数量', ...(amount ? ['库存总金额（元）'] : [])],
-        rows.map(row => [row.code, row.name, row.spec, row.unit, row.warehouse, row.regionName, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])]))];
+      const batches = stockRows(url, false, true);
+      if (rows.length > 5000 || batches.length > 5000) error(413, '一次最多导出5000条库存或批次，请缩小筛选范围');
+      sheets = [
+        sheet('库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '数量', ...(amount ? ['库存总金额（元）'] : [])],
+          rows.map(row => [row.code, row.name, row.spec, row.unit, row.warehouse, row.regionName, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])])),
+        sheet('批次库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '批号', '有效期', '库存位置', '数量', ...(amount ? ['库存总金额（元）'] : [])],
+          batches.map(row => [row.code, row.name, row.spec, row.unit, row.warehouse, row.regionName, row.batch, row.expiryDate, row.location, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])]))
+      ];
     } else {
       let orders = listRequests(url, user, true);
       const original = url.searchParams.get('version') === 'original';

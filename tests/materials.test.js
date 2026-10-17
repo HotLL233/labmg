@@ -7,6 +7,8 @@ const { inflateRawSync } = require('node:zlib');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const { test } = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
+const createMaterials = require('../src/materials');
 
 const root = path.resolve(__dirname, '..');
 const key = () => crypto.randomUUID();
@@ -609,4 +611,237 @@ test('complete materials backup restores relationships, snapshots, attachments, 
   await target.request('POST', '/api/materials/restore', target.admin, backup, 409);
   assert.deepEqual((await target.request('GET', '/api/materials/stock', targetMaterial)).data.items, afterStock);
   await f.request('POST', '/api/materials/restore', f.admin, backup, 409);
+});
+
+test('stock locations are exact-batch metadata with role permissions, optimistic versions and no balance changes', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: '', expiryDate: '' };
+  for (const batch of ['', 'OTHER']) await f.request('POST', '/api/materials/stock/opening', s.material,
+    { ...identity, batch, quantity: '3', amount: '1.00', requestIdempotencyKey: key() }, 201);
+  const query = '/api/materials/stock/batches?' + new URLSearchParams(identity);
+  const initial = (await f.request('GET', query, ordinary)).data;
+  assert.equal(initial.total, 1); assert.equal(initial.items[0].location, ''); assert.equal(initial.items[0].locationVersion, 0);
+  const update = { ...identity, location: '=Shelf-A/01', version: 0, reason: '建立库存位置' };
+  await f.request('PUT', '/api/materials/stock/location', ordinary, update, 403);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...update, batch: 'UNKNOWN' }, 400);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...update, location: 'x'.repeat(201) }, 400);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...update, reason: '' }, 400);
+  const first = (await f.request('PUT', '/api/materials/stock/location', f.admin, update)).data.location;
+  assert.equal(first.version, 1); assert.equal(first.actorId, f.admin.id);
+  await f.request('PUT', '/api/materials/stock/location', s.material, update, 409);
+  const raced = await Promise.all(['Shelf-B/02', 'Shelf-C/03'].map(location => f.request('PUT', '/api/materials/stock/location', s.material,
+    { ...update, location, version: 1 }, [200, 409])));
+  assert.deepEqual(raced.map(result => result.status).sort(), [200, 409]);
+  const current = (await f.request('GET', query, s.material)).data.items[0];
+  assert.equal(current.locationVersion, 2); assert.equal(current.qtyM, 3000); assert.equal(current.amountCents, 100);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements', s.material)).data.total, 2);
+  const other = (await f.request('GET', '/api/materials/stock/batches?batch=OTHER&expiryDate=', s.material)).data.items[0];
+  assert.equal(other.location, ''); assert.equal(other.locationVersion, 0);
+  const xml = [...workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=stock', s.material)).bytes).values()].join('\n');
+  assert.match(xml, /批次库存/); assert.match(xml, new RegExp(current.location));
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: ['materials.read'] });
+  assert.equal((await f.request('GET', '/api/materials/meta', s.material)).data.capabilities.manageLocation, false);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...update, version: 2 }, 403);
+});
+
+test('material issues retain application snapshots, enforce own-only visibility and authorized state transitions, and export safely', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
+  const exporter = await f.customAccount('ISSUE_EXPORT', ['materials.export']);
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'ISSUE-A', expiryDate: '2030-01-02' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '4', amount: '10', requestIdempotencyKey: key() }, 201);
+  await f.request('PUT', '/api/materials/stock/location', f.admin, { ...identity, location: '=Shelf-before', version: 0, reason: '放置' });
+  const payload = { ...identity, quantity: '1', purpose: '=HYPERLINK("https://example.invalid","own-issue")', requestIdempotencyKey: key() };
+  const issue = (await f.request('POST', '/api/materials/issues', ordinary, payload, 201)).data.issue;
+  assert.equal(issue.canCancel, true); assert.equal(issue.canIssue, false); assert.equal(issue.snapshot.location, '=Shelf-before');
+  assertNoMoney(issue);
+  assert.equal((await f.request('POST', '/api/materials/issues', ordinary, payload)).data.issue.id, issue.id);
+  await f.request('POST', '/api/materials/issues', ordinary, { ...payload, quantity: '2' }, 409);
+  assert.equal((await f.request('GET', '/api/materials/issues', other)).data.total, 0);
+  for (const actor of [s.material, f.admin]) assert.equal((await f.request('GET', '/api/materials/issues', actor)).data.total, 1);
+  await f.request('GET', `/api/materials/issues/${issue.id}`, other, undefined, 403);
+  for (const actor of [ordinary, other, f.admin]) await f.request('POST', `/api/materials/issues/${issue.id}/issue`, actor, { version: 1, requestIdempotencyKey: key() }, 403);
+  await f.request('POST', `/api/materials/issues/${issue.id}/cancel`, s.material, { version: 1, reason: '管理员不能代取消', requestIdempotencyKey: key() }, 403);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...identity, location: 'Shelf-now', version: 1, reason: '移动' });
+  const pending = (await f.request('GET', `/api/materials/issues/${issue.id}`, s.material)).data.issue;
+  assert.equal(pending.snapshot.location, '=Shelf-before'); assert.equal(pending.location, 'Shelf-now'); assert.equal(pending.canIssue, true);
+  const action = { version: 1, requestIdempotencyKey: key() };
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, { ...action, version: 2 }, 409);
+  const issued = (await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action, 201)).data.issue;
+  assert.equal(issued.status, 'issued'); assert.equal(issued.version, 2); assert.equal(issued.amountCents, 250); assert.equal(issued.location, 'Shelf-now');
+  assert.equal((await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action)).data.issue.id, issue.id);
+  await f.request('POST', `/api/materials/issues/${issue.id}/cancel`, ordinary, { version: 2, reason: '已发放', requestIdempotencyKey: key() }, 409);
+  await f.request('POST', `/api/materials/issues/${issue.id}/reject`, s.material, { version: 2, reason: '已发放', requestIdempotencyKey: key() }, 409);
+  await f.request('PUT', '/api/materials/stock/location', f.admin, { ...identity, location: 'Shelf-later', version: 2, reason: '再次移动' });
+  assert.equal((await f.request('GET', `/api/materials/issues/${issue.id}`, s.material)).data.issue.location, 'Shelf-now');
+  const movement = (await f.request('GET', '/api/materials/stock/movements', s.material)).data.items.find(row => row.type === 'issue');
+  assert.equal(movement.issueId, issue.id); assert.equal(movement.qtyM, -1000); assert.equal(movement.amountCents, -250); assert.equal(movement.snapshot.location, 'Shelf-now');
+  for (const [actor, transition, status] of [[ordinary, 'cancel', 'cancelled'], [s.material, 'reject', 'rejected']]) {
+    const next = (await f.request('POST', '/api/materials/issues', ordinary, { ...payload, requestIdempotencyKey: key() }, 201)).data.issue;
+    const body = { version: 1, reason: '申请取消或驳回', requestIdempotencyKey: key() };
+    const result = (await f.request('POST', `/api/materials/issues/${next.id}/${transition}`, actor, body, 201)).data.issue;
+    assert.equal(result.status, status); assert.equal(result.processedBy, actor.id);
+    await f.request('POST', `/api/materials/issues/${next.id}/issue`, s.material, { version: 2, requestIdempotencyKey: key() }, 409);
+  }
+  await f.request('POST', '/api/materials/issues', other, { ...payload, purpose: 'other-private-issue', requestIdempotencyKey: key() }, 201);
+  const own = (await f.request('GET', '/api/materials/issues?q=own-issue&status=issued&pageSize=1', ordinary)).data;
+  assert.equal(own.total, 1); assert.equal(own.items[0].id, issue.id); assertNoMoney(own);
+  await f.request('POST', '/api/materials/issues', exporter, { ...payload, purpose: '+SUM(own-export)', requestIdempotencyKey: key() }, 201);
+  const ownExport = workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=issues', exporter)).bytes);
+  const xml = [...ownExport.values()].join('\n');
+  assert.match(xml, /own-export/); assert.doesNotMatch(xml, /other-private-issue|own-issue|金额|amountCents/);
+  for (const [name, text] of ownExport) if (name.startsWith('xl/worksheets/')) assert.doesNotMatch(text, /<f(?:\s|>)/);
+  const adminXml = [...workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=issues&status=issued', s.material)).bytes).values()].join('\n');
+  assert.match(adminXml, /HYPERLINK/); assert.match(adminXml, /Shelf-now/); assert.doesNotMatch(adminXml, /other-private-issue/);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: ['materials.read'] });
+  assert.equal((await f.request('GET', '/api/materials/meta', s.material)).data.capabilities.issueStock, false);
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action, 403);
+});
+
+test('issue processing serializes concurrent unreserved applications, allocates current batch cost and depletes all remaining cents', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'COST', expiryDate: '' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '3', amount: '1.00', requestIdempotencyKey: key() }, 201);
+  const apply = async quantity => (await f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity, purpose: '成本分摊', requestIdempotencyKey: key() }, 201)).data.issue;
+  const first = await apply('1'), full = await apply('3');
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.items[0].qtyM, 3000, 'applications do not reserve stock');
+  const firstBody = { version: 1, requestIdempotencyKey: key() };
+  const same = await Promise.all([0, 1].map(() => f.request('POST', `/api/materials/issues/${first.id}/issue`, s.material, firstBody, [200, 201])));
+  assert.deepEqual(same.map(result => result.status).sort(), [200, 201]);
+  assert.ok(same.every(result => result.data.issue.amountCents === 33));
+  await f.request('POST', `/api/materials/issues/${full.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 409);
+  const a = await apply('2'), b = await apply('2');
+  const competed = await Promise.all([a, b].map(issue => f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material,
+    { version: 1, requestIdempotencyKey: key() }, [201, 409])));
+  assert.deepEqual(competed.map(result => result.status).sort(), [201, 409]);
+  assert.equal(competed.find(result => result.status === 201).data.issue.amountCents, 67);
+  const zero = (await f.request('GET', '/api/materials/stock/batches?batch=COST&expiryDate=', s.material)).data.items[0];
+  assert.equal(zero.qtyM, 0); assert.equal(zero.amountCents, 0);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements', s.material)).data.items.filter(row => row.type === 'issue').length, 2);
+  const gift = { ...identity, batch: 'GIFT' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...gift, quantity: '2', amount: '0', zeroAmountReason: '赠品', requestIdempotencyKey: key() }, 201);
+  const free = (await f.request('POST', '/api/materials/issues', ordinary, { ...gift, quantity: '1', purpose: '赠品领用', requestIdempotencyKey: key() }, 201)).data.issue;
+  assert.equal((await f.request('POST', `/api/materials/issues/${free.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue.amountCents, 0);
+  const changed = { ...identity, batch: 'CURRENT' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...changed, quantity: '2', amount: '2.00', requestIdempotencyKey: key() }, 201);
+  const pending = (await f.request('POST', '/api/materials/issues', ordinary, { ...changed, quantity: '1', purpose: '按发放时成本', requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...changed, direction: 'increase', quantity: '1', amount: '4.00', reason: '追加成本', requestIdempotencyKey: key() }, 201);
+  assert.equal((await f.request('POST', `/api/materials/issues/${pending.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue.amountCents, 200);
+});
+
+test('issue cost calculation preserves safe integers when multiplication exceeds Number precision and rounds half up', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'BIGINT', expiryDate: '' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '9007199254740.991', amount: '90071992547409.90', requestIdempotencyKey: key() }, 201);
+  const q = 3002399751580331n, amount = 9007199254740990n, total = 9007199254740991n;
+  const issue = (await f.request('POST', '/api/materials/issues', s.material, { ...identity, quantity: '3002399751580.331', purpose: '安全整数成本', requestIdempotencyKey: key() }, 201)).data.issue;
+  const issued = (await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue;
+  assert.equal(issued.amountCents, Number((amount * q + total / 2n) / total));
+  const half = { ...identity, regionId: s.otherRegion.id, batch: 'HALF' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...half, quantity: '2', amount: '0.01', requestIdempotencyKey: key() }, 201);
+  const halfIssue = (await f.request('POST', '/api/materials/issues', s.material, { ...half, quantity: '1', purpose: '半入', requestIdempotencyKey: key() }, 201)).data.issue;
+  assert.equal((await f.request('POST', `/api/materials/issues/${halfIssue.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue.amountCents, 1);
+});
+
+test('materials upgrade expands the stock CHECK atomically while retaining rows, foreign keys, indices, triggers and sequence high water', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT); INSERT INTO users VALUES(1,\'upgrade-user\',\'Upgrade user\')');
+    const options = { db, body: async () => ({}), send() {}, fail: (status, message) => Object.assign(new Error(message), { status }),
+      log() {}, hasPermission: () => true, tokenUser: () => null, uploads: root };
+    createMaterials(options);
+    const schema = db.prepare("SELECT sql FROM sqlite_master WHERE name='material_stock_movements'").get().sql;
+    db.exec('DROP TABLE material_stock_movements');
+    db.exec(schema.replace(",'issue'", ''));
+    db.exec(`INSERT INTO material_categories(id,name,created_by) VALUES(1,'Category',1);
+      INSERT INTO material_regions(id,name,created_by) VALUES(1,'Region',1);
+      INSERT INTO material_catalog(id,code,name,spec,unit,category_id,created_by) VALUES(1,'UP','Upgrade','1','piece',1,1);
+      CREATE INDEX material_upgrade_extra ON material_stock_movements(batch,expiry_date);
+      CREATE TRIGGER material_upgrade_trigger AFTER INSERT ON material_stock_movements BEGIN SELECT 1; END;`);
+    const snapshot = JSON.stringify({ catalogId: 1, regionId: 1, warehouse: 'MAIN', code: 'UP', name: 'Upgrade', spec: '1', unit: 'piece' });
+    const insert = db.prepare(`INSERT INTO material_stock_movements(id,type,catalog_id,region_id,warehouse,qty_m,amount_cents,source_key,snapshot,date,actor_id)
+      VALUES(?,'opening',1,1,'MAIN',1000,100,?,?,'2026-10-17',1)`);
+    insert.run(1, 'opening:kept', snapshot); insert.run(100, 'opening:deleted', snapshot);
+    db.exec('DELETE FROM material_stock_movements WHERE id=100');
+    const before = db.prepare('SELECT * FROM material_stock_movements').all();
+    assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+    createMaterials(options);
+    assert.deepEqual(db.prepare('SELECT * FROM material_stock_movements').all(), before);
+    assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+    assert.match(db.prepare("SELECT sql FROM sqlite_master WHERE name='material_stock_movements'").get().sql, /'issue'/);
+    for (const name of ['material_stock_key', 'material_upgrade_extra', 'material_upgrade_trigger']) assert.ok(db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(name));
+    assert.equal(db.prepare("SELECT seq FROM sqlite_sequence WHERE name='material_stock_movements'").get().seq, 100);
+    const added = db.prepare(`INSERT INTO material_stock_movements(type,catalog_id,region_id,warehouse,qty_m,amount_cents,source_key,snapshot,date,actor_id)
+      VALUES('issue',1,1,'MAIN',-1000,-100,'issue:1',?,'2026-10-17',1)`).run(snapshot);
+    assert.equal(added.lastInsertRowid, 101);
+    createMaterials(options);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM material_stock_movements').get().n, 2);
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+  } finally { db.close(); }
+});
+
+test('schema 2 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'BACKUP-ISSUE', expiryDate: '2030-05-06' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '4', amount: '1.01', requestIdempotencyKey: key() }, 201);
+  const legacy = structuredClone((await f.request('GET', '/api/materials/backup', f.admin)).data);
+  legacy.schemaVersion = 1; delete legacy.data.material_stock_locations; delete legacy.data.material_issues;
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...identity, location: 'Backup A', version: 0, reason: '备份位置' });
+  const applyBody = { ...identity, quantity: '1', purpose: '备份发放', requestIdempotencyKey: key() };
+  const issue = (await f.request('POST', '/api/materials/issues', ordinary, applyBody, 201)).data.issue;
+  await f.request('PUT', '/api/materials/stock/location', f.admin, { ...identity, location: 'Backup B', version: 1, reason: '发放前移动' });
+  const issueBody = { version: 1, requestIdempotencyKey: key() };
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, issueBody, 201);
+  const pending = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, quantity: '2', requestIdempotencyKey: key() }, 201)).data.issue;
+  const rejected = (await f.request('POST', '/api/materials/issues', other, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${rejected.id}/reject`, s.material, { version: 1, reason: '备份驳回', requestIdempotencyKey: key() }, 201);
+  const cancelled = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${cancelled.id}/cancel`, ordinary, { version: 1, reason: '备份取消', requestIdempotencyKey: key() }, 201);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.equal(backup.schemaVersion, 2); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
+  const target = await fixture(t);
+  await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
+  assert.notEqual(targetMaterial.id, s.material.id);
+  const changes = [
+    payload => { payload.data.material_stock_movements = payload.data.material_stock_movements.filter(row => row.type !== 'issue'); },
+    payload => { payload.data.material_stock_movements.find(row => row.type === 'issue').amount_cents -= 1; },
+    payload => { payload.data.material_stock_movements.find(row => row.type === 'issue').qty_m -= 1; },
+    payload => { payload.data.material_stock_movements.find(row => row.type === 'issue').source_key = 'issue:999'; },
+    payload => { payload.data.material_issues.find(row => row.id === pending.id).status = 'issued'; },
+    payload => { payload.data.material_issues.find(row => row.id === issue.id).version = 1; },
+    payload => { payload.data.material_issues.find(row => row.id === issue.id).processed_by = ordinary.id; },
+    payload => { payload.data.material_issues.find(row => row.id === cancelled.id).processed_by = s.material.id; },
+    payload => { const row = payload.data.material_issues[0]; row.snapshot = JSON.stringify({ ...JSON.parse(row.snapshot), batch: 'OTHER' }); },
+    payload => { payload.data.material_stock_locations[0].batch = 'MISSING'; },
+    payload => { payload.data.material_stock_locations[0].location = 'x'.repeat(201); },
+    payload => { payload.data.material_issues[0].snapshot = 'null'; },
+    payload => { payload.data.material_stock_movements[0].qty_m = 1; },
+    payload => { const row = payload.data.material_issues.find(row => row.id === issue.id); row.amount_cents += 1; payload.data.material_stock_movements.find(row => row.type === 'issue').amount_cents -= 1; }
+  ];
+  for (const change of changes) {
+    const damaged = structuredClone(backup); change(damaged);
+    await target.request('POST', '/api/materials/restore', target.admin, damaged, 400);
+    assert.equal((await target.request('GET', '/api/materials/issues', targetMaterial)).data.total, 0);
+    assert.equal((await target.request('GET', '/api/materials/stock', targetMaterial)).data.total, 0);
+  }
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  const restored = (await target.request('GET', `/api/materials/issues/${issue.id}`, targetMaterial)).data.issue;
+  assert.equal(restored.createdBy, targetOrdinary.id); assert.equal(restored.snapshot.createdBy, targetOrdinary.id); assert.equal(restored.processedBy, targetMaterial.id);
+  assert.equal(restored.snapshot.location, 'Backup A'); assert.equal(restored.location, 'Backup B'); assert.equal(restored.amountCents, 25);
+  const location = (await target.request('GET', '/api/materials/stock/batches', targetMaterial)).data.items[0];
+  assert.equal(location.location, 'Backup B'); assert.equal(location.locationVersion, 2); assert.equal(location.qtyM, 3000); assert.equal(location.amountCents, 76);
+  const replay = (await target.request('POST', `/api/materials/issues/${issue.id}/issue`, targetMaterial, issueBody)).data.issue;
+  assert.equal(replay.id, issue.id); assert.equal(replay.createdBy, targetOrdinary.id); assert.equal(replay.processedBy, targetMaterial.id);
+  await target.request('POST', '/api/materials/issues', targetOrdinary, applyBody);
+  assert.equal((await target.request('GET', '/api/materials/issues', targetMaterial)).data.total, 4);
+  const oldTarget = await fixture(t); await oldTarget.account('TESTER'); await oldTarget.account('FINANCE'); const oldMaterial = await oldTarget.account('MATERIAL');
+  const mixedSchema = structuredClone(legacy); mixedSchema.data.material_issues = [];
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, mixedSchema, 400);
+  const missingColumn = structuredClone(legacy); delete missingColumn.data.material_stock_movements[0].batch;
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, missingColumn, 400);
+  const extraColumn = structuredClone(legacy); extraColumn.data.material_stock_movements[0].issue_id = null;
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, extraColumn, 400);
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, legacy);
+  assert.equal((await oldTarget.request('GET', '/api/materials/issues', oldMaterial)).data.total, 0);
+  const oldStock = (await oldTarget.request('GET', '/api/materials/stock/batches', oldMaterial)).data.items[0];
+  assert.equal(oldStock.qtyM, 4000); assert.equal(oldStock.amountCents, 101); assert.equal(oldStock.location, ''); assert.equal(oldStock.locationVersion, 0);
 });

@@ -65,6 +65,7 @@ class Element {
     this._html += value;
   }
   querySelectorAll(selector) {
+    if (selector.includes(',')) return [...new Set(selector.split(',').flatMap(part => this.querySelectorAll(part.trim())))];
     const matches = (node, simple) => {
       if (simple.endsWith(':checked')) return node.checked && matches(node, simple.slice(0, -8));
       const attr = simple.match(/^\[([^=\]]+)(?:=["']?([^\]"']*)["']?)?\]$/);
@@ -131,7 +132,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
   const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
-    materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [],
+    materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [], materialLists: {}, materialResponse: null,
     materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
@@ -139,6 +140,10 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     const url = new URL(input, 'http://localhost'), method = options.method || 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
     requests.push({ url, method, body });
+    if (url.pathname.startsWith('/api/materials/') && state.materialResponse) {
+      const result = await state.materialResponse({ url, method, body });
+      if (result !== undefined) return response(result.body, result.status || 200);
+    }
     if (url.pathname === '/api/auth/me') return response(state.auth);
     if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/setup') {
       if (state.authHold) {
@@ -163,7 +168,10 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
-    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog'].includes(url.pathname)) return response({ items: [], total: 0, page: 1, pageSize: 200 });
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues'].includes(url.pathname)) {
+      const entries = state.materialLists[url.pathname.slice('/api/materials'.length)] || [];
+      return response({ items: entries, total: entries.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
+    }
     if (url.pathname === '/api/records' && method === 'GET') {
       const module = url.searchParams.get('module'), q = url.searchParams.get('q') || '';
       const result = response(records.filter(row => row.module === module && row.title.includes(q)));
@@ -577,4 +585,161 @@ test('new material can be submitted before catalog matching, with accounting blo
   assert.ok(app.$('#mw-fields [name=catalogId]'));
   assert.ok(app.$('#mw-fields [name=reason]'));
   assert.equal(app.requests.some(entry => entry.method === 'POST' || entry.method === 'PATCH'), false);
+});
+
+async function materialApp(manager = true) {
+  const app = await browser({ id: 1, role: manager ? 'MATERIAL' : 'USER', permissions: [] });
+  app.state.materialCapabilities = { createRequest: true, createIssue: true, viewAmount: manager, manageLocation: manager, issueStock: manager, adjustStock: manager, submitRequest: manager };
+  const row = { catalogId: 5, code: 'MAT-5', name: '合成物资', spec: '测试规格', unit: '件', categoryId: 1, categoryName: '合成分类', regionId: 2, regionName: '合成区域', warehouse: 'MAIN', batch: '', expiryDate: '', location: '', locationVersion: 1, qtyM: 10000, amountCents: 1000, lastMovementAt: '2026-10-17T01:02:03Z' };
+  Object.assign(app.state.materialLists, { '/categories': [{ id: 1, name: row.categoryName }], '/regions': [{ id: 2, name: row.regionName }], '/catalog': [row], '/stock': [row], '/stock/batches': [row] });
+  const item = { ...row, id: 11, requestId: 101, qtyM: 10000, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 10000, receiptStatus: 'pending', version: 1, canEdit: true };
+  const request = { ...app.state.materialRequests[0], status: 'draft', version: 1, canEditHeader: true, canAddItem: true, canSubmit: manager, items: [item] };
+  app.state.materialDetails[101] = request;
+  const click = node => app.document.listeners.click({ target: { closest: () => typeof node === 'string' ? app.$(node) : node } });
+  const fill = values => { for (const [name, value] of Object.entries(values)) app.$(`#mw-fields [name=${name}]`).value = value; };
+  const submit = () => app.$('#mw-form').listeners.submit({ preventDefault() {}, target: app.$('#mw-form') });
+  await app.run("go('materials')");
+  return { app, row, item, request, click, fill, submit };
+}
+
+test('batch balances preserve exact empty or quoted batch filters through movement pagination and reject stale row actions', async () => {
+  const { app, row, click } = await materialApp();
+  const quoted = { ...row, batch: 'LOT"<&', location: '<img src=x onerror=alert(1)>', expiryDate: '2027-01-01' };
+  app.state.materialResponse = ({ url, method }) => method === 'GET' && ['/api/materials/stock/batches', '/api/materials/stock/movements'].includes(url.pathname)
+    ? { body: { items: url.pathname.endsWith('/batches') ? [row, quoted] : [], total: 101, page: Number(url.searchParams.get('page')), pageSize: 50 } } : undefined;
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  await click('[data-mw=batches]');
+  assert.equal(app.$('#mw-view img'), null);
+  assert.match(app.$('#mw-view-body').textContent, /存放位置/);
+  const stale = app.$('[data-mw=location]');
+  await click(app.document.querySelectorAll('[data-mw=batches]').find(node => node.dataset.historyPage === '2'));
+  assert.equal(app.requests.at(-1).url.searchParams.get('page'), '2');
+  await click(stale);
+  assert.match(app.$('#mw-status').textContent, /批次列表已变化/);
+  await click(app.document.querySelectorAll('[data-mw=batch-movements]')[0]);
+  let query = app.requests.at(-1).url.searchParams;
+  assert.equal(query.has('batch'), true); assert.equal(query.get('batch'), '');
+  assert.equal(query.has('expiryDate'), true); assert.equal(query.get('expiryDate'), '');
+  await click(app.document.querySelectorAll('[data-mw=movements]').find(node => node.dataset.historyPage === '2'));
+  query = app.requests.at(-1).url.searchParams;
+  assert.equal(query.get('page'), '2'); assert.equal(query.get('batch'), ''); assert.equal(query.get('expiryDate'), '');
+  await click('[data-mw=batches]');
+  await click(app.document.querySelectorAll('[data-mw=batch-movements]')[1]);
+  assert.equal(app.requests.at(-1).url.searchParams.get('batch'), quoted.batch);
+  assert.equal(app.requests.at(-1).url.searchParams.get('expiryDate'), quoted.expiryDate);
+});
+
+test('ordinary users request stock once, retry a lost response with the same body and key, then cancel their pending request', async () => {
+  const { app, row, click, fill, submit } = await materialApp(false);
+  const issue = { ...row, id: 21, version: 1, qtyM: 2000, amountCents: 0, snapshot: row, purpose: '合成领用用途', status: 'pending', creatorName: '申请人', canCancel: true, canIssue: false, canReject: false };
+  const sends = []; let release;
+  app.state.materialResponse = async ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/issues' && method === 'POST') {
+      sends.push(body);
+      if (sends.length === 1) { await new Promise(resolve => { release = resolve; }); throw Error('synthetic lost response'); }
+      app.state.materialLists['/issues'] = [issue]; return { body: { issue }, status: 200 };
+    }
+    if (url.pathname === '/api/materials/issues/21' && method === 'GET') return { body: { issue } };
+    if (url.pathname === '/api/materials/issues/21/cancel') { assert.equal(body.version, 1); assert.equal(body.reason, '不再需要'); assert.ok(body.requestIdempotencyKey); issue.status = 'cancelled'; issue.canCancel = false; return { body: { issue } }; }
+  };
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]');
+  assert.equal(app.$('[data-mw=location]'), null);
+  await click('[data-mw=issue-create]'); fill({ quantity: '2', purpose: issue.purpose });
+  assert.equal(app.$('#mw-fields [name=amount]'), null);
+  assert.match(app.$('#mw-intro').textContent, /申请不预占库存/);
+  const first = submit(); await new Promise(setImmediate); await submit(); assert.equal(sends.length, 1);
+  release(); await first;
+  assert.equal(app.$('#mw-fields [name=quantity]').disabled, true);
+  assert.equal(app.$('#mw-save').textContent, '按原内容重试');
+  await click('[data-mw=cancel]'); assert.equal(app.$('#mw-dialog').open, true);
+  await submit(); assert.equal(sends.length, 2); assert.deepEqual(sends[1], sends[0]);
+  assert.equal('amount' in sends[0], false); assert.ok(sends[0].requestIdempotencyKey.length >= 8);
+  assert.equal(app.$('[data-mw=issue-stock]'), null); assert.equal(app.$('[data-mw=issue-reject]'), null);
+  assert.match(app.$('#page').textContent, /未记账/);
+  await click('[data-mw=issue-cancel]'); fill({ reason: '不再需要' }); await submit();
+  assert.match(app.$('#page').textContent, /已取消/); assert.equal(app.$('[data-mw=issue-cancel]'), null);
+});
+
+test('location conflicts retain typed values, reload the exact batch version and permit clearing the location', async () => {
+  const { app, row, click, fill, submit } = await materialApp();
+  const writes = [];
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname !== '/api/materials/stock/location' || method !== 'PUT') return;
+    writes.push(body);
+    if (writes.length === 1) { row.location = '另一人设置的位置'; row.locationVersion = 2; return { body: { error: '位置已变化' }, status: 409 }; }
+    assert.equal(body.version, row.locationVersion); row.location = body.location; row.locationVersion++;
+    return { body: { location: { ...row, version: row.locationVersion } } };
+  };
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]'); await click('[data-mw=location]');
+  fill({ location: '二楼柜 A', reason: '合成位置修改原因' }); await submit();
+  assert.equal(app.$('[data-mw=reload-form]').hidden, false); await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-fields [name=location]').value, '二楼柜 A'); assert.equal(app.$('#mw-fields [name=reason]').value, '合成位置修改原因');
+  assert.match(app.$('#mw-version').textContent, /位置版本 2.*另一人设置的位置/);
+  const reload = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1);
+  assert.equal(reload.url.searchParams.has('batch'), true); assert.equal(reload.url.searchParams.get('batch'), '');
+  await submit(); assert.equal(writes[1].version, 2); assert.match(app.$('#mw-view-body').textContent, /二楼柜 A/);
+  await click('[data-mw=location]'); fill({ location: '', reason: '清除旧位置' }); await submit();
+  assert.equal(writes[2].location, ''); assert.equal(writes[2].reason, '清除旧位置');
+});
+
+test('material issuers confirm stock without entering money and cannot process a stale issue after reloading', async () => {
+  const { app, row, click, fill, submit } = await materialApp();
+  const issue = { ...row, id: 31, version: 1, qtyM: 1000, snapshot: { ...row, location: '旧位置' }, location: '发放时当前位置', purpose: '合成用途', status: 'pending', amountCents: 0, canIssue: true, canReject: true, canCancel: false };
+  app.state.materialLists['/issues'] = [issue]; const writes = [];
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/issues/31' && method === 'GET') return { body: { issue } };
+    if (url.pathname === '/api/materials/issues/31/issue') {
+      writes.push(body); issue.version = 2; issue.status = 'issued'; issue.amountCents = 123; issue.location = '冲突后的最新位置'; issue.canIssue = issue.canReject = false;
+      return { body: { error: '另一人已发放' }, status: 409 };
+    }
+  };
+  await click({ dataset: { mw: 'page', page: 'issues' } }); assert.match(app.$('#page').textContent, /未记账/);
+  await click('[data-mw=issue-stock]'); assert.match(app.$('#mw-intro').textContent, /发放时当前位置/);
+  assert.equal(app.$('#mw-fields [name=amount]'), null); assert.equal(app.$('#mw-fields [name=reason]'), null); await submit();
+  assert.equal(writes.length, 1); assert.equal(writes[0].version, 1); assert.ok(writes[0].requestIdempotencyKey); assert.equal(Object.hasOwn(writes[0], 'reason'), false);
+  await click('[data-mw=reload-form]'); assert.equal(app.$('#mw-save').disabled, true);
+  assert.match(app.$('#mw-version').textContent, /领用单版本 2.*冲突后的最新位置/);
+  await submit(); assert.equal(writes.length, 1);
+  await click('[data-mw=cancel]'); await click({ dataset: { mw: 'refresh' } });
+  assert.match(app.$('#page').textContent, /¥1\.23/); assert.equal(app.$('[data-mw=issue-stock]'), null);
+});
+
+test('request conflict reload adds a submitted revision reason, retains inputs and enforces new identity locks and permissions', async () => {
+  const { app, request, item, click, fill, submit } = await materialApp(); let writes = 0;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname !== '/api/materials/requests/101/items/11' || method !== 'PATCH') return;
+    writes++;
+    if (writes === 1) { request.status = 'submitted'; request.version = 2; request.revision = 1; item.version = 2; item.identityLocked = true; return { body: { error: '已提交并验收' }, status: 409 }; }
+    assert.equal(body.reason, '保留输入后修订'); assert.equal(body.purpose, '保留的用途'); assert.equal(body.catalogId, 5); assert.equal(body.regionId, 2); assert.equal(body.requestVersion, 2);
+    return { body: { request } };
+  };
+  await click('[data-mw=request]'); await click('[data-mw=edit-item]'); fill({ purpose: '保留的用途' }); await submit();
+  await click('[data-mw=reload-form]'); assert.ok(app.$('#mw-fields [name=reason]'));
+  assert.equal(app.$('#mw-fields [name=purpose]').value, '保留的用途'); assert.equal(app.$('#mw-fields [name=catalogId]').disabled, true);
+  assert.equal(app.$('#mw-fields [name=name]').readOnly, true); fill({ reason: '保留输入后修订' }); await submit(); assert.equal(writes, 2);
+  await click('[data-mw=edit-item]'); fill({ purpose: '失权时保留的用途', reason: '权限变化时的修订原因' });
+  app.state.materialResponse = ({ url, method }) => {
+    if (url.pathname === '/api/materials/requests/101/items/11' && method === 'PATCH') { writes++; item.canEdit = false; request.version++; return { body: { error: '权限已变化' }, status: 409 }; }
+  };
+  await submit(); await click('[data-mw=reload-form]'); assert.equal(app.$('#mw-save').disabled, true);
+  assert.equal(app.$('#mw-fields [name=purpose]').value, '失权时保留的用途'); await submit(); assert.equal(writes, 3);
+});
+
+test('zero-value stock adjustments require a reason and receipt history shows business dates and all reasons', async () => {
+  const { app, row, request, click, fill, submit } = await materialApp(); let adjustment;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/stock/adjustments' && method === 'POST') { adjustment = body; return { body: { movement: { id: 1 } } }; }
+  };
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=adjustment]');
+  fill({ catalogId: '5', code: row.code, name: row.name, spec: row.spec, unit: row.unit, categoryId: '1', regionId: '2', warehouse: 'MAIN', quantity: '2', amount: '0' });
+  await submit(); assert.equal(adjustment, undefined); assert.match(app.$('#mw-error').textContent, /调整原因不能为空/);
+  fill({ reason: '零值赠品入账' }); await submit(); assert.equal(adjustment.amount, '0'); assert.equal(adjustment.reason, '零值赠品入账');
+  app.state.materialLists['/receipts'] = [{ id: 51, type: 'acceptance', requestRevision: 1, snapshot: row, qtyM: 1000, rejectedQtyM: 1000, closedQtyM: 0, amountCents: 0, zeroAmountReason: '免费样品原因', rejectedReason: '破损拒收原因', date: '2026-09-01', createdAt: '2026-10-17T01:02:03Z' }];
+  request.status = 'submitted';
+  await click({ dataset: { mw: 'events', request: '101', item: '11' } });
+  const history = app.$('#mw-view-body').textContent;
+  assert.match(history, /业务日期 2026-09-01/); assert.match(history, /录入 2026-10-17 01:02:03/);
+  assert.match(history, /零金额原因：免费样品原因/); assert.match(history, /拒收原因：破损拒收原因/);
+  const ordinary = await materialApp(false); await ordinary.click('[data-mw=request]');
+  assert.match(ordinary.app.$('#page').textContent, /MATERIAL.*提交申报.*ADMIN/);
 });
