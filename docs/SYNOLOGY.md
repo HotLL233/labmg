@@ -50,7 +50,7 @@ docker compose logs --tail=100 labos-init labos
 
 ## 已有目录与旧版升级
 
-已有数据时先保留原 YML、`.env`、数据路径和 UID/GID，再做停服备份。rc.5 兼容显式指定的宿主机绑定目录；在配套新版 YML 的 `.env` 中更新镜像版本，同时保留原来的真实路径，例如：
+已有数据时先保留原 YML、`.env`、数据路径和 UID/GID，再做停服备份。0.3.0 继续兼容显式指定的宿主机绑定目录；在配套新版 YML 的 `.env` 中更新镜像版本，同时保留原来的真实路径，例如：
 
 ```dotenv
 LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.0
@@ -62,7 +62,7 @@ LABOS_DATA_DIR=/volume1/docker/labos/runtime/0.2.0-rc.4
 
 **不能用新版空环境模板覆盖已有部署配置。** 删除 `LABOS_DATA_DIR` 会切换到默认新卷，旧数据不会自动出现在里面。若升级后意外出现“首次设置管理员”，先停止应用并检查挂载源，不要把新空库当作旧库继续录入。
 
-rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while interpolating`；rc.4 改为网页首次设置。升级到 rc.5 应同时使用配套 YML 和 rc.5 镜像，不能只改其中一个：rc.4 镜像没有本版目录初始化入口。已有账号不因升级重新开放初始化或重置密码。
+rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while interpolating`；rc.4 改为网页首次设置。升级到 0.3.0 应同时使用配套 YML 和 0.3.0 镜像，不能只改其中一个：rc.4 镜像没有本版目录初始化入口。已有账号不因升级重新开放初始化或重置密码。
 
 `.env` 应与 YML 位于同一项目目录，真实文件名不能仍为 `env.example` 或 `.env.txt`。排错可用 `docker compose config --quiet`，只分享错误文字，不分享包含敏感信息的完整配置。
 
@@ -71,14 +71,14 @@ rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while
 截图中的 `Bind mount failed: '/volume1/docker/var/docker/0.2.0-rc.4' does not exist` 表示容器尚未启动，宿主机没有该挂载源。这通常来自 rc.4 相对路径 `../var/docker/0.2.0-rc.4`；实际解析位置取决于项目目录，不一定是预期的 `/volume1/docker/labos/runtime/`。
 
 - rc.4 临时处理：在 NAS 创建报错所指的准确目录，并使实际应用 UID/GID 可写，或将 `LABOS_DATA_DIR` 改为已准备好的绝对目录。对首次部署的空目录，可由 NAS 管理员执行 `sudo mkdir -p /volume1/docker/var/docker/0.2.0-rc.4`，再对这个目录设置正确属主；不要对已有业务目录盲目递归改属主或开放 777。
-- rc.5 默认处理：首次部署使用配套新 YML，不设置 `LABOS_DATA_DIR`，由 Docker 创建本版命名卷，初始化服务设置目录权限。它不依赖上述宿主机路径，不需要手工创建数据目录。
+- rc.5 及后续版本默认处理：首次部署使用配套新 YML，不设置 `LABOS_DATA_DIR`，由 Docker 创建本版命名卷，初始化服务设置目录权限。它不依赖上述宿主机路径，不需要手工创建数据目录。
 - 已有数据继续使用 bind 时：保留真实目录，先确认目录存在、旧数据及权限正确；切换默认空卷不是迁移方案。
 
-若 rc.5 仍显示相同旧路径，检查是否还使用旧 YML，或 `.env` 中仍保留该 `LABOS_DATA_DIR`。
+若本版仍显示相同旧路径，检查是否还使用旧 YML，或 `.env` 中仍保留该 `LABOS_DATA_DIR`。
 
 ## 离线导入与慢拉取
 
-若 NAS 拉取 `ghcr.io` 慢，可使用构建电脑上已经生成的同版本 TAR，经局域网传到 NAS，避免再次公网下载。产物位于构建电脑的 `artifacts/releases/<version>/`，不随 Git 克隆提供；rc.5 文件须以实际完成的构建及 Release 为准。
+若 NAS 拉取 `ghcr.io` 慢，可使用构建电脑上已经生成的同版本 TAR，经局域网传到 NAS，避免再次公网下载。产物位于构建电脑的 `artifacts/releases/<version>/`，不随 Git 克隆提供；0.3.0 文件须以实际完成的构建及 Release 为准。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -108,7 +108,7 @@ LABOS_IMAGE=labos:0.3.0
 
 需要用户自己的 ACR/TCR 等目标仓库，先准备域名、命名空间及仓库推送权限。当前没有配置目标地址或凭据，下面是操作方法，不表示已完成同步。目标仓库须支持多架构索引；拟使用的 `0.3.0-amd64`、`0.3.0-arm64`、`0.3.0` 三个标签均须未占用，已有标签先核对，不覆盖。
 
-在持有两份已核验 rc.5 TAR 的开发电脑上使用 **PowerShell 7**。替换占位值，在仓库控制台确认三个标签未使用，再执行；每个 Docker 命令失败都会停止后续步骤。`docker login` 交互输入凭据，不把密码写进命令、文档或 Git：
+在持有两份已核验 0.3.0 TAR 的开发电脑上使用 **PowerShell 7**。替换占位值，在仓库控制台确认三个标签未使用，再执行；每个 Docker 命令失败都会停止后续步骤。`docker login` 交互输入凭据，不把密码写进命令、文档或 Git：
 
 ```powershell
 $registryHost = '<国内仓库域名>'
@@ -185,4 +185,4 @@ ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。�
 
 推荐用配套项目 YML；单独从 GUI 创建一个应用容器不会执行 `labos-init`，不能自动获得同样的目录准备流程。自行管理容器时须另行准备存储及 UID/GID，内部端口保持 3000、运行目录保持 `/var/lib/labos`。应用镜像默认用户为非 root `node`，初始化服务的 root 权限仅用于准备挂载目录，不开放 Web 服务。
 
-本项目仍是候选版；本机 Docker 验证不能代替实际群晖、浏览器、权限、备份恢复和约 30 人混合负载验收。
+0.3.0 的实际验证范围见[版本说明](CHANGELOG.md)；本机验证结果不代表目标 NAS 的性能或完整灾备已经验收。

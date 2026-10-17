@@ -167,3 +167,14 @@
 - 真实Edge四角色、局域网HTTP非安全上下文、Excel下载、提交后修订与只读、金额裁剪、批次、刷新及服务重启持久化检查通过。手机390/320px无文档溢出，截图已目视；正式发布结果后续追加，不回写冻结产物。
 
 - 真实Edge最终22项断言通过，补齐备份中心完整物资JSON下载与非空库恢复409拒绝，未出现脚本异常；最终报告browser-report.json及截图在本版validation缓存。
+
+## 2026-10-17：0.3.0 冻结与正式镜像交付
+
+- 源码提交 `5012a2cde090c40eadbcab9ee3099db011691ded`，功能分支与 develop 已同步，标签 `v0.3.0` 固定该提交。源码 ZIP 大小 241087 字节、SHA-256 `155f4a3022e913a323b6749eef3daed890aeb95a8fb608b9908778c139c1036e`，sourceSha256 为 `2b5196ff8950d676241f5af58d15150841feeb2accceca7510729ce58f4220dd`。
+- GitHub 推送曾遇 HTTP/2 连接重置，使用单次 `git -c http.version=HTTP/1.1` 完成同步，未修改全局网络设置。Actions `38999734421` 成功构建并推送正式 `ghcr.io/hotll233/labmg:0.3.0`；从成功运行原始日志独立取得多架构索引 `sha256:32e3341f2ea4d10fc55b3b3f1a42cf783e9299d806e15176155f23970d9d419f`。
+- 空 Docker 配置实际匿名拉取 amd64/arm64，逐级核验索引、平台 manifest、config 的原始摘要/大小及 OCI 源码/版本标签。冻结 ZIP 全部条目、生成的首次依赖安装入口、配套 YML 与测试字节核验通过，正式 Compose 完整专项通过，隔离项目及卷清理通过。报告 `artifacts/cache/0.3.0/ghcr-anonymous-verification.json`。
+- 正式离线包直接导出上述已核验公开镜像，不使用临时检查镜像或重新构建。amd64 TAR 82279936 字节、SHA-256 `a4b9e62e843201f6c59c80ee1079d9fa6c5a8b92b77fb8f839eaedd9893d3319`；arm64 TAR 82148864 字节、SHA-256 `674c7c76d33e7ed5efa5f36ce8a71adf342cabb9453fbc6630f5fafefe352b65`。两份 TAR 各自加载、平台/提交核验及冻结 Compose 专项通过，ARM64 为本机模拟；覆盖正式物资链、Linux XLSX、重建后库存数量/金额保留、初始化与符号链接保护，以及项目/卷清理。
+- 十件正式文件及九条校验位于 `artifacts/releases/0.3.0/`；导出辅助脚本与报告只在对应 cache。报告 `ghcr-offline-export-ghcr-export-WNCvd6.json` 为 passed。已冻结 ZIP/TAR 不因后续文档更正而重打，旧镜像、标签和版本产物保留。
+- 冻结后核对交付文档，更正当前部署中遗留的旧版镜像措辞，将方案中的“待实现”明确标为实施前历史，并按代码补齐 Excel 的实际筛选范围及验收从原单导出规则。九份 Markdown 的 28 个相对链接有效，未改业务源码；发布附件文档保留源码冻结快照，最新步骤见 develop 文档。
+- 仍未在实际群晖、国内镜像仓库或长期负载场景验收，也未进行完整停服灾备演练；本轮所有运行验证使用隔离副本，未启动真实 `var/` 数据库。
+- 公开验证版 [Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.0) `415567992` 已发布（prerelease=true），十附件大小与 SHA-256 核验通过。最后匿名网页检查遇本机 `github.com:443` 连接超时，curl 也复现重置/超时；保留失败记录，改用 GitHub 官方公开资产 API 匿名下载 YML/环境示例并逐字节核验通过，元数据 API 也是匿名。`github-release-verification.json` 明确 `anonymousReleasePage=false`，不将此项写成通过，不改全局代理或 DNS。

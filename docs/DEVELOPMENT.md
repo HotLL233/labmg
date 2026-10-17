@@ -64,13 +64,15 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 源码先运行 `npm ci --omit=dev --ignore-scripts`；ZIP 包含 package-lock，不含跨平台 node_modules。Docker 构建安装锁定依赖，TAR 可离线使用。测试/构建缓存继续在 `artifacts/cache/0.3.0/`，正式产物在 `artifacts/releases/0.3.0/`。
 
+本版源码冻结在 `5012a2c` / `v0.3.0`。Actions `38999734421` 构建正式双架构镜像；本机 Docker Hub 超时后，离线 TAR 改从已核验的正式公开 GHCR 镜像按架构导出，保留 `package-docker.ps1` 的清单字段，未用临时检查镜像发布。匿名双架构拉取、配套冻结 Compose、两份 TAR 的完整容器专项均通过，ARM64 为模拟。冻结后的发布记录和部署文档更正另作提交，不移动版本标签或重打 ZIP；附件中的文档保留冻结快照，当前步骤以本分支文档为准。
+
 ## 物资管理设计历史
 
 2026-10-17 的[物资申报、验收与库存方案](MATERIAL_WORKFLOW.md)与[离线 HTML 原型](prototypes/material-workflow.html)位于 `docs/`，本轮在 `feature/material-workflow-design` 隔离制作，供业务与界面评审。原型使用内存模拟数据，刷新还原，未接入正式页面、API 或数据库；XLSX 按钮仅示意。
 
 用户同日补充分类与归属区域选择，并将提交后全员不可编辑改为仅物资管理员可修订；后续在 `feature/material-classification-editing` 更新方案与原型，保留原提交版及修订原因/历史。分类与区域选项建议由 ADMIN 或 MATERIAL 维护；提交后编辑仍明确要求 MATERIAL，区域与仓库、创建者分别保存，建议库存按物资+仓库+区域合并。
 
-正式实现需要完成独立单据/明细、分类/区域字典、原提交快照与受控修订、明确物资管理员角色约束、验收入库事务与幂等、库存流水、期初切换和备份恢复，按方案列出的验收标准验证后再确定业务版本并制作 Docker。当前方案不改变 `0.2.0-rc.5` 版本号、镜像或标签，也不把 HTML 演示视为正式功能完成。
+设计阶段将独立单据/明细、分类/区域字典、原提交快照与受控修订、物资管理员角色约束、验收入库事务与幂等、库存流水、期初切换和备份恢复列为正式实施范围。上述要求已由本轮 0.3.0 正式业务实现补充；原型仍只作历史示例，不替代正式页面。设计阶段未改写的 `0.2.0-rc.5` 版本、镜像和标签继续保留。
 
 ## 运行与检查
 
@@ -171,7 +173,7 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.2.0-rc.5`。rc.5 默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.2.0-rc.5` 命名卷，应用和初始化服务共用该卷。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+`deploy/docker-compose.yml` 默认使用 `ghcr.io/hotll233/labmg:0.3.0`。默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.3.0` 命名卷，应用和初始化服务共用该卷。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
 
 已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID，目录须已存在；默认新卷不含旧数据。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留卷，日常升级不要用 `down --volumes` / `down -v`。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持完成依赖条件须以实际部署工具为准。
 
@@ -183,7 +185,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.2.0-rc.5`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+导入 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:0.3.0`，使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -192,7 +194,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.2.0-rc.5'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.3.0'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
