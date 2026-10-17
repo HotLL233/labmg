@@ -42,6 +42,8 @@
 
 [0.3.0 验证版 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.0) 已公开，ID `415567992`，十个附件大小与 SHA-256 核验通过。公开元数据、YML 和环境示例经 GitHub 官方资产 API 匿名下载及逐字节摘要核验通过；本机 `github.com` 网页和常规下载链接连接超时，未记为匿名网页验收通过，未修改全局网络。具体结果在 `artifacts/cache/0.3.0/github-release-verification.json`。
 
+冻结后文档提交 `299ebd8` 的普通 `git push` 同样遇到本机 `github.com` 连接超时，已通过 GitHub 官方 Git Database API 逐项复现相同 blob/tree/commit OID，并以 `force:false` 同步 `develop`、`feature/v0.3.0-materials` 及本地 origin tracking refs；`main` 与版本标签保持不变，纯摘要报告为 `artifacts/cache/0.3.0/sync-docs-299ebd8-report.json`。
+
 ## 当前物资模块方案历史（2026-10-17，后由0.3.0正式实现补充）
 
 - [方案](MATERIAL_WORKFLOW.md)及[HTML 原型](prototypes/material-workflow.html)在 `feature/material-workflow-design` 制作；只使用模拟数据，不启动真实运行数据库，不修改生产源码或冻结版本。

@@ -178,3 +178,4 @@
 - 冻结后核对交付文档，更正当前部署中遗留的旧版镜像措辞，将方案中的“待实现”明确标为实施前历史，并按代码补齐 Excel 的实际筛选范围及验收从原单导出规则。九份 Markdown 的 28 个相对链接有效，未改业务源码；发布附件文档保留源码冻结快照，最新步骤见 develop 文档。
 - 仍未在实际群晖、国内镜像仓库或长期负载场景验收，也未进行完整停服灾备演练；本轮所有运行验证使用隔离副本，未启动真实 `var/` 数据库。
 - 公开验证版 [Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.0) `415567992` 已发布（prerelease=true），十附件大小与 SHA-256 核验通过。最后匿名网页检查遇本机 `github.com:443` 连接超时，curl 也复现重置/超时；保留失败记录，改用 GitHub 官方公开资产 API 匿名下载 YML/环境示例并逐字节核验通过，元数据 API 也是匿名。`github-release-verification.json` 明确 `anonymousReleasePage=false`，不将此项写成通过，不改全局代理或 DNS。
+- 冻结后文档提交 `299ebd8` 的普通 `git push` 同样遇到本机 `github.com` 连接超时，已通过 GitHub 官方 Git Database API 逐项复现相同 blob/tree/commit OID，并以 `force:false` 同步 `develop`、`feature/v0.3.0-materials` 及本地 origin tracking refs；`main` 与版本标签保持不变，纯摘要报告为 `artifacts/cache/0.3.0/sync-docs-299ebd8-report.json`。
