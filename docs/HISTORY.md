@@ -187,3 +187,12 @@
 - 物资管理员使用现有带原因修订在验收前匹配；原提交null快照、修订、恢复和首次事件后身份保护保留。前端明确待匹配状态、提交说明和原单修订路径。后端HTTP专项14/14、前端VM15/15通过。
 - 包信息/首次部署YML及文档提升0.3.1，旧部署保持原YML/项目/挂载仅更新镜像，防止误连空卷。隔离缓存仅在artifacts/cache/0.3.1，真实var不启动；全量/浏览器/正式产物与外部发布结果待后续据实补记。
 - 冻结前20个JS语法通过，全量47组46通过/1默认Docker跳过/0失败；真实Edge新物资全链20/20、脚本错误0，桌面/390px截图已目视。真实Docker专项改为从无主档提交、未匹配验收409、受控匹配/原版null留存继续原有入库/XLSX/重建持久化，将从正式冻结镜像执行；源语法通过。28个Markdown相对链接有效，已消除旧版YML升级措辞歧义。
+
+## 2026-10-17：0.3.1 冻结与正式交付验证
+
+- 源码冻结 `bc781bbf8c9c20bcef1f17f8223bc77a28d84dd9`，annotated tag `v0.3.1`，GitHub HTTP/1.1原子推送develop/fix分支与标签成功，无需API回退；main与旧标签不变。ZIP为250184字节、SHA-256 `bf20fbfc6c17157e4ce6e0f72fccfb35369ee4c63aa40f7de01e594f066a720e`，sourceSha256为 `7a28858a2214a6b861e32c721f05ee69d062d2c40e4dc0bbd0a5afbddd12574c`。
+- Actions `39006123718` 成功发布双架构，原始job日志独立提取索引 `sha256:45f6bc3925fbdbc4a939cb5be1772ed38033790a4e36f5c545642b8044973149`；未重复dispatch。空Docker配置匿名双平台拉取及OCI/原始摘要、冻结ZIP/生成入口与正式Compose专项通过，测试容器、卷及隔离配置清理通过。
+- 从同一公开镜像导出正式amd64 TAR 82280448字节、SHA-256 `75a8d96f8d05fbee36e162fca8806ce730bcd9cbfd13a74752b5a61de34dbbba`；arm64 TAR 82149376字节、SHA-256 `9fae8c36b0cb5c9bc1114813c469be6a5a807f6420af8dfc4aecfc426ff67054`。各自load并用独立别名核对平台/提交，冻结Compose专项各1/1通过，ARM64模拟。报告为 `ghcr-anonymous-verification.json`、`ghcr-offline-export.json`，正式十附件/九条校验完整；未用本地临时重建冒充发布镜像。
+- 新增隔离真实升级专项：旧0.3.0同一未匹配草稿提交400、内容版本不变；保留原冻结YML/项目/0.3.0卷/UID-GID，仅.env改镜像到0.3.1后健康，原账号双角色与草稿完整、首设未重开，提交200且原快照catalogId仍null。第一轮辅助脚本误将role字符串读为roles数组，修正脚本后重跑通过，保留失败证据，未修改产品代码。最终报告 `validation/upgrade-6fb62ed3296339/report.json`，容器/卷0残留，合成明文凭据已删除。
+- [0.3.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 已公开（ID `415602635`，prerelease=true），十附件大小/GitHub SHA-256与本地及九条校验记录一致。官方API匿名元数据/tag及八份小件/源码附件完整下载通过；amd64 TAR匿名下载300秒超时，失败证据保留，arm64 TAR未追加全量下载。两TAR正式容器及上传摘要验证已通过，不因额外大文件下载验证阻塞已完成修复交付，不记录十件匿名全量下载通过。最终报告 `github-release-verification.json` 为 `passed-with-network-limitations`，原尝试为 `github-release-verification-full-attempt.json`；未声称github.com网页验证通过。
+- 远端main及全部九个tag OID经匿名API核对与本地一致，报告 `protected-refs-verification.json`。冻结后仅更新三份文档，不重打ZIP/TAR、不移动标签，未在实际群晖、国内仓库或长期容量场景验收。
