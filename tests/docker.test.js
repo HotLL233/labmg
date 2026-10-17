@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const execute = promisify(execFile);
 const image = process.env.LABOS_DOCKER_IMAGE;
 
-test('Compose initializes a new volume for a non-root user and preserves setup, records and attachments', {
+test('Compose initializes a new volume for a non-root user and preserves setup, records, attachments and material issues', {
   skip: image ? false : 'set LABOS_DOCKER_IMAGE to test a locally built image', timeout: 420000
 }, async () => {
   const root = path.resolve(__dirname, '..');
@@ -63,9 +63,9 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     assert.equal(response.status, expected, `${route}: ${await response.clone().text()}`);
     return response;
   };
-  const login = async base => {
+  const login = async (base, account = credentials) => {
     const response = await request(base, '/api/auth/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials)
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(account)
     });
     await response.json();
     return response.headers.get('set-cookie').split(';')[0];
@@ -152,9 +152,47 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     assert.equal(history.revisions[0].after.items[0].catalogId, catalog.id);
     const materialReceipt = await post('/api/materials/receipts', {
       requestId: materialRequest.id, itemId: materialRequest.items[0].id, requestVersion: materialRequest.version, version: materialRequest.items[0].version,
-      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34'
+      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34', batch: 'DOCKER-ISSUE-BATCH', expiryDate: '2027-12-31'
     });
     assert.equal(materialReceipt.receipt.amountCents, 1234);
+    const stockIdentity = { catalogId: catalog.id, regionId: region.id, warehouse: 'MAIN', batch: 'DOCKER-ISSUE-BATCH', expiryDate: '2027-12-31' };
+    const location = '容器试剂柜 A-02';
+    await request(first.base, '/api/materials/stock/location', {
+      method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...stockIdentity, location, version: 0, reason: '容器存放位置核验' })
+    });
+    const requesterCredentials = { username: 'docker-requester', password: 'docker-requester-password' };
+    await post('/api/users', { ...requesterCredentials, roles: ['TESTER'] });
+    const requesterCookie = await login(first.base, requesterCredentials);
+    const requesterBatches = (await (await request(first.base, '/api/materials/stock/batches', { headers: { Cookie: requesterCookie } })).json()).items;
+    assert.equal(requesterBatches[0].location, location);
+    assert.equal(requesterBatches[0].amountCents, undefined, 'ordinary batch lookup must not expose money');
+    const application = (await (await request(first.base, '/api/materials/issues', {
+      method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...stockIdentity, quantity: '0.25', purpose: '容器普通人员领用申请', requestIdempotencyKey: crypto.randomUUID() })
+    }, 201)).json()).issue;
+    assert.equal(application.status, 'pending');
+    assert.equal(application.amountCents, undefined);
+    const issuePayload = { version: application.version, requestIdempotencyKey: crypto.randomUUID() };
+    await request(first.base, `/api/materials/issues/${application.id}/issue`, {
+      method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(issuePayload)
+    }, 403);
+    const issued = (await post(`/api/materials/issues/${application.id}/issue`, issuePayload)).issue;
+    assert.equal(issued.status, 'issued'); assert.equal(issued.qtyM, 250);
+    assert.equal(issued.amountCents, 309, 'a quarter of 12.34 must round half up to 3.09');
+    assert.equal(issued.snapshot.location, location, 'issued stock must retain its location snapshot');
+    assert.equal((await post(`/api/materials/issues/${application.id}/issue`, issuePayload, 200)).issue.id, application.id);
+    const movementRoute = '/api/materials/stock/movements?' + new URLSearchParams(stockIdentity);
+    const assertIssueMovements = async (base, actorCookie) => {
+      const rows = (await (await request(base, movementRoute, { headers: { Cookie: actorCookie } })).json()).items;
+      assert.equal(rows.length, 2, 'receipt and one issue must be the only batch movements');
+      const outgoing = rows.filter(row => row.type === 'issue');
+      assert.equal(outgoing.length, 1); assert.equal(outgoing[0].issueId, application.id);
+      assert.equal(outgoing[0].qtyM, -250); assert.equal(outgoing[0].amountCents, -309);
+      assert.equal(rows.reduce((sum, row) => sum + row.qtyM, 0), 750);
+      assert.equal(rows.reduce((sum, row) => sum + row.amountCents, 0), 925);
+    };
+    await assertIssueMovements(first.base, cookie);
     const workbook = await request(first.base, `/api/materials/export.xlsx?type=requests&requestId=${materialRequest.id}`, { headers: { Cookie: cookie } });
     assert.match(workbook.headers.get('content-type'), /spreadsheetml/);
     assert.equal(Buffer.from(await workbook.arrayBuffer()).readUInt32LE(0), 0x04034b50, 'Linux dependencies must generate an actual XLSX ZIP');
@@ -184,7 +222,17 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     const secondCookie = await login(second.base);
     const materialStock = await request(second.base, '/api/materials/stock', { headers: { Cookie: secondCookie } });
     const persistedMaterial = (await materialStock.json()).items.find(row => row.catalogId === catalog.id && row.regionId === region.id);
-    assert.equal(persistedMaterial.qtyM, 1000); assert.equal(persistedMaterial.amountCents, 1234);
+    assert.equal(persistedMaterial.qtyM, 750); assert.equal(persistedMaterial.amountCents, 925);
+    const persistedBatches = (await (await request(second.base, '/api/materials/stock/batches', { headers: { Cookie: secondCookie } })).json()).items;
+    assert.equal(persistedBatches[0].location, location); assert.equal(persistedBatches[0].locationVersion, 1);
+    assert.equal(persistedBatches[0].qtyM, 750); assert.equal(persistedBatches[0].amountCents, 925);
+    const persistedIssue = (await (await request(second.base, `/api/materials/issues/${application.id}`, { headers: { Cookie: secondCookie } })).json()).issue;
+    assert.equal(persistedIssue.status, 'issued'); assert.equal(persistedIssue.amountCents, 309); assert.equal(persistedIssue.snapshot.location, location);
+    await assertIssueMovements(second.base, secondCookie);
+    const secondRequesterCookie = await login(second.base, requesterCredentials);
+    const ownIssues = (await (await request(second.base, '/api/materials/issues', { headers: { Cookie: secondRequesterCookie } })).json()).items;
+    assert.equal(ownIssues.length, 1); assert.equal(ownIssues[0].id, application.id); assert.equal(ownIssues[0].status, 'issued');
+    assert.equal(ownIssues[0].amountCents, undefined, 'ordinary issue history must remain amount-redacted after recreation');
     const records = await request(second.base, '/api/records?module=archives', { headers: { Cookie: secondCookie } });
     assert.ok((await records.json()).some(row => row.id === record.id && row.title === title));
     const files = await request(second.base, `/api/files?record_id=${record.id}`, { headers: { Cookie: secondCookie } });
