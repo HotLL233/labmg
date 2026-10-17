@@ -132,12 +132,24 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     });
     const category = await post('/api/materials/categories', { name: '容器分类' });
     const region = await post('/api/materials/regions', { name: '容器区域' });
-    const catalog = await post('/api/materials/catalog', { code: 'DOCKER-MAT', name: '容器物资', spec: '1 L', unit: '瓶', categoryId: category.id });
     let materialRequest = await post('/api/materials/requests', { title: '容器物资入库' });
     materialRequest = await post(`/api/materials/requests/${materialRequest.id}/items`, {
-      requestVersion: materialRequest.version, catalogId: catalog.id, categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '2'
+      requestVersion: materialRequest.version, name: '容器物资', spec: '1 L', unit: '瓶', categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '2'
     });
     materialRequest = await post(`/api/materials/requests/${materialRequest.id}/submit`, { requestVersion: materialRequest.version }, 200);
+    assert.equal(materialRequest.items[0].catalogId, null, 'new materials must submit before catalog creation');
+    await post('/api/materials/receipts', {
+      requestId: materialRequest.id, itemId: materialRequest.items[0].id, requestVersion: materialRequest.version, version: materialRequest.items[0].version,
+      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34'
+    }, 409);
+    const catalog = await post('/api/materials/catalog', { code: 'DOCKER-MAT', name: '容器物资', spec: '1 L', unit: '瓶', categoryId: category.id });
+    materialRequest = await (await request(first.base, `/api/materials/requests/${materialRequest.id}/items/${materialRequest.items[0].id}`, {
+      method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestVersion: materialRequest.version, version: materialRequest.items[0].version, catalogId: catalog.id, reason: '入库前规范匹配' })
+    })).json();
+    const history = await (await request(first.base, `/api/materials/requests/${materialRequest.id}/revisions`, { headers: { Cookie: cookie } })).json();
+    assert.equal(history.originalSnapshot.items[0].catalogId, null);
+    assert.equal(history.revisions[0].after.items[0].catalogId, catalog.id);
     const materialReceipt = await post('/api/materials/receipts', {
       requestId: materialRequest.id, itemId: materialRequest.items[0].id, requestVersion: materialRequest.version, version: materialRequest.items[0].version,
       requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34'

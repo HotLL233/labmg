@@ -131,6 +131,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
   const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
+    materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [],
     materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
@@ -158,8 +159,10 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/dashboard') return response({ totals: {}, finance: { income: 0, expense: 0 }, warnings: 0 });
     if (url.pathname === '/api/permissions') return response(state.permissionData || { catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
     if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: state.auth.user.role }]);
-    if (url.pathname === '/api/materials/meta') return response({ capabilities: { createRequest: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false });
+    if (url.pathname === '/api/materials/meta') return response({ capabilities: state.materialCapabilities, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false });
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
+    if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
+    if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
     if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog'].includes(url.pathname)) return response({ items: [], total: 0, page: 1, pageSize: 200 });
     if (url.pathname === '/api/records' && method === 'GET') {
       const module = url.searchParams.get('module'), q = url.searchParams.get('q') || '';
@@ -531,4 +534,47 @@ test('user-controlled fields and account names stay out of executable markup', a
   app.context.editUser = (...args) => { edited = args; };
   app.$('[data-edit-user=1]').onclick();
   assert.equal(edited[1], "O'Brien <img src=x onerror=alert(1)>");
+});
+
+test('new material can be submitted before catalog matching, with accounting blocked and the original request reachable', async () => {
+  const app = await browser({ role: 'MATERIAL', permissions: ['materials.read', 'materials.request.submit', 'materials.acceptance.write'] });
+  const free = { id: 11, requestId: 101, catalogId: null, name: '新物资', spec: '新规格', unit: '件', qtyM: 1000, remainingQtyM: 1000, acceptedQtyM: 0, closedQtyM: 0, receiptStatus: 'pending', canEdit: true };
+  const bound = { ...free, id: 12, catalogId: 5, name: '已有物资' };
+  const request = { ...app.state.materialRequests[0], version: 1, canSubmit: true, canAddItem: true, items: [free, bound] };
+  app.state.materialDetails[101] = request;
+  app.state.materialCapabilities = { createRequest: true, receive: true, closeReceipt: true };
+  const click = node => app.document.listeners.click({ target: { closest: () => node } });
+  await app.run("go('materials')");
+  await click(app.$('[data-mw=request]'));
+  assert.match(app.$('#page').textContent, /共 1 项待匹配主档，可直接提交新物资/);
+  assert.ok(app.$('[data-mw=submit]'));
+  await click(app.$('[data-mw=add-item]'));
+  assert.equal('required' in app.$('#mw-fields [name=catalogId]').attrs, false);
+  assert.match(app.$('#mw-fields').textContent, /新物资可直接填报提交/);
+  await click(app.$('[data-mw=cancel]'));
+  await click(app.$('[data-mw=submit]'));
+  assert.match(app.$('#mw-intro').textContent, /2 项，其中 1 项待匹配主档/);
+  assert.match(app.$('#mw-intro').textContent, /新物资可直接提交/);
+  await click(app.$('[data-mw=cancel]'));
+  Object.assign(request, { status: 'submitted', revision: 1, canSubmit: false, canAddItem: false });
+  app.state.materialAcceptance = [free, bound];
+  await click({ dataset: { mw: 'page', page: 'acceptance' } });
+  const receive = app.document.querySelectorAll('[data-mw=receive]'), close = app.document.querySelectorAll('[data-mw=close-item]');
+  assert.equal(receive[0].disabled, true);
+  assert.equal(close[0].disabled, true);
+  assert.match(receive[0].attrs.title, /待匹配主档/);
+  assert.equal(receive[1].disabled, false);
+  assert.equal(close[1].disabled, false);
+  assert.match(app.$('#page').textContent, /请点“原单”/);
+  for (const action of ['receive', 'close-item']) {
+    await click({ dataset: { mw: action, request: '101', item: '11' } });
+    assert.equal(app.$('#mw-dialog').open, false);
+    assert.match(app.$('#mw-status').textContent, /修订.*选择主档并填写原因/);
+  }
+  await click(app.$('[data-mw=request]'));
+  assert.ok(app.$('[data-mw=edit-item]'));
+  await click(app.$('[data-mw=edit-item]'));
+  assert.ok(app.$('#mw-fields [name=catalogId]'));
+  assert.ok(app.$('#mw-fields [name=reason]'));
+  assert.equal(app.requests.some(entry => entry.method === 'POST' || entry.method === 'PATCH'), false);
 });

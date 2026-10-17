@@ -179,3 +179,11 @@
 - 仍未在实际群晖、国内镜像仓库或长期负载场景验收，也未进行完整停服灾备演练；本轮所有运行验证使用隔离副本，未启动真实 `var/` 数据库。
 - 公开验证版 [Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.0) `415567992` 已发布（prerelease=true），十附件大小与 SHA-256 核验通过。最后匿名网页检查遇本机 `github.com:443` 连接超时，curl 也复现重置/超时；保留失败记录，改用 GitHub 官方公开资产 API 匿名下载 YML/环境示例并逐字节核验通过，元数据 API 也是匿名。`github-release-verification.json` 明确 `anonymousReleasePage=false`，不将此项写成通过，不改全局代理或 DNS。
 - 冻结后文档提交 `299ebd8` 的普通 `git push` 同样遇到本机 `github.com` 连接超时，已通过 GitHub 官方 Git Database API 逐项复现相同 blob/tree/commit OID，并以 `force:false` 同步 `develop`、`feature/v0.3.0-materials` 及本地 origin tracking refs；`main` 与版本标签保持不变，纯摘要报告为 `artifacts/cache/0.3.0/sync-docs-299ebd8-report.json`。
+
+## 2026-10-17：0.3.1 新物资提交修复
+
+- 用户确认账号仅 ADMIN，缺提交资格；授权 MATERIAL 后又反馈新物资不能提交。定位 0.3.0 允许自由填报却在提交时要求全部匹配主档，不能仅以角色问题解释。
+- 从 `f345be7` 建立 `fix/v0.3.1-new-material-submission`，最小修复提交仅检查非空有效明细；验收/纯拒收/结案的主档 guard 统一前移，避免 null 身份被事件锁死。不改schema、权限，不自动建档。
+- 物资管理员使用现有带原因修订在验收前匹配；原提交null快照、修订、恢复和首次事件后身份保护保留。前端明确待匹配状态、提交说明和原单修订路径。后端HTTP专项14/14、前端VM15/15通过。
+- 包信息/首次部署YML及文档提升0.3.1，旧部署保持原YML/项目/挂载仅更新镜像，防止误连空卷。隔离缓存仅在artifacts/cache/0.3.1，真实var不启动；全量/浏览器/正式产物与外部发布结果待后续据实补记。
+- 冻结前20个JS语法通过，全量47组46通过/1默认Docker跳过/0失败；真实Edge新物资全链20/20、脚本错误0，桌面/390px截图已目视。真实Docker专项改为从无主档提交、未匹配验收409、受控匹配/原版null留存继续原有入库/XLSX/重建持久化，将从正式冻结镜像执行；源语法通过。28个Markdown相对链接有效，已消除旧版YML升级措辞歧义。

@@ -1,12 +1,20 @@
 # 群晖 Docker 部署
 
-本版为 `0.3.0` 物资业务版，可下载的镜像、附件和验证结果以 [0.3.0 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.0) 实际记录为准。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
+本版为 `0.3.1` 物资业务版，可下载的镜像、附件和验证结果以 [0.3.1 发布页](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 实际记录为准。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
 
 本版沿用 rc.5 的 Docker 管理的数据卷，自动准备运行目录，无需先在 NAS 手工创建数据文件夹。YML 有两个服务：`labos-init` 以 root 一次性准备目录，成功后退出；`labos` 以非 root 用户运行应用。空数据库首次打开网页时设置管理员密码，没有默认密码。
 
 推荐使用 64 位群晖的 Container Manager 和支持 `depends_on.condition: service_completed_successfully` 的 Compose。仅声明兼容 Compose 3.8，不能保证旧套件支持本配置；先运行 `docker compose config --quiet`，若提示不支持该条件，需升级 Compose/套件。实际 DSM、内核和权限仍须在目标 NAS 验证。
 
-## 0.3.0 升级与首次使用
+## 0.3.0 升级到 0.3.1
+
+本版修复“新物资未匹配主档不能提交”：填报完整后可提交，验收、拒收和结案前再由物资管理员在“原单 → 修订”选择已维护的主档并填写原因。保留原提交及修订历史，无新增数据库结构。
+
+已有 0.3.0 部署先停服备份，继续使用原 YML、原项目名及全部挂载配置，只在项目同目录 `.env` 设置 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.1`，然后重新拉取并重建项目。0.3.0 YML 的命名卷仍保留为原来的 `labos-runtime-0.3.0`，这是原有数据位置，不能随镜像版本一起改名。若镜像被写死在 YML，则仅修改两个服务的 image，保留 volumes。不要使用 `down -v`。
+
+下文的 0.3.1 默认命名卷适用于首次安装；旧版完整数据迁移与回退仍按文末步骤执行。
+
+## 首次使用物资模块
 
 先停服备份原数据卷或整个运行目录，在独立副本验证升级。默认卷名改为本版隔离卷；保留旧业务须继续挂载原数据源并保留 UID/GID，不能删除原 LABOS_DATA_DIR 后以为已迁移。新业务表首次为空，旧物资只读，不自动累加库存，由物资管理员盘点后登记期初。
 
@@ -21,7 +29,7 @@
 3. `.env` 可选。需要自定义端口或用户时，将环境示例复制为项目同目录的 `.env`；首次部署保留 `LABOS_DATA_DIR` 为未设置状态。例如：
 
    ```dotenv
-   LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.0
+   LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.1
    LABOS_PORT=3000
    LABOS_ADMIN_USER=admin
    LABOS_UID=1000
@@ -29,7 +37,7 @@
    ```
 
    默认数据卷适用上述 UID/GID，无需改成 NAS 登录用户。`labos-init` 只创建并设置 `/var/lib/labos`、`data/`、`uploads/`、`logs/` 四个目录的属主及目录访问权限，不递归更改已有文件。应用继续使用 `LABOS_UID/LABOS_GID` 指定的非 root 用户；`PUID/PGID` 不控制本镜像的运行用户。
-4. 使用该 YML 创建并启动项目。默认拉取 `ghcr.io/hotll233/labmg:0.3.0`，自动选择 amd64/arm64。`labos-init` 显示退出码 0 是正常完成；它失败时先查看日志并排错，应用不会启动。
+4. 使用该 YML 创建并启动项目。默认拉取 `ghcr.io/hotll233/labmg:0.3.1`，自动选择 amd64/arm64。`labos-init` 显示退出码 0 是正常完成；它失败时先查看日志并排错，应用不会启动。
 5. 访问 `http://群晖IP:3000`，设置管理员账号和新密码（8–1024 字符、不能全为空白、需确认）。完成后自动登录；已有数据库使用原账号。修改端口后使用对应地址，首次设置完成前仅允许可信人员访问。
 
 在 NAS SSH 会话进入放置 YML 的项目目录后，可逐条执行，每条成功后再继续：
@@ -44,16 +52,16 @@ docker compose logs --tail=100 labos-init labos
 
 以上是 NAS 上的 Linux 命令；Windows 侧的构建、同步命令使用 PowerShell 7。不要在开发电脑的 Docker 引擎上执行 NAS 数据维护命令。旧套件命令可能为 `docker-compose`，但仍需核对完成条件支持。Compose 的 `version is obsolete` 提示本身不影响运行。
 
-默认卷逻辑名为 `labos-runtime-0.3.0`，实际名称通常为 `<项目名>_labos-runtime-0.3.0`，隔离项目和版本。保持同一项目名及配置目录，重建容器继续使用该卷；换项目名或版本会得到另一份存储。Docker 卷不是 File Station 中约定的普通 NAS 业务目录。
+默认卷逻辑名为 `labos-runtime-0.3.1`，实际名称通常为 `<项目名>_labos-runtime-0.3.1`，隔离项目和版本。保持同一项目名及配置目录，重建容器继续使用该卷；换项目名或版本会得到另一份存储。Docker 卷不是 File Station 中约定的普通 NAS 业务目录。
 
 `x86_64` 设备选 amd64，`aarch64` 设备选 arm64，可在 NAS 执行 `uname -m` 核对。32 位 ARM 不在本版支持范围，ARM64 设备还须支持 Docker。
 
 ## 已有目录与旧版升级
 
-已有数据时先保留原 YML、`.env`、数据路径和 UID/GID，再做停服备份。0.3.0 继续兼容显式指定的宿主机绑定目录；在配套新版 YML 的 `.env` 中更新镜像版本，同时保留原来的真实路径，例如：
+已有数据时先保留原 YML、`.env`、数据路径和 UID/GID，再做停服备份。0.3.1 继续兼容显式指定的宿主机绑定目录；在配套新版 YML 的 `.env` 中更新镜像版本，同时保留原来的真实路径，例如：
 
 ```dotenv
-LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.0
+LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.1
 LABOS_DATA_DIR=/volume1/docker/labos/runtime/0.2.0-rc.4
 # LABOS_UID 和 LABOS_GID 保留旧部署的真实值
 ```
@@ -62,7 +70,7 @@ LABOS_DATA_DIR=/volume1/docker/labos/runtime/0.2.0-rc.4
 
 **不能用新版空环境模板覆盖已有部署配置。** 删除 `LABOS_DATA_DIR` 会切换到默认新卷，旧数据不会自动出现在里面。若升级后意外出现“首次设置管理员”，先停止应用并检查挂载源，不要把新空库当作旧库继续录入。
 
-rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while interpolating`；rc.4 改为网页首次设置。升级到 0.3.0 应同时使用配套 YML 和 0.3.0 镜像，不能只改其中一个：rc.4 镜像没有本版目录初始化入口。已有账号不因升级重新开放初始化或重置密码。
+rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while interpolating`；rc.4 改为网页首次设置。从 rc.4 及更早版本升级时，需配套更新 YML 和 0.3.1 镜像并明确保留旧数据源：rc.4 镜像没有本版目录初始化入口。0.3.0 升级则按上文保留原 YML，仅更新镜像。已有账号不因升级重新开放初始化或重置密码。
 
 `.env` 应与 YML 位于同一项目目录，真实文件名不能仍为 `env.example` 或 `.env.txt`。排错可用 `docker compose config --quiet`，只分享错误文字，不分享包含敏感信息的完整配置。
 
@@ -78,26 +86,26 @@ rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while
 
 ## 离线导入与慢拉取
 
-若 NAS 拉取 `ghcr.io` 慢，可使用构建电脑上已经生成的同版本 TAR，经局域网传到 NAS，避免再次公网下载。产物位于构建电脑的 `artifacts/releases/<version>/`，不随 Git 克隆提供；0.3.0 文件须以实际完成的构建及 Release 为准。
+若 NAS 拉取 `ghcr.io` 慢，可使用构建电脑上已经生成的同版本 TAR，经局域网传到 NAS，避免再次公网下载。产物位于构建电脑的 `artifacts/releases/<version>/`，不随 Git 克隆提供；0.3.1 文件须以实际完成的构建及 Release 为准。
 
 | 文件 | 用途 |
 | --- | --- |
-| `labos-0.3.0-linux-amd64.tar` | Intel / AMD 64 位设备 |
-| `labos-0.3.0-linux-arm64.tar` | 支持 Docker 的 ARM64 设备 |
+| `labos-0.3.1-linux-amd64.tar` | Intel / AMD 64 位设备 |
+| `labos-0.3.1-linux-arm64.tar` | 支持 Docker 的 ARM64 设备 |
 | 同名 `.json`、`SHA256SUMS` | 架构、提交、归档大小与 SHA-256 核对 |
 | `docker-compose.yml`、环境示例、`SYNOLOGY.md` | 配套部署文件 |
-| `labos-0.3.0.zip`、`manifest.json` | 源码及构建清单 |
+| `labos-0.3.1.zip`、`manifest.json` | 源码及构建清单 |
 
 只导入与 NAS 架构匹配的一份 TAR。使用“映像 → 新增 → 从文件添加”，或在 NAS 执行：
 
 ```sh
-docker load -i labos-0.3.0-linux-amd64.tar
+docker load -i labos-0.3.1-linux-amd64.tar
 ```
 
-这是 `docker save` 镜像归档，不是容器根文件系统。两种架构的本地标签都为 `labos:0.3.0`。在项目 `.env` 中设置：
+这是 `docker save` 镜像归档，不是容器根文件系统。两种架构的本地标签都为 `labos:0.3.1`。在项目 `.env` 中设置：
 
 ```dotenv
-LABOS_IMAGE=labos:0.3.0
+LABOS_IMAGE=labos:0.3.1
 ```
 
 确认本地存在该标签后，跳过 `docker compose pull`，直接 `docker compose up -d`；两个服务都会使用这份本地镜像，数据卷仍按前述规则自动准备。固定版本标签在本地存在时，常规启动默认复用本地镜像；若仍指向缺失的 GHCR 标签，Compose 会尝试拉取该名称。
@@ -106,16 +114,16 @@ LABOS_IMAGE=labos:0.3.0
 
 ## 同步到国内镜像仓库
 
-需要用户自己的 ACR/TCR 等目标仓库，先准备域名、命名空间及仓库推送权限。当前没有配置目标地址或凭据，下面是操作方法，不表示已完成同步。目标仓库须支持多架构索引；拟使用的 `0.3.0-amd64`、`0.3.0-arm64`、`0.3.0` 三个标签均须未占用，已有标签先核对，不覆盖。
+需要用户自己的 ACR/TCR 等目标仓库，先准备域名、命名空间及仓库推送权限。当前没有配置目标地址或凭据，下面是操作方法，不表示已完成同步。目标仓库须支持多架构索引；拟使用的 `0.3.1-amd64`、`0.3.1-arm64`、`0.3.1` 三个标签均须未占用，已有标签先核对，不覆盖。
 
-在持有两份已核验 0.3.0 TAR 的开发电脑上使用 **PowerShell 7**。替换占位值，在仓库控制台确认三个标签未使用，再执行；每个 Docker 命令失败都会停止后续步骤。`docker login` 交互输入凭据，不把密码写进命令、文档或 Git：
+在持有两份已核验 0.3.1 TAR 的开发电脑上使用 **PowerShell 7**。替换占位值，在仓库控制台确认三个标签未使用，再执行；每个 Docker 命令失败都会停止后续步骤。`docker login` 交互输入凭据，不把密码写进命令、文档或 Git：
 
 ```powershell
 $registryHost = '<国内仓库域名>'
 $namespace = '<命名空间>'
 $targetRepository = "${registryHost}/${namespace}/labmg"
-$releaseVersion = '0.3.0'
-$releaseDirectory = 'C:\labmg\artifacts\releases\0.3.0'
+$releaseVersion = '0.3.1'
+$releaseDirectory = 'C:\labmg\artifacts\releases\0.3.1'
 if ($registryHost.Contains('<') -or $namespace.Contains('<')) { throw '先填写真实目标仓库信息' }
 
 docker login $registryHost
@@ -154,10 +162,10 @@ if ($LASTEXITCODE -ne 0) { throw '读取目标索引失败' }
 
 先停止应用写入：在 NAS 项目目录执行 `docker compose stop labos`。从 Container Manager 应用容器的挂载信息，或 `docker compose ps -a -q labos` 配合 `docker inspect`，确认 `/var/lib/labos` 对应的真实卷名。可用 `docker volume inspect 卷名` 核对；其中 `Mountpoint` 仅用于识别位置，不要手工编辑 Docker 内部目录或复制正在运行的数据库。
 
-以下示例在 **NAS SSH 会话**执行。先把卷名替换为刚确认的真实值，准备独立备份目录 `/volume1/docker/labos/backups`，并使用尚未存在的备份文件名。先执行 `docker volume inspect 真实卷名`，成功后再运行备份；写错卷名可能创建空卷，不能盲目继续。镜像名应与当前应用实际已存在的镜像一致，离线安装时替换为 `labos:0.3.0`。
+以下示例在 **NAS SSH 会话**执行。先把卷名替换为刚确认的真实值，准备独立备份目录 `/volume1/docker/labos/backups`，并使用尚未存在的备份文件名。先执行 `docker volume inspect 真实卷名`，成功后再运行备份；写错卷名可能创建空卷，不能盲目继续。镜像名应与当前应用实际已存在的镜像一致，离线安装时替换为 `labos:0.3.1`。
 
 ```sh
-docker run --rm --pull=never --user 0:0 --entrypoint tar --mount type=volume,source=YOUR_PROJECT_labos-runtime-0.3.0,target=/backup-source,readonly --mount type=bind,source=/volume1/docker/labos/backups,target=/backup-output ghcr.io/hotll233/labmg:0.3.0 -czf /backup-output/labos-0.3.0-YYYYMMDD-HHMMSS.tar.gz -C /backup-source .
+docker run --rm --pull=never --user 0:0 --entrypoint tar --mount type=volume,source=YOUR_PROJECT_labos-runtime-0.3.1,target=/backup-source,readonly --mount type=bind,source=/volume1/docker/labos/backups,target=/backup-output ghcr.io/hotll233/labmg:0.3.1 -czf /backup-output/labos-0.3.1-YYYYMMDD-HHMMSS.tar.gz -C /backup-source .
 ```
 
 源卷只读挂载，备份只写指定宿主机目录；占位卷名和时间戳须先替换。确认命令退出码为 0、归档存在且能列出 `data/`、`uploads/` 等内容，再启动应用。备份应另存到可靠位置。管理器仅导出镜像或容器配置，不等于导出数据卷；网页 JSON 备份也不是整套灾备。
@@ -177,12 +185,12 @@ GitHub Actions 按版本标签发布 amd64/arm64，最终可用性以实际 Rele
 自行构建可在源码根目录使用 PowerShell 7 执行：
 
 ```powershell
-docker build --platform linux/amd64 --build-arg VERSION=0.3.0 -f deploy/Dockerfile -t labos:0.3.0 .
+docker build --platform linux/amd64 --build-arg VERSION=0.3.1 -f deploy/Dockerfile -t labos:0.3.1 .
 if ($LASTEXITCODE -ne 0) { throw '构建失败' }
 ```
 
-ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。基础镜像为 `node:24-bookworm-slim`，自行构建需要下载基础镜像；导入现成 TAR 无需下载它。构建后设置 `LABOS_IMAGE=labos:0.3.0`。
+ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。基础镜像为 `node:24-bookworm-slim`，自行构建需要下载基础镜像；导入现成 TAR 无需下载它。构建后设置 `LABOS_IMAGE=labos:0.3.1`。
 
 推荐用配套项目 YML；单独从 GUI 创建一个应用容器不会执行 `labos-init`，不能自动获得同样的目录准备流程。自行管理容器时须另行准备存储及 UID/GID，内部端口保持 3000、运行目录保持 `/var/lib/labos`。应用镜像默认用户为非 root `node`，初始化服务的 root 权限仅用于准备挂载目录，不开放 Web 服务。
 
-0.3.0 的实际验证范围见[版本说明](CHANGELOG.md)；本机验证结果不代表目标 NAS 的性能或完整灾备已经验收。
+0.3.1 的实际验证范围见[版本说明](CHANGELOG.md)；本机验证结果不代表目标 NAS 的性能或完整灾备已经验收。

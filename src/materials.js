@@ -460,6 +460,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const line = item(order.id, original?.item_id || itemId || input.itemId);
       versions(order, line, input);
       if (order.status !== 'submitted') conflict('只有已提交申报可办理验收或结案');
+      if (!line.catalog_id) conflict('验收、拒收或结案前请先匹配物资主档');
       const counts = activity(line.id);
       const remaining = safeSum([line.qty_m, -counts.accepted, -counts.closed]);
       const snapshot = itemView(line, order, user, true);
@@ -488,7 +489,6 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const amount = decimal(input.amount, 2, '本批总金额', true);
         if (quantity === 0 && rejected === 0) error(400, '合格数量与拒收数量不能同时为零');
         if (safeSum([quantity, rejected]) > remaining) conflict('本次合格与拒收数量超过当前剩余待处理量');
-        if (!line.catalog_id) conflict('申报明细尚未匹配物资主档');
         const rejectedReason = rejected > 0 ? text(input.rejectedReason, '拒收原因', 1000) : '';
         const zeroReason = quantity > 0 && amount === 0 ? text(input.zeroAmountReason, '零金额原因', 1000) : '';
         if (quantity === 0 && amount !== 0) error(400, '纯拒收不能计入合格库存金额');
@@ -770,7 +770,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         versions(order, null, input);
         if (order.status !== 'draft') conflict('申报单已提交');
         const items = all('SELECT * FROM material_request_items WHERE request_id=?', order.id);
-        if (!items.length || items.some(line => !line.catalog_id)) error(400, '提交前须有有效明细且全部匹配物资主档');
+        if (!items.length) error(400, '提交前须至少有一条有效物资明细');
         run("UPDATE material_requests SET status='submitted',submitted_by=?,submitted_at=?,revision=1,version=version+1 WHERE id=?", user.id, now(), order.id);
         run('UPDATE material_requests SET original_snapshot=? WHERE id=?', JSON.stringify(requestView(order.id, user, true)), order.id);
         log(user, 'SUBMIT', 'material_requests', order.id, order.no);

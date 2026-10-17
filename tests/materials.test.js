@@ -153,7 +153,118 @@ test('materials dictionaries require administrator roles while all authenticated
   await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary, { requestVersion: order.version, ...f.item(s), categoryId: 999999 }, 400);
   const unmatched = await f.order(finance, { code: 'NEW-ITEM', name: '未建档耗材', spec: 'test', unit: '盒', categoryId: s.category.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '1' });
   assert.equal(unmatched.items[0].catalogId, null);
-  await f.request('POST', `/api/materials/requests/${unmatched.id}/submit`, s.material, { requestVersion: unmatched.version }, [400, 409]);
+  const submitted = await f.submit(unmatched, s.material);
+  assert.equal(submitted.status, 'submitted'); assert.equal(submitted.items[0].catalogId, null);
+});
+
+test('new free-text materials submit without a catalog but require explicit controlled matching before receipt events', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  let order = await f.order(ordinary, null, '新物资申报');
+  await f.request('POST', `/api/materials/requests/${order.id}/submit`, s.material, { requestVersion: order.version }, 400);
+  const free = { name: '全新耗材原填报', spec: '自由规格', unit: '盒', categoryId: s.category.id, regionId: s.region.id,
+    warehouse: 'MAIN', quantity: '3.5', purpose: '尚未建立规范主档' };
+  for (const field of ['name', 'spec', 'unit']) {
+    await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary,
+      { requestVersion: order.version, ...free, [field]: '' }, 400);
+  }
+  const staleVersion = order.version;
+  order = await f.add(order, ordinary, free);
+  for (const actor of [ordinary, f.admin]) {
+    await f.request('POST', `/api/materials/requests/${order.id}/submit`, actor, { requestVersion: order.version }, 403);
+  }
+  await f.request('POST', `/api/materials/requests/${order.id}/submit`, s.material, { requestVersion: staleVersion }, 409);
+  order = await f.submit(order, s.material);
+  assert.equal(order.status, 'submitted'); assert.equal(order.revision, 1);
+  assert.equal(order.items[0].catalogId, null); assert.equal(order.items[0].identityLocked, false);
+  const original = (await f.request('GET', `/api/materials/requests/${order.id}/revisions`, s.material)).data.originalSnapshot;
+  assert.equal(original.items[0].catalogId, null); assert.equal(original.items[0].name, free.name);
+  assert.equal((await f.request('GET', '/api/materials/catalog', s.material)).data.total, 1, 'submission must not create or guess a catalog match');
+  const receipt = f.receiptBody(order, { quantity: '1.25', amount: '25' });
+  const reject = f.receiptBody(order, { quantity: '0', amount: '0', rejectedQuantity: '1', rejectedReason: '包装破损' });
+  const close = { requestVersion: order.version, version: order.items[0].version, requestIdempotencyKey: key(), reason: '取消采购' };
+  for (const payload of [receipt, reject]) {
+    const response = await f.request('POST', '/api/materials/receipts', s.material, payload, 409);
+    assert.match(response.data.error, /先匹配物资主档/);
+  }
+  await f.request('POST', `/api/materials/requests/${order.id}/items/${order.items[0].id}/close`, s.material, close, 409);
+  assert.deepEqual(await f.get(order.id), order, 'failed events must not change versions, identity locks or progress');
+  for (const route of ['stock', 'stock/movements', 'receipts']) assert.equal((await f.request('GET', '/api/materials/' + route, s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/meta', s.material)).data.openingClosed, false);
+  const master = await f.catalog(s.category.id, { code: 'NEW-CONFIRMED', name: '规范新耗材', spec: '25 mL', unit: '盒' });
+  const bind = { requestVersion: order.version, version: order.items[0].version, catalogId: master.id, reason: '明确建立主档后受控匹配' };
+  for (const actor of [ordinary, f.admin]) await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, actor, bind, 403);
+  await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, s.material, { ...bind, reason: '' }, 400);
+  await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, s.material, { ...bind, requestVersion: staleVersion }, 409);
+  order = (await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, s.material, bind)).data;
+  assert.equal(order.revision, 2); assert.equal(order.items[0].catalogId, master.id);
+  assert.equal(order.items[0].name, master.name); assert.equal(order.items[0].spec, master.spec);
+  assert.equal(order.submittedAt, original.submittedAt); assert.equal(order.submittedBy, original.submittedBy);
+  const history = (await f.request('GET', `/api/materials/requests/${order.id}/revisions`, s.material)).data;
+  assert.deepEqual(history.originalSnapshot, original);
+  assert.equal(history.revisions.length, 1);
+  assert.equal(history.revisions[0].before.items[0].catalogId, null);
+  assert.equal(history.revisions[0].after.items[0].catalogId, master.id);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0, 'matching must not create inventory');
+  const accepted = (await f.request('POST', '/api/materials/receipts', s.material,
+    f.receiptBody(order, { quantity: '1.25', amount: '25' }), 201)).data;
+  order = accepted.request;
+  assert.equal(accepted.receipt.snapshot.catalogId, master.id); assert.equal(accepted.receipt.requestRevision, 2);
+  assert.equal(order.items[0].identityLocked, true);
+  for (const fields of [{ catalogId: null }, { catalogId: s.catalog.id }, { spec: '改动受保护规格' }]) {
+    await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, s.material,
+      { requestVersion: order.version, version: order.items[0].version, reason: '不能改已验收身份', ...fields }, 409);
+  }
+  const stock = (await f.request('GET', '/api/materials/stock', s.material)).data.items;
+  assert.equal(stock.length, 1); assert.equal(stock[0].catalogId, master.id);
+  assert.equal(stock[0].qtyM, 1250); assert.equal(stock[0].amountCents, 2500);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  const target = await fixture(t);
+  await target.account('MATERIAL'); await target.account('TESTER');
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  assert.equal((await target.get(order.id)).items[0].catalogId, master.id);
+  const restoredHistory = (await target.request('GET', `/api/materials/requests/${order.id}/revisions`, target.admin)).data;
+  assert.deepEqual(restoredHistory.originalSnapshot, original);
+  assert.equal(restoredHistory.revisions[0].before.items[0].catalogId, null);
+  assert.equal(restoredHistory.revisions[0].after.items[0].catalogId, master.id);
+  assert.equal((await target.request('GET', '/api/materials/stock', target.admin)).data.items[0].qtyM, 1250);
+});
+
+test('submitted unmatched lines restore before matching and retain rejection and closure identity protection afterward', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const free = { name: '待建档物资', spec: '500 mL', unit: '瓶', categoryId: s.category.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '2' };
+  let order = await f.submit(await f.order(s.material, free));
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  const target = await fixture(t), material = await target.account('MATERIAL');
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  order = await target.get(order.id, material);
+  assert.equal(order.status, 'submitted'); assert.equal(order.items[0].catalogId, null);
+  const original = (await target.request('GET', `/api/materials/requests/${order.id}/revisions`, material)).data.originalSnapshot;
+  assert.equal(original.items[0].catalogId, null);
+  await target.request('POST', '/api/materials/receipts', material,
+    target.receiptBody(order, { quantity: '0', amount: '0', rejectedQuantity: '1', rejectedReason: '先匹配再拒收' }), 409);
+  const master = await target.catalog(s.category.id, { code: 'EXPLICIT-RESTORED', name: free.name });
+  order = (await target.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, material,
+    { requestVersion: order.version, version: order.items[0].version, catalogId: master.id, reason: '恢复后规范匹配' })).data;
+  order = (await target.request('POST', '/api/materials/receipts', material,
+    target.receiptBody(order, { quantity: '0', amount: '0', rejectedQuantity: '1', rejectedReason: '外包装破损' }), 201)).data.request;
+  assert.equal(order.items[0].identityLocked, true); assert.equal(order.items[0].remainingQtyM, 2000);
+  await target.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, material,
+    { requestVersion: order.version, version: order.items[0].version, catalogId: null, reason: '拒收后不能解除匹配' }, 409);
+  order = (await target.request('POST', `/api/materials/requests/${order.id}/items/${order.items[0].id}/close`, material,
+    { requestVersion: order.version, version: order.items[0].version, requestIdempotencyKey: key(), reason: '差缺不再采购' }, 201)).data.request;
+  assert.equal(order.items[0].closedQtyM, 2000); assert.equal(order.items[0].remainingQtyM, 0);
+  await target.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, material,
+    { requestVersion: order.version, version: order.items[0].version, regionId: s.otherRegion.id, reason: '结案后不能改区域' }, 409);
+  assert.equal((await target.request('GET', '/api/materials/stock/movements', material)).data.total, 0);
+  assert.equal((await target.request('GET', '/api/materials/meta', material)).data.openingClosed, false);
+  const historicalBackup = (await target.request('GET', '/api/materials/backup', target.admin)).data;
+  const restored = await fixture(t);
+  await restored.account('MATERIAL');
+  await restored.request('POST', '/api/materials/restore', restored.admin, historicalBackup);
+  const history = (await restored.request('GET', `/api/materials/requests/${order.id}/revisions`, restored.admin)).data;
+  assert.deepEqual(history.originalSnapshot, original);
+  assert.equal((await restored.get(order.id)).items[0].closedQtyM, 2000);
+  assert.equal((await restored.request('GET', '/api/materials/receipts', restored.admin)).data.total, 2);
 });
 
 test('request submission serializes against draft writes and only MATERIAL can submit or revise submitted content', { timeout: 30000 }, async t => {

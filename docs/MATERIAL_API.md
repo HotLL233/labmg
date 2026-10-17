@@ -1,4 +1,4 @@
-# 0.3.0 物资 API 合同
+# 0.3.1 物资 API 合同
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，返回 `{handle, backup, restore}`。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`。新业务只使用专表，不写旧 `records`。以下合同供前端与 HTTP 回归共同使用。
 
@@ -27,14 +27,14 @@
 - `POST /requests/:id/items`，`{requestVersion,catalogId?,code?,name?,spec?,unit?,categoryId,regionId,warehouse,quantity,purpose?}` → 201 完整单据。
 - `PATCH /requests/:id/items/:itemId`，`{requestVersion,version,...待改行字段,reason?}` → 完整单据。
 - `DELETE /requests/:id/items/:itemId`，`{requestVersion,version}` → 完整单据，仅草稿。
-- `POST /requests/:id/submit`，`{requestVersion}` → 完整单据。仅 MATERIAL + submit 权限；非空、所有行主档已匹配才能提交。
+- `POST /requests/:id/submit`，`{requestVersion}` → 完整单据。仅 MATERIAL + submit 权限；至少一条有效明细，允许 catalogId 为空；无主档不阻断提交。
 - `GET /requests/:id/revisions` → `{originalSnapshot,revisions:[{id,revision,reason,actorId,actorName,createdAt,before,after}]}`；提交版 revision=1，修订从 2 起。
 
 单据含 `{id,no,title,description,status,createdBy,creatorName,createdAt,submittedBy,submittedAt,version,revision,canEditHeader,canAddItem,canSubmit,items}`。摘要保留表头与操作能力，另含 `itemCount,progress:{pendingItems}`，不附 `items` 或附件；完整内容通过详情接口读取。
 
 明细含 `{id,requestId,catalogId,code,name,spec,unit,categoryId,categoryName,regionId,regionName,warehouse,qtyM,purpose,authorId,authorName,version,identityLocked,acceptedQtyM,closedQtyM,remainingQtyM,receiptStatus,canEdit,canDelete}`。`receiptStatus` 为 `pending|partial|done|closed`；identityLocked 表示存在任何历史验收/拒收/结案事件，冲正后也不解除身份保护。
 
-未匹配主档的草稿行允许普通用户先填写名称/规格/单位，catalogId 可为空；提交前 MATERIAL/ADMIN 建主档，MATERIAL 将 catalogId 匹配到草稿行。有 catalogId 时名称/规格/单位由服务端主档确定。
+未匹配主档的草稿行允许普通用户先填写名称/规格/单位，catalogId 可为空；0.3.1 起允许先提交；验收、拒收或结案前由 MATERIAL/ADMIN 维护主档，再由 MATERIAL 在原单受控修订中匹配 catalogId 并说明原因。0.3.0 的提交前匹配限制由此替代。有 catalogId 时名称/规格/单位由服务端主档确定。
 
 草稿本人改本人行，MATERIAL 可改全部；仅创建者/MATERIAL 可改草稿表头。提交后仅 MATERIAL + `materials.request.edit_submitted` 可改表头/已有行，必须 reason；不能新增/删行。原提交快照不覆盖。已有任何验收/结案记录的行保护 catalogId/code/name/spec/unit/warehouse/regionId；qtyM 不得小于有效已验收+结案量。分类、用途、合法数量仍可修订。修改申报不改变库存。
 
@@ -47,6 +47,8 @@
 - `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。
 - `POST /requests/:id/items/:itemId/close`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`，将当时剩余量结案，不产生库存。
 - `POST /receipts/:id/reverse`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`。仅整笔冲正原合格验收，最多一次，数量金额精确反向，库存不能负数。
+
+验收、纯拒收及结案均须当前行已匹配主档，未匹配返回 409 且不产生事件、库存或身份锁定；页面提示从“原单 → 修订”完成匹配。原提交快照中的 null 主档保持原样。
 
 以上动作需要 MATERIAL + `materials.acceptance.write`。记账 `requestIdempotencyKey` 为 8–128 字符；同用户同键同正文返回原结果（200），同键不同正文 409。客户端每次真实操作产生新键，网络重试复用原键及原正文；不要与申报单 requestId 混淆。
 
