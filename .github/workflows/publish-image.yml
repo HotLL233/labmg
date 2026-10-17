@@ -20,7 +20,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: read
 
 concurrency:
@@ -91,15 +91,18 @@ jobs:
           const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict');
           const {Readable,Transform}=require('node:stream'),{pipeline}=require('node:stream/promises');
           const repo='HotLL233/labmg',api='https://api.github.com/repos/'+repo,headers={Authorization:'Bearer '+process.env.GH_TOKEN,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'labmg-release-validation'};
-          let stage='draft-metadata';
-          async function json(route){const r=await fetch(api+route,{headers,redirect:'error',signal:AbortSignal.timeout(30000)});assert.ok(r.ok,'Official API status '+r.status);return r.json();}
+          let stage='draft-metadata',lastHttpStatus=null;
+          function reject(code,message){const error=new Error(message);error.safeCode=code;error.safeMessage=message;throw error;}
+          async function json(route){const r=await fetch(api+route,{headers,redirect:'error',signal:AbortSignal.timeout(30000)});lastHttpStatus=r.status;if(!r.ok)reject('OFFICIAL_API_HTTP','Official GitHub REST metadata request failed.');return r.json();}
           async function download(asset,file){
             stage='asset-'+asset.id;
             let r=await fetch(api+'/releases/assets/'+asset.id,{headers:{...headers,Accept:'application/octet-stream'},redirect:'manual',signal:AbortSignal.timeout(300000)});
+            lastHttpStatus=r.status;
             if([301,302,303,307,308].includes(r.status)){
               const target=new URL(r.headers.get('location'));
               assert.ok(target.protocol==='https:'&&!target.username&&!target.password&&(target.hostname.endsWith('.githubusercontent.com')||target.hostname.endsWith('.blob.core.windows.net')),'Unexpected official asset redirect host');
               r=await fetch(target,{redirect:'error',signal:AbortSignal.timeout(300000)});
+              lastHttpStatus=r.status;
             }
             assert.ok(r.ok&&r.body,'Asset download failed');
             let size=0;const hash=crypto.createHash('sha256');fs.mkdirSync(path.dirname(file),{recursive:true});
@@ -114,10 +117,10 @@ jobs:
             const assets=[];
             for(const name of expected){const matching=draft.assets.filter(a=>a.name===name);assert.equal(matching.length,1);assets.push(await download(matching[0],path.join('artifacts/releases/0.3.3',name==='env.example'?'.env.example':name)));}
             const manifest=JSON.parse(fs.readFileSync('artifacts/releases/0.3.3/manifest.json','utf8').replace(/^\uFEFF/,''));assert.equal(manifest.commit,process.env.FROZEN_COMMIT);assert.equal(manifest.version,'0.3.3');assert.equal(manifest.sha256,assets.find(a=>a.name===manifest.archive).sha256);
-            const old=await json('/releases/415629591');assert.equal(old.tag_name,'v0.3.2');const original=old.assets.filter(a=>a.name==='docker-compose.yml');assert.equal(original.length,1);
+            stage='original-0.3.2-release-metadata';const old=await json('/releases/415629591');assert.equal(old.tag_name,'v0.3.2');const original=old.assets.filter(a=>a.name==='docker-compose.yml');assert.equal(original.length,1);
             const oldCompose=await download(original[0],'artifacts/releases/0.3.2/docker-compose.yml');
             fs.writeFileSync('artifacts/cache/0.3.3/official-inputs.json',JSON.stringify({repository:repo,draftReleaseId:draft.id,commit:process.env.FROZEN_COMMIT,assets,oldCompose,environment:'GitHub Actions hosted Ubuntu'},null,2)+'\n');
-          })().catch(()=>{console.error('Official input preparation failed at '+stage+'; credentials and redirect URLs are omitted.');process.exitCode=1;});
+          })().catch(error=>{const result={status:'failed',stage,httpStatus:lastHttpStatus,errorCode:error.safeCode||(/^[A-Z][A-Z0-9_]{1,60}$/.test(error.code||'')?error.code:'TRANSFER_OR_PARSE_FAILED'),message:error.safeMessage||(error.code==='ERR_ASSERTION'?'Official asset metadata or frozen source assertion failed.':'Official input transfer or parsing failed.'),checkedAtUtc:new Date().toISOString()};fs.writeFileSync('artifacts/cache/0.3.3/official-inputs-error.json',JSON.stringify(result,null,2)+'\n');console.error(JSON.stringify(result));process.exitCode=1;});
           NODE
 
       - name: Set up current Docker with multi-platform image storage
