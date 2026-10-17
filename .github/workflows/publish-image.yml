@@ -78,6 +78,8 @@ jobs:
           fs.mkdirSync(path.join(cache,'validation'),{recursive:true});
           for(const name of ['verify-ghcr-anonymous.cjs','export-ghcr-offline.cjs','release-config.json','published-index.json'])fs.copyFileSync(path.join(source,name),path.join(cache,name),fs.constants.COPYFILE_EXCL);
           fs.copyFileSync(path.join(source,'upgrade-032-to-033.cjs'),path.join(cache,'validation/upgrade-032-to-033.cjs'),fs.constants.COPYFILE_EXCL);
+          fs.mkdirSync(path.join(cache,'remote-validation'),{recursive:true});
+          fs.copyFileSync(path.join(source,'upload-draft-assets.cjs'),path.join(cache,'remote-validation/upload-draft-assets.cjs'),fs.constants.COPYFILE_EXCL);
           assert.equal(require('./'+cache+'/release-config.json').commit,process.env.FROZEN_COMMIT);
           assert.equal(require('./'+cache+'/published-index.json').indexDigest,process.env.INDEX_DIGEST);
           NODE
@@ -165,6 +167,27 @@ jobs:
 
       - name: Gate 3 - official offline TAR export and both container tests
         run: node artifacts/cache/0.3.3/export-ghcr-offline.cjs --validate 2>&1 | tee artifacts/cache/0.3.3/remote-offline.log
+
+      - name: Upload verified missing assets to private release draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node artifacts/cache/0.3.3/remote-validation/upload-draft-assets.cjs --execute-after-gates
+
+      - name: Upload small publication evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-0.3.3-publish-evidence
+          path: |
+            project/artifacts/cache/0.3.3/ghcr-anonymous-verification.json
+            project/artifacts/cache/0.3.3/ghcr-offline-export.json
+            project/artifacts/cache/0.3.3/upgrade-verification.json
+            project/artifacts/cache/0.3.3/runner-environment.json
+            project/artifacts/cache/0.3.3/draft-upload-report.json
+            project/artifacts/releases/0.3.3/labos-0.3.3-linux-amd64.json
+            project/artifacts/releases/0.3.3/labos-0.3.3-linux-arm64.json
+            project/artifacts/releases/0.3.3/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload verified ten release assets and canonical gate reports
         uses: actions/upload-artifact@v4
