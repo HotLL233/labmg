@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-当前开发版本：**0.3.3**（手机扫码出入库），正在准备源码、双架构镜像、离线包和配套 YML；实际发布与验证结果见[版本说明](docs/CHANGELOG.md)。上一版 [0.3.2](https://github.com/HotLL233/labmg/releases/tag/v0.3.2) 保留。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
+当前版本：**[0.3.3](https://github.com/HotLL233/labmg/releases/tag/v0.3.3)**（手机扫码出入库验证版），已发布源码、双架构镜像、离线包和配套 YML；实际验证范围见[版本说明](docs/CHANGELOG.md)。上一版 [0.3.2](https://github.com/HotLL233/labmg/releases/tag/v0.3.2) 保留。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
 
 ## 快速启动
 
@@ -70,11 +70,13 @@ npm start
 npm run package:zip
 ```
 
-生成 `artifacts/releases/0.3.3/labos-0.3.3.zip` 及 `manifest.json`；构建和验证缓存使用 `artifacts/cache/0.3.3/`。此为打包命令的输出约定，不表示本轮已生成或发布正式产物。旧版本产物保留，相同版本只复用内容和校验一致的包；输入变化或已有包损坏时应使用新版本号。
+生成 `artifacts/releases/0.3.3/labos-0.3.3.zip` 及 `manifest.json`；构建和验证缓存使用 `artifacts/cache/0.3.3/`。本版 ZIP 固定于 `fe4d6f4`，发布后的文档记录不重新打包或移动标签。旧版本产物保留，相同版本只复用内容和校验一致的包；输入变化或已有包损坏时应使用新版本号。
 
 `npm run package:docker` 另构建并导出两个架构的镜像 TAR、镜像校验清单及独立的 YML/环境示例/群晖说明，仍位于同一版本目录。此命令需要运行中的 Linux Docker 引擎及 Buildx；层缓存按架构导出到 `artifacts/cache/<version>/`，后续版本可引用。
 
 GitHub Actions 在推送与 `package.json` 版本匹配的 `v*` 标签时构建并推送 GHCR 多架构镜像；镜像发布结果与匿名拉取验证以对应 Actions 运行和包状态为准，部署配置本身不代表发布已成功。`0.2.0-rc.2` 引入的本地 TAR 交付方式及历史版本继续保留。
+
+0.3.3 的正式容器、双架构 TAR 和 0.3.2 同卷升级检查已在 GitHub Ubuntu 运行器通过，ARM64 使用 QEMU 模拟；两份 TAR 由该运行器直接上传 Release。本机保留源码、部署文件、架构清单及原始验证报告，未因大包下载缓慢重复取回 TAR。十附件大小及 SHA-256、八份非 TAR 附件匿名下载均已核验；手机相机与目标群晖实机尚未验收。
 
 解压后先执行 `npm ci --omit=dev --ignore-scripts` 再运行 `npm start`；`start-labos.cmd` 在首次缺少依赖时自动安装。源码 ZIP 不含 node_modules，首次安装需要 npm 网络或已有缓存；Docker 镜像已包含运行依赖，可用 TAR 离线部署。部署包不包含本地运行数据；后续引用版本时同时核对清单中的版本、源码摘要和 ZIP 校验值。
 

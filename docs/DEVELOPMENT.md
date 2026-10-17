@@ -56,6 +56,10 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 从0.3.2升级时先停服完整备份，在隔离副本验证；继续使用原 YML、项目名、原卷/挂载及 UID/GID，仅更新 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.3` 后拉取重建。新 YML 默认新卷仅供首次安装；旧版不能恢复 schema 3，回退须恢复升级前完整数据副本。本轮继续交付公开双架构镜像、离线 TAR、YML、源码 ZIP 和 GitHub Release，发布与测试结果按实际追加，不移动旧标签或重打已冻结产物。
 
+[0.3.3验证版](https://github.com/HotLL233/labmg/releases/tag/v0.3.3) 已公开（ID `415656980`），冻结提交 `fe4d6f4` / `v0.3.3`。Actions `39013421657` 的79项回归及双架构发布成功；正式索引为 `sha256:0ef478536f41367916e5966cf0f1381f8f561d3b2060c610656a591ec0be18c6`。本机Docker因内存不足不能启动，使用独立运维分支的GitHub Ubuntu运行器 `39015392030` 验证：空凭据双架构实际拉取和正式Compose专项通过，0.3.2原配置同卷升级15/15通过，双TAR冻结专项通过并由运行器直接上传，ARM64为QEMU模拟。十附件摘要/大小及八份非TAR匿名下载已核验，真实var未访问。
+
+本机 `artifacts/releases/0.3.3/` 保留八份非TAR附件（含源码ZIP），两TAR在上述Release；大artifact两种本机下载方式均超时，部分文件仅作诊断，不计完整下载。原始云端报告、官方小artifact校验及来源、上传和公开验证记录在 `artifacts/cache/0.3.3/`。同一run/运维提交、冻结源码、镜像索引及十附件ID/摘要核对后才公开，不把云端结果记成本机Docker验收。物理手机、实际NAS、ARM64升级及长期容量仍须目标环境确认。
+
 ## 0.3.2 位置与领用
 
 从 `8d214e2` 建立 `feature/v0.3.2-material-improvements`。用户先要求参考开源逻辑完善现有流程，随后要求增加存放位置和物资领用，并明确选择“人员申请，物资管理员发放”。源码版本为 0.3.2，运行/测试/构建缓存统一使用 `artifacts/cache/0.3.2/`，开发数据为 `var/development/0.3.2/`；已发布版本及稳定 main 保留。
@@ -207,7 +211,7 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 和 0.3.2 Release 配套 YML 默认使用 `ghcr.io/hotll233/labmg:0.3.2`；部署前先核对实际发布状态。首次安装默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.3.2` 命名卷，应用和初始化服务共用该卷。已有 0.3.1 部署沿用原 YML/项目/挂载和 UID/GID，仅更新镜像，原卷名不变。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+`deploy/docker-compose.yml` 和 0.3.3 配套 YML 默认使用 `ghcr.io/hotll233/labmg:0.3.3`；部署前先核对实际发布状态。首次安装默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.3.3` 命名卷，应用和初始化服务共用该卷。已有 0.3.2 部署沿用原 YML/项目/挂载和 UID/GID，仅更新镜像，原卷名不变。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
 
 已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID，目录须已存在；默认新卷不含旧数据。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留卷，日常升级不要用 `down --volumes` / `down -v`。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持完成依赖条件须以实际部署工具为准。
 
@@ -219,7 +223,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.3.2 TAR 对应 `labos:0.3.2`），使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.3.3 TAR 对应 `labos:0.3.3`），使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -228,7 +232,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.3.2'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.3.3'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```

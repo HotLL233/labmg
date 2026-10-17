@@ -235,3 +235,14 @@
 - 源码包启动器增加扫码依赖缺失检测，Docker运行依赖由锁文件安装；静态资源仅两个固定映射，不公开node_modules。后端物资24/24、扫码8/8及静态资源/版本化打包2/2阶段专项已通过，完整回归、浏览器、正式镜像及升级验证后续按实追加。
 - 源码阶段全量81项80通过/1默认Docker跳过/0失败（含ZIP离线npm依赖安装），22个JS语法通过。交叉复核复现并修复关闭候选后晚返回重开弹窗/表单、包装码候选主档变化后未重核三项，最终前端VM30/30和独立原始触发6/6通过；扫码专用9/9。Edge独立扫码组件20/20、3图目视通过，实际使用合成图像/canvas流、无物理相机；同源GET及HTTP降级、390px已核对。Compose三场景只做配置解析3/3通过。正式容器/同卷升级/公开发布结果待后续实测，不套用旧版本。
 - 冻结前最新源码Edge业务UI40/40通过，18张截图目视检查，390px可横滚至操作列并完成实际保存；扫码文本替身，真实ZXing生成/解码及独立打印窗口，实际条码绑定、验收入库和领用申请均通过。该结果与独立扫码合成相机验证分别记录，未声称物理手机端到端。10份Markdown/55个相对链接有效；源码diff检查通过，保留上游Apache许可正文末尾原始空行。
+
+## 2026-10-17：0.3.3 镜像与完整发布
+
+- 冻结提交 `fe4d6f454f793e1eceeb45ea7a13fc888db6d5d0`，annotated tag `v0.3.3`；官方Git Database API核对相同Git OID并以force:false同步develop和功能分支，main及旧标签不动。ZIP 343203字节，SHA-256 `a4d08c295857f6874262013dd27732ed69bdb45fdd07419663833ad1a4783637`，sourceSha256 `156f4efc01d853ff90259dbbdb475f6099a3e2233aabb62098f4d14dead96a04`。
+- Actions `39013421657` 成功，79/79回归及22个JS语法通过；从原始成功job日志独立提取双架构索引 `sha256:0ef478536f41367916e5966cf0f1381f8f561d3b2060c610656a591ec0be18c6`，未重复构建或覆盖镜像。
+- 本机Docker Desktop无法启动，Hyper-V日志明确内存不足，无法分配2048MB（0x800705AA）；一次官方停止/启动未解决。没有重置设置、删卷、结束用户进程或访问真实var。转到独立 `ops/v0.3.3-release-validation` 辅助分支，冻结业务标签不变；首次 `39014682445` 因contents只读不能读取草稿失败，增加草稿所需写权限后 `39014851469` 完成三gate。失败和成功原日志保留，不记作应用修复。
+- 本机Node下载大artifact在31709字节停滞；独立PowerShell HttpClient持续但约37KB/s，300秒只取得11157504/167433175字节。两次超时及partial保留，不计完整产物。改以同镜像再执行 `39015392030`，运维提交 `7ce44bf95fdafb2fafbf8cfb5406d27b39a4ebed`，三gate后将缺失五附件直接上传既有草稿；原五个附件的ID/大小/摘要保持不变。
+- 最终Ubuntu24.04运行器Docker29.9/containerd存储、实际独立unix socket；空Docker凭据匿名实际拉取amd64/arm64并核对原始索引/manifest/config及OCI，冻结ZIP原字节和正式Compose专项通过，测试资源清理通过。
+- 官方0.3.2→0.3.3 amd64同卷升级15/15通过：旧Release原YML字节、项目、原0.3.2卷、挂载和12347:23458不变，仅.env镜像改变；历史账号权限、位置、已发放和账保留，首次设置未重开，新增条码绑定/精确QR/申请发放/实时金额及重启幂等、schema2映射恢复通过，容器/卷0残留且合成明文凭据删除。不覆盖ARM64升级、物理手机、实际NAS或长期负载。
+- 从同一正式公开镜像导出amd64 TAR 84141568字节，SHA-256 `5e26524fc4c7ccb65baec621e210b2dcb468befbdb41da7e05fc2c747259f3f7`；arm64 TAR 84010496字节，SHA-256 `d1fe95d2321800b50f515ac9a929f906df5798a2d7731b43761ca89a5f6df9bd`。各自load并通过冻结Compose容器专项，ARM64为QEMU模拟；TAR直接上传而非本机下载再传，本机未运行容器。八个小证据文件的10517字节artifact以官方API大小/SHA核验后安全解压，五份原报告逐字节保留，独立复核同run/ops、15check与清理、两TAR元数据/九SUM/十附件摘要链通过。
+- [0.3.3 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.3) 已公开（ID `415656980`，prerelease=true）。仅在三gate和全部十附件ID/大小/官方SHA-256一致后发布，公开后匿名metadata/tag与八份非TAR附件完整下载通过，报告 `github-release-verification.json` 为passed。未声明github.com页面、两大TAR本机或匿名全量下载、实际手机/NAS已验收。冻结后仅补文档，main、旧标签和发行ZIP/TAR不改写；本机八份小附件/源码在本版releases，验证、来源及下载失败记录在本版cache。
