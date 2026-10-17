@@ -779,12 +779,12 @@ test('materials upgrade expands the stock CHECK atomically while retaining rows,
   } finally { db.close(); }
 });
 
-test('schema 2 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
+test('schema 3 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
   const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'BACKUP-ISSUE', expiryDate: '2030-05-06' };
   await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '4', amount: '1.01', requestIdempotencyKey: key() }, 201);
   const legacy = structuredClone((await f.request('GET', '/api/materials/backup', f.admin)).data);
-  legacy.schemaVersion = 1; delete legacy.data.material_stock_locations; delete legacy.data.material_issues;
+  legacy.schemaVersion = 1; delete legacy.data.material_stock_locations; delete legacy.data.material_issues; delete legacy.data.material_barcodes;
   await f.request('PUT', '/api/materials/stock/location', s.material, { ...identity, location: 'Backup A', version: 0, reason: '备份位置' });
   const applyBody = { ...identity, quantity: '1', purpose: '备份发放', requestIdempotencyKey: key() };
   const issue = (await f.request('POST', '/api/materials/issues', ordinary, applyBody, 201)).data.issue;
@@ -797,7 +797,7 @@ test('schema 2 backups restore issue sources, locations and user mapping; damage
   const cancelled = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
   await f.request('POST', `/api/materials/issues/${cancelled.id}/cancel`, ordinary, { version: 1, reason: '备份取消', requestIdempotencyKey: key() }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 2); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
+  assert.equal(backup.schemaVersion, 3); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
   const target = await fixture(t);
   await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
@@ -844,4 +844,143 @@ test('schema 2 backups restore issue sources, locations and user mapping; damage
   assert.equal((await oldTarget.request('GET', '/api/materials/issues', oldMaterial)).data.total, 0);
   const oldStock = (await oldTarget.request('GET', '/api/materials/stock/batches', oldMaterial)).data.items[0];
   assert.equal(oldStock.qtyM, 4000); assert.equal(oldStock.amountCents, 101); assert.equal(oldStock.location, ''); assert.equal(oldStock.locationVersion, 0);
+});
+
+test('packaging barcodes preserve literal identity, require catalog managers and reasons, and cannot be rebound or deleted by stale IDs', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const other = await f.catalog(s.category.id, { code: 'BARCODE-OTHER', name: '另一个主档' });
+  const writeOnly = await f.customAccount('BARCODE_WRITE_ONLY', ['materials.catalog.write']);
+  const route = `/api/materials/catalog/${s.catalog.id}/barcodes`, payload = { code: '  0000123aA  ', reason: '外包装绑定' };
+  for (const actor of [ordinary, writeOnly]) await f.request('POST', route, actor, payload, 403);
+  for (const change of [{ code: 123 }, { code: '' }, { code: 'x'.repeat(513) }, { code: 'A\u001dB' }, { code: 'A\u007fB' },
+    { code: '\ud800' }, { code: 'LABOS-STOCK:1:{}' }, { reason: '' }]) await f.request('POST', route, s.material, { ...payload, ...change }, 400);
+  const saved = (await f.request('POST', route, s.material, payload, 201)).data.barcode;
+  assert.equal(saved.code, '0000123aA'); assert.equal(saved.catalogId, s.catalog.id); assert.equal(saved.createdBy, s.material.id);
+  assert.equal((await f.request('POST', route, f.admin, payload)).data.barcode.id, saved.id);
+  const conflict = await Promise.all([other, s.catalog].map(catalog => f.request('POST', `/api/materials/catalog/${catalog.id}/barcodes`, f.admin,
+    { code: 'CONCURRENT-CODE', reason: '并发唯一绑定' }, [201, 409])));
+  assert.deepEqual(conflict.map(result => result.status).sort(), [201, 409]);
+  await f.request('POST', `/api/materials/catalog/${other.id}/barcodes`, f.admin, payload, 409);
+  const distinct = (await f.request('POST', route, f.admin, { code: '0000123Aa', reason: '大小写不同的码' }, 201)).data.barcode;
+  assert.notEqual(distinct.id, saved.id);
+  const list = (await f.request('GET', route + '?pageSize=1&page=1', ordinary)).data;
+  assert.equal(list.pageSize, 1); assert.equal(list.items.length, 1); assert.ok(list.total >= 2);
+  const resolved = (await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: payload.code })).data;
+  assert.equal(resolved.kind, 'catalog'); assert.equal(resolved.catalog.id, s.catalog.id); assert.equal(resolved.barcode.id, saved.id);
+  await f.request('DELETE', `/api/materials/barcodes/${saved.id}`, ordinary, { reason: '无权' }, 403);
+  await f.request('DELETE', `/api/materials/barcodes/${saved.id}`, f.admin, { reason: '' }, 400);
+  await f.request('DELETE', `/api/materials/barcodes/${saved.id}`, f.admin, { reason: '纠正原绑定' });
+  await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: saved.code }, 404);
+  const replacement = (await f.request('POST', `/api/materials/catalog/${other.id}/barcodes`, s.material, { code: saved.code, reason: '核对后重新绑定' }, 201)).data.barcode;
+  assert.ok(replacement.id > saved.id);
+  await f.request('DELETE', `/api/materials/barcodes/${saved.id}`, f.admin, { reason: '陈旧表单' }, 404);
+  assert.equal((await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: saved.code })).data.catalog.id, other.id);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements', s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/requests', ordinary)).data.total, 0);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: ['materials.read'] });
+  await f.request('POST', route, s.material, { code: 'REVOKED', reason: '无权限' }, 403);
+  await f.request('DELETE', `/api/materials/barcodes/${replacement.id}`, s.material, { reason: '无权限' }, 403);
+});
+
+test('system stock QR resolves a fresh exact batch without side effects and rejects malformed, foreign and nonmatching locators', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: '', expiryDate: '' };
+  for (const extra of [{}, { batch: 'LOT-A', expiryDate: '2030-01-01' }, { batch: 'LOT-A', expiryDate: '2031-01-01' },
+    { regionId: s.otherRegion.id }, { warehouse: 'REAGENT' }]) await f.request('POST', '/api/materials/stock/opening', s.material,
+    { ...identity, ...extra, quantity: '2', amount: '3.00', requestIdempotencyKey: key() }, 201);
+  const batches = (await f.request('GET', '/api/materials/stock/batches', s.material)).data.items;
+  assert.equal(new Set(batches.map(row => row.qrPayload)).size, 5);
+  for (const batch of batches) {
+    assert.ok(batch.qrPayload.startsWith('LABOS-STOCK:1:'));
+    const resolved = (await f.request('POST', '/api/materials/scan/resolve', s.material, { code: batch.qrPayload })).data;
+    assert.equal(resolved.kind, 'stock'); assert.deepEqual(resolved.batch, batch); assert.equal(resolved.catalog.code, s.catalog.code);
+  }
+  const first = batches.find(row => row.warehouse === 'MAIN' && row.regionId === s.region.id && row.batch === '');
+  await f.request('PUT', '/api/materials/stock/location', f.admin, { ...identity, version: 0, location: '扫码柜', reason: '定位更新' });
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...identity, direction: 'decrease', quantity: '2', amount: '3.00', reason: '耗尽后仍可定位', requestIdempotencyKey: key() }, 201);
+  const empty = (await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: first.qrPayload })).data;
+  assert.equal(empty.batch.qtyM, 0); assert.equal(empty.batch.location, '扫码柜'); assert.equal(empty.batch.locationVersion, 1); assertNoMoney(empty);
+  const before = (await f.request('GET', '/api/materials/stock/movements', s.material)).data.total;
+  const saved = JSON.parse(first.qrPayload.slice('LABOS-STOCK:1:'.length)), encode = value => 'LABOS-STOCK:1:' + JSON.stringify(value);
+  for (const value of ['LABOS-STOCK:2:{}', 'LABOS-STOCK:1:broken', encode(null), encode([]), encode({ ...saved, quantity: '1' }),
+    encode({ ...saved, catalogId: String(saved.catalogId) }), encode({ ...saved, batch: null }), encode({ ...saved, expiryDate: '2030-02-30' }),
+    encode(Object.fromEntries(Object.entries(saved).filter(([name]) => name !== 'batch')))]) await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: value }, 400);
+  for (const change of [{ catalogCode: 'FOREIGN-SYSTEM' }, { regionId: 99999 }, { batch: 'NONEXISTENT' }, { expiryDate: '2040-01-01' }]) {
+    await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: encode({ ...saved, ...change }) }, 404);
+  }
+  const external = 'https://example.invalid/package?code=0000123', sqlLike = "' OR 1=1 --";
+  for (const code of [external, sqlLike]) {
+    await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, f.admin, { code, reason: '按原码精确绑定' }, 201);
+    assert.equal((await f.request('POST', '/api/materials/scan/resolve', ordinary, { code })).data.catalog.id, s.catalog.id);
+  }
+  await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: 'https://127.0.0.1/not-a-fetch' }, 404);
+  await f.request('POST', '/api/materials/scan/resolve', null, { code: first.qrPayload }, 401);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements', s.material)).data.total, before);
+  assert.equal((await f.request('GET', '/api/materials/issues', s.material)).data.total, 0);
+});
+
+test('scanned material acceptance lookup filters exact catalog, region and warehouse while keeping real receipt permissions and line versions', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const other = await f.catalog(s.category.id, { code: 'SCAN-OTHER', name: '其他扫码物资' });
+  let order = await f.order(ordinary, null, '扫码验收候选');
+  for (const extra of [{}, { regionId: s.otherRegion.id }, { warehouse: 'MAIN' }, { catalogId: other.id }, { catalogId: null, code: '', name: '尚未匹配', spec: '1', unit: '件' }]) {
+    order = await f.add(order, ordinary, f.item(s, { quantity: '2', ...extra }));
+  }
+  order = await f.submit(order);
+  const query = '/api/materials/acceptance?' + new URLSearchParams({ catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'REAGENT' });
+  const exact = (await f.request('GET', query, ordinary)).data;
+  assert.equal(exact.total, 1); assert.equal(exact.items[0].id, order.items[0].id);
+  assert.equal((await f.request('GET', '/api/materials/acceptance?catalogId=' + s.catalog.id, ordinary)).data.total, 3);
+  for (const suffix of ['catalogId=bad', 'regionId=0', 'warehouse=UNKNOWN']) await f.request('GET', '/api/materials/acceptance?' + suffix, ordinary, undefined, 400);
+  const receipt = f.receiptBody(order, { quantity: '1', amount: '1.00' });
+  await f.request('POST', '/api/materials/receipts', ordinary, receipt, 403);
+  await f.request('POST', '/api/materials/receipts', f.admin, receipt, 403);
+  await f.request('POST', '/api/materials/receipts', s.material, receipt, 201);
+  const partial = (await f.request('GET', query + '&status=partial', ordinary)).data;
+  assert.equal(partial.total, 1); assert.equal(partial.items[0].remainingQtyM, 1000);
+  await f.request('POST', '/api/materials/receipts', s.material, { ...receipt, requestIdempotencyKey: key() }, 409);
+  const pendingOrder = await f.submit(await f.order(ordinary, f.item(s, { quantity: '2' }), '仍待验收'));
+  const doneOrder = await f.submit(await f.order(ordinary, f.item(s, { quantity: '2' }), '最新已验收'));
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(doneOrder, { quantity: '2', amount: '2.00' }), 201);
+  const open = (await f.request('GET', query + '&status=open&pageSize=1', ordinary)).data;
+  assert.equal(open.total, 2); assert.equal(open.items.length, 1); assert.equal(open.items[0].requestId, pendingOrder.id);
+  const next = (await f.request('GET', query + '&status=open&pageSize=1&page=2', ordinary)).data;
+  assert.equal(next.total, 2); assert.equal(next.items[0].requestId, order.id); assert.equal(next.items[0].receiptStatus, 'partial');
+  assert.equal((await f.request('GET', query, ordinary)).data.total, 3, 'default lookup still includes completed history');
+});
+
+test('schema 3 barcode backup maps creators and rejects damaged mappings while strict schema 2 imports normalize only the new table', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const previous = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  previous.schemaVersion = 2; delete previous.data.material_barcodes;
+  const saved = (await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, s.material, { code: '0000Backup', reason: '备份映射' }, 201)).data.barcode;
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.equal(backup.schemaVersion, 3); assert.equal(backup.data.material_barcodes.length, 1);
+  const target = await fixture(t); await target.account('TESTER'); const targetMaterial = await target.account('MATERIAL');
+  assert.notEqual(targetMaterial.id, s.material.id);
+  for (const change of [
+    payload => { payload.data.material_barcodes.push({ ...payload.data.material_barcodes[0], id: saved.id + 1 }); },
+    payload => { payload.data.material_barcodes[0].code = ' padded '; },
+    payload => { payload.data.material_barcodes[0].code = 'A\u001dB'; },
+    payload => { payload.data.material_barcodes[0].code = 'LABOS-STOCK:1:{}'; },
+    payload => { payload.data.material_barcodes[0].catalog_id = 99999; },
+    payload => { payload.data.material_barcodes[0].created_by = 99999; },
+    payload => { delete payload.data.material_barcodes[0].code; },
+    payload => { delete payload.data.material_barcodes; }
+  ]) {
+    const damaged = structuredClone(backup); change(damaged);
+    await target.request('POST', '/api/materials/restore', target.admin, damaged, 400);
+    assert.equal((await target.request('GET', '/api/materials/catalog', targetMaterial)).data.total, 0);
+  }
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  const restored = (await target.request('POST', '/api/materials/scan/resolve', targetMaterial, { code: saved.code })).data;
+  assert.equal(restored.catalog.id, s.catalog.id); assert.equal(restored.barcode.id, saved.id); assert.equal(restored.barcode.createdBy, targetMaterial.id);
+  const oldTarget = await fixture(t); const oldMaterial = await oldTarget.account('MATERIAL');
+  const mixed = structuredClone(previous); mixed.data.material_barcodes = [];
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, mixed, 400);
+  const missing = structuredClone(previous); delete missing.data.material_issues;
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, missing, 400);
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, previous);
+  assert.equal((await oldTarget.request('GET', `/api/materials/catalog/${s.catalog.id}/barcodes`, oldMaterial)).data.total, 0);
+  await oldTarget.request('POST', '/api/materials/scan/resolve', oldMaterial, { code: saved.code }, 404);
 });

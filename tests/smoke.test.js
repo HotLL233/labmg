@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
+const crypto = require('node:crypto');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const { test } = require('node:test');
@@ -50,6 +51,21 @@ test('moved entry serves assets and isolates normal, development and custom data
       const home = await fetch(base);
       assert.equal(home.status, 200);
       assert.match(await home.text(), /LabOS/);
+      for (const [url, file, mime] of [
+        ['/vendor/zxing-wasm/3.1.5/index.js', path.resolve(path.dirname(require.resolve('zxing-wasm/full/zxing_full.wasm')), '../iife/full/index.js'), 'text/javascript; charset=utf-8'],
+        ['/vendor/zxing-wasm/3.1.5/zxing_full.wasm', require.resolve('zxing-wasm/full/zxing_full.wasm'), 'application/wasm']
+      ]) {
+        const resource = await fetch(base + url);
+        assert.equal(resource.status, 200);
+        assert.equal(resource.headers.get('content-type'), mime);
+        const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+        assert.equal(hash(Buffer.from(await resource.arrayBuffer())), hash(fs.readFileSync(file)));
+      }
+      for (const url of ['/node_modules/zxing-wasm/package.json', '/vendor/zxing-wasm/3.1.5/package.json', '/vendor/zxing-wasm/3.1.5/%2e%2e%2fpackage.json']) {
+        const response = await fetch(base + url);
+        assert.equal(response.status, 404, url);
+        await response.arrayBuffer();
+      }
       const login = await fetch(`${base}/api/auth/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: env.LABOS_ADMIN_USER, password: env.LABOS_ADMIN_PASSWORD })

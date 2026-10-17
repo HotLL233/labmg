@@ -71,9 +71,11 @@ try {
         }
     }
     @('@echo off', 'cd /d "%~dp0"',
-        'if not exist "node_modules\write-excel-file\package.json" (',
+        'if not exist "node_modules\write-excel-file\package.json" goto install',
+        'if exist "node_modules\zxing-wasm\dist\full\zxing_full.wasm" goto start',
+        ':install',
         "  call npm ci --omit=dev --ignore-scripts --no-audit --no-fund --cache artifacts\cache\$version\npm",
-        '  if errorlevel 1 exit /b 1', ')', 'node src\server.js') |
+        '  if errorlevel 1 exit /b 1', ':start', 'node src\server.js') |
         Set-Content -LiteralPath (Join-Path $payload 'start-labos.cmd') -Encoding ascii
     $archive = Join-Path $ready $archiveName
     [System.IO.Compression.ZipFile]::CreateFromDirectory($payload, $archive)

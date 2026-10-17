@@ -3,6 +3,10 @@
 !package-lock.json
 !src
 !src/**
+!docs
+!docs/licenses
+!docs/licenses/**
+!docs/THIRD_PARTY.md
 **/.env*
 **/*.db
 **/*.db-wal

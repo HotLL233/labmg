@@ -202,7 +202,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   }
   const context = {
     document, fetch, FormData, URL, URLSearchParams, Blob, Date, console, crypto, location: { origin: 'http://localhost', reload() {} },
-    confirm: () => true, prompt: () => null,
+    confirm: () => true, prompt: () => null, addEventListener() {}, removeEventListener() {},
     setTimeout(callback, delay) { const id = Symbol(); timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval() {},
     editor: document.querySelector('#editor'), detail: document.querySelector('#detail'), login: document.querySelector('#login')
@@ -327,7 +327,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['app.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -589,9 +589,9 @@ test('new material can be submitted before catalog matching, with accounting blo
 
 async function materialApp(manager = true) {
   const app = await browser({ id: 1, role: manager ? 'MATERIAL' : 'USER', permissions: [] });
-  app.state.materialCapabilities = { createRequest: true, createIssue: true, viewAmount: manager, manageLocation: manager, issueStock: manager, adjustStock: manager, submitRequest: manager };
+  app.state.materialCapabilities = { createRequest: true, createIssue: true, viewAmount: manager, manageCatalog: manager, receive: manager, manageLocation: manager, issueStock: manager, adjustStock: manager, submitRequest: manager };
   const row = { catalogId: 5, code: 'MAT-5', name: '合成物资', spec: '测试规格', unit: '件', categoryId: 1, categoryName: '合成分类', regionId: 2, regionName: '合成区域', warehouse: 'MAIN', batch: '', expiryDate: '', location: '', locationVersion: 1, qtyM: 10000, amountCents: 1000, lastMovementAt: '2026-10-17T01:02:03Z' };
-  Object.assign(app.state.materialLists, { '/categories': [{ id: 1, name: row.categoryName }], '/regions': [{ id: 2, name: row.regionName }], '/catalog': [row], '/stock': [row], '/stock/batches': [row] });
+  Object.assign(app.state.materialLists, { '/categories': [{ id: 1, name: row.categoryName }], '/regions': [{ id: 2, name: row.regionName }], '/catalog': [{ ...row, id: row.catalogId }], '/stock': [row], '/stock/batches': [row] });
   const item = { ...row, id: 11, requestId: 101, qtyM: 10000, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 10000, receiptStatus: 'pending', version: 1, canEdit: true };
   const request = { ...app.state.materialRequests[0], status: 'draft', version: 1, canEditHeader: true, canAddItem: true, canSubmit: manager, items: [item] };
   app.state.materialDetails[101] = request;
@@ -742,4 +742,211 @@ test('zero-value stock adjustments require a reason and receipt history shows bu
   assert.match(history, /零金额原因：免费样品原因/); assert.match(history, /拒收原因：破损拒收原因/);
   const ordinary = await materialApp(false); await ordinary.click('[data-mw=request]');
   assert.match(ordinary.app.$('#page').textContent, /MATERIAL.*提交申报.*ADMIN/);
+});
+
+function materialScanner(app, scan, createQr = async () => new Blob(['synthetic QR'], { type: 'image/png' })) {
+  const calls = { scans: 0, closes: 0, qr: [] };
+  app.context.MaterialScanner = {
+    scan: async () => { calls.scans++; return scan(); }, close: () => { calls.closes++; },
+    createQr: async text => { calls.qr.push(text); return createQr(text); }
+  };
+  return calls;
+}
+
+const stockQr = row => 'LABOS-STOCK:1:' + JSON.stringify({ catalogId: row.catalogId, catalogCode: row.code, regionId: row.regionId, warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiryDate });
+
+test('scanned packaging codes retain leading zeros and require selecting a current submitted acceptance row before accounting', async () => {
+  const { app, row, item, request, click, fill, submit } = await materialApp();
+  request.status = 'submitted'; request.version = 3; item.version = 4;
+  const candidate = { ...item, requestNo: request.no };
+  const scanner = materialScanner(app, async () => '001AbC'); let receipt;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/scan/resolve') { assert.deepEqual(body, { code: '001AbC' }); return { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: { code: '001AbC' } } }; }
+    if (url.pathname === '/api/materials/acceptance') {
+      assert.equal(url.searchParams.get('catalogId'), '5'); assert.equal(url.searchParams.get('status'), 'open');
+      assert.equal(url.searchParams.has('warehouse'), false);
+      return { body: { items: [candidate], total: 51, page: Number(url.searchParams.get('page')), pageSize: 50 } };
+    }
+    if (url.pathname === '/api/materials/receipts' && method === 'POST') { receipt = body; return { body: { request } }; }
+  };
+  await click('[data-mw=scan-receive]'); assert.equal(scanner.scans, 1);
+  assert.match(app.$('#mw-view-body').textContent, /外包装条码只能定位物资/);
+  assert.equal(app.$('#mw-dialog').open, false); assert.equal(receipt, undefined);
+  const stale = app.$('[data-mw=scan-receive-item]');
+  await click(app.document.querySelectorAll('[data-mw=scan-receive-page]').find(button => button.dataset.historyPage === '2'));
+  assert.equal(app.requests.at(-1).url.searchParams.get('page'), '2');
+  await click(stale); assert.match(app.$('#mw-status').textContent, /扫码候选已变化/);
+  await click('[data-mw=scan-receive-item]');
+  assert.equal(app.$('#mw-fields [name=quantity]').value, ''); assert.equal(app.$('#mw-fields [name=amount]').value, '');
+  fill({ quantity: '1', amount: '2.50' }); await submit();
+  assert.equal(receipt.requestVersion, 3); assert.equal(receipt.version, 4); assert.equal(receipt.itemId, 11);
+  assert.equal(receipt.quantity, '1'); assert.equal(receipt.amount, '2.50'); assert.ok(receipt.requestIdempotencyKey);
+});
+
+test('internal batch scans narrow acceptance by warehouse and region and only prefill editable batch identity', async () => {
+  const { app, row, item, request, click, fill, submit } = await materialApp(); request.status = 'submitted';
+  const batch = { ...row, batch: 'LOT"<&', expiryDate: '2028-05-06' }; batch.qrPayload = stockQr(batch);
+  materialScanner(app, async () => batch.qrPayload); let receipt;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname.endsWith('/scan/resolve')) return { body: { kind: 'stock', catalog: { ...row, id: row.catalogId }, batch } };
+    if (url.pathname === '/api/materials/acceptance') {
+      assert.equal(url.searchParams.get('regionId'), '2'); assert.equal(url.searchParams.get('warehouse'), 'MAIN');
+      assert.equal(url.searchParams.has('batch'), false);
+      return { body: { items: [{ ...item, requestNo: request.no }], total: 1, page: 1, pageSize: 50 } };
+    }
+    if (url.pathname === '/api/materials/receipts' && method === 'POST') { receipt = body; return { body: { request } }; }
+  };
+  await click('[data-mw=scan-receive]'); await click('[data-mw=scan-receive-item]');
+  assert.equal(app.$('#mw-fields [name=batch]').value, 'LOT"<&'); assert.equal(app.$('#mw-fields [name=expiryDate]').value, '2028-05-06');
+  assert.match(app.$('#mw-intro').textContent, /以本次实际到货为准/);
+  fill({ batch: '核对后的到货批次', expiryDate: '2028-06-01', quantity: '1', amount: '1' }); await submit();
+  assert.equal(receipt.batch, '核对后的到货批次'); assert.equal(receipt.expiryDate, '2028-06-01');
+  await click('[data-mw=scan-receive]'); item.remainingQtyM = 0; await click('[data-mw=scan-receive-item]');
+  assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /已无待验数量/);
+});
+
+test('ordinary packaging scans choose a full stock batch and still submit an application without money or direct issuance', async () => {
+  const { app, row, click, fill, submit } = await materialApp(false);
+  const other = { ...row, regionId: 9, regionName: '另一区域', warehouse: 'SPARE', batch: 'L-2', expiryDate: '2029-01-01' };
+  app.state.materialLists['/stock/batches'] = [row, other]; materialScanner(app, async () => '0000123'); let applied;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname.endsWith('/scan/resolve')) return { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: { code: '0000123' } } };
+    if (url.pathname === '/api/materials/issues' && method === 'POST') { applied = body; return { body: { issue: { id: 41 } } }; }
+  };
+  assert.equal(app.$('[data-mw=scan-receive]'), null); assert.equal(app.$('[data-mw=dictionaries]'), null);
+  await click('[data-mw=scan-issue]');
+  const lookup = app.requests.find(entry => entry.url.pathname === '/api/materials/stock/batches');
+  assert.equal(lookup.url.searchParams.get('catalogId'), '5'); assert.equal(lookup.url.searchParams.has('regionId'), false);
+  assert.match(app.$('#mw-view-body').textContent, /外包装条码只能定位物资.*选择实际仓库/);
+  assert.match(app.$('#mw-view-body').textContent, /另一区域/);
+  assert.equal(app.$('[data-mw=location]'), null); assert.equal(app.$('[data-mw=barcodes]'), null);
+  await click(app.document.querySelectorAll('[data-mw=issue-create]')[1]); fill({ quantity: '1', purpose: '扫描后申请' }); await submit();
+  assert.equal(applied.regionId, 9); assert.equal(applied.warehouse, 'SPARE'); assert.equal(applied.batch, 'L-2');
+  assert.equal(Object.hasOwn(applied, 'amount'), false); assert.ok(applied.requestIdempotencyKey);
+  assert.equal(app.requests.some(entry => /\/issues\/\d+\/issue$/.test(entry.url.pathname)), false);
+});
+
+test('stock QR lookup preserves empty batch filters and no-candidate or unknown codes give a recoverable result', async () => {
+  const { app, row, click } = await materialApp(false); row.qrPayload = stockQr(row);
+  materialScanner(app, async () => row.qrPayload);
+  app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { kind: 'stock', catalog: { ...row, id: row.catalogId }, batch: row } } : undefined;
+  await click('[data-mw=scan-issue]');
+  const lookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1).url;
+  assert.equal(lookup.searchParams.get('warehouse'), 'MAIN'); assert.equal(lookup.searchParams.has('batch'), true); assert.equal(lookup.searchParams.get('batch'), '');
+  assert.equal(lookup.searchParams.has('expiryDate'), true); assert.equal(lookup.searchParams.get('expiryDate'), '');
+  await click('[data-mw=close-view]');
+  app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { error: '条码尚未绑定主档' }, status: 404 } : undefined;
+  await click('[data-mw=scan-issue]'); assert.match(app.$('#mw-status').textContent, /尚未绑定/); assert.equal(app.$('#mw-view').open, false);
+  const manager = await materialApp(); materialScanner(manager.app, async () => 'empty');
+  manager.app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: {} } } : undefined;
+  await manager.click('[data-mw=scan-receive]'); assert.match(manager.app.$('#mw-view-body').textContent, /暂无可验收申报行.*原单已提交/);
+});
+
+test('scanner cancellation, duplicate clicks and late scan or resolver responses cannot replace a newer page or form', async () => {
+  const { app, row, click } = await materialApp(); let release;
+  const calls = materialScanner(app, () => new Promise(resolve => { release = resolve; }));
+  const pending = click('[data-mw=scan-issue]'); await new Promise(setImmediate); await click('[data-mw=scan-issue]'); assert.equal(calls.scans, 1);
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); release('001'); await pending;
+  assert.ok(calls.closes > 0); assert.equal(app.requests.some(entry => entry.url.pathname.endsWith('/scan/resolve')), false);
+  app.context.MaterialScanner.scan = async () => null; await click('[data-mw=scan-issue]');
+  assert.equal(app.requests.some(entry => entry.url.pathname.endsWith('/scan/resolve')), false);
+  app.context.MaterialScanner.scan = async () => '002';
+  app.state.materialResponse = async ({ url }) => {
+    if (url.pathname.endsWith('/scan/resolve')) { await new Promise(resolve => { release = resolve; }); return { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: {} } }; }
+  };
+  const resolving = click('[data-mw=scan-issue]'); await new Promise(setImmediate); await app.run("currentUser.permissions.push('assets.read'); go('assets')"); release(); await resolving;
+  assert.equal(app.run('current'), 'assets'); assert.equal(app.$('#mw-view').open, false); assert.doesNotMatch(app.$('#page').textContent, /扫码领用/);
+});
+
+test('closing scan details by button or Escape invalidates pending batch pages and acceptance selection', async () => {
+  for (const escape of [false, true]) {
+    const { app, row, item, request, click } = await materialApp(); request.status = 'submitted';
+    materialScanner(app, async () => '001'); let release, holdBatch = false, holdRequest = false;
+    app.state.materialResponse = async ({ url }) => {
+      if (url.pathname.endsWith('/scan/resolve')) return { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: {} } };
+      if (url.pathname === '/api/materials/stock/batches') {
+        if (holdBatch) await new Promise(resolve => { release = resolve; });
+        return { body: { items: [row], total: 51, page: Number(url.searchParams.get('page')), pageSize: 50 } };
+      }
+      if (url.pathname === '/api/materials/acceptance') return { body: { items: [item], total: 1, page: 1, pageSize: 50 } };
+      if (url.pathname === '/api/materials/requests/101' && holdRequest) {
+        await new Promise(resolve => { release = resolve; }); return { body: request };
+      }
+    };
+    const dismiss = async () => {
+      if (escape) { let prevented = false; app.$('#mw-view').listeners.cancel({ preventDefault() { prevented = true; } }); assert.equal(prevented, true); }
+      else await click('[data-mw=close-view]');
+    };
+    await click('[data-mw=scan-issue]'); holdBatch = true;
+    const paging = click(app.document.querySelectorAll('[data-mw=batches]').find(button => button.dataset.historyPage === '2'));
+    await new Promise(setImmediate); await dismiss(); release(); await paging;
+    assert.equal(app.$('#mw-view').open, false, 'late batch page must stay closed');
+    await click('[data-mw=scan-receive]'); holdRequest = true;
+    const selecting = click('[data-mw=scan-receive-item]'); await new Promise(setImmediate);
+    await dismiss(); release(); await selecting;
+    assert.equal(app.$('#mw-view').open, false); assert.equal(app.$('#mw-dialog').open, false, 'late original request must not open receipt form');
+  }
+});
+
+test('packaging acceptance selection rechecks the scanned catalog after the original row changes', async () => {
+  const { app, row, item, request, click } = await materialApp(); request.status = 'submitted';
+  materialScanner(app, async () => '001');
+  app.state.materialResponse = ({ url }) => {
+    if (url.pathname.endsWith('/scan/resolve')) return { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: {} } };
+    if (url.pathname === '/api/materials/acceptance') return { body: { items: [{ ...item }], total: 1, page: 1, pageSize: 50 } };
+  };
+  await click('[data-mw=scan-receive]'); item.catalogId = 999; item.name = '另一物资';
+  await click('[data-mw=scan-receive-item]');
+  assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /原单物资已变化.*重新扫码/);
+  assert.equal(app.requests.some(entry => entry.url.pathname === '/api/materials/receipts'), false);
+});
+
+test('catalog barcode binding preserves scanned strings and rejected input, replays an uncertain binding, and requires unbinding reasons', async () => {
+  const { app, row, click, fill, submit } = await materialApp(); const writes = [], bindings = [];
+  materialScanner(app, async () => '001AbC');
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/catalog/5/barcodes') {
+      if (method === 'GET') return { body: { items: bindings, total: bindings.length, page: 1, pageSize: 50 } };
+      writes.push(body);
+      if (writes.length === 1) return { body: { error: '条码被另一主档占用，请核对' }, status: 409 };
+      if (writes.length === 2) throw Error('synthetic lost binding response');
+      bindings.push({ id: 51, code: body.code, catalogId: 5, creatorName: '<img src=x>', createdAt: '2026-10-17' }); return { body: { barcode: bindings[0] } };
+    }
+    if (url.pathname === '/api/materials/barcodes/51' && method === 'DELETE') { assert.deepEqual(body, { reason: '包装变更，解除旧码' }); bindings.length = 0; return { body: { deleted: true } }; }
+  };
+  await click('[data-mw=dictionaries]'); await click('[data-mw=barcodes]'); await click('[data-mw=barcode-add]');
+  await click('[data-mw=barcode-scan]'); assert.equal(app.$('#mw-fields [name=code]').value, '001AbC');
+  await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /绑定原因不能为空/);
+  fill({ reason: '核对包装与主档后绑定' }); await submit();
+  assert.equal(app.$('#mw-fields [name=code]').value, '001AbC'); assert.match(app.$('#mw-error').textContent, /被另一主档占用/);
+  await submit(); assert.equal(app.$('#mw-fields [name=code]').disabled, true); assert.match(app.$('#mw-error').textContent, /不会重复绑定/);
+  await submit(); assert.deepEqual(writes[2], writes[1]); assert.equal(Object.hasOwn(writes[2], 'requestIdempotencyKey'), false);
+  assert.equal(app.$('#mw-view img'), null); assert.match(app.$('#mw-view-body').textContent, /001AbC/);
+  await click('[data-mw=barcode-delete]'); await submit(); assert.match(app.$('#mw-error').textContent, /解绑原因不能为空/);
+  fill({ reason: '包装变更，解除旧码' }); await submit(); assert.match(app.$('#mw-view-body').textContent, /尚未绑定外包装条码/);
+  const ordinary = await materialApp(false); await ordinary.click({ dataset: { mw: 'barcodes', catalog: String(row.catalogId) } });
+  assert.equal(ordinary.app.requests.some(entry => entry.url.pathname.endsWith('/barcodes')), false);
+});
+
+test('QR labels open synchronously in an isolated printable window, escape material text and wait for the image before enabling print', async () => {
+  const { app, row, click } = await materialApp(); row.name = '<img src=x onerror=alert(1)>'; row.qrPayload = stockQr(row);
+  const opened = [], events = [], revoked = []; let release;
+  app.context.open = () => {
+    events.push('open'); const document = new Element('document'); document.open = () => {}; document.write = html => { document.innerHTML = html; }; document.close = () => {};
+    document.getElementById = id => document.querySelector('#' + id);
+    const popup = { document, closed: false, prints: 0, close() { this.closed = true; }, print() { this.prints++; }, addEventListener() {} }; opened.push(popup); return popup;
+  };
+  app.context.URL = class extends URL { static createObjectURL() { return 'blob:synthetic-label'; } static revokeObjectURL(value) { revoked.push(value); } };
+  const scanner = materialScanner(app, async () => null, () => { events.push('qr'); return new Promise(resolve => { release = resolve; }); });
+  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]');
+  const printing = click('[data-mw=print-label]'); assert.deepEqual(events, ['open', 'qr']);
+  assert.equal(opened[0].opener, null); assert.equal(opened[0].document.getElementById('label-print').disabled, true);
+  release(new Blob(['synthetic QR'], { type: 'image/png' })); await printing;
+  const popup = opened[0], image = popup.document.getElementById('stock-qr'); assert.equal(scanner.qr[0], row.qrPayload);
+  assert.equal(popup.document.querySelectorAll('img').length, 1); assert.equal(popup.document.querySelector('script'), null);
+  assert.match(popup.document.textContent, /扫码后查询实时库存/); assert.doesNotMatch(popup.document.textContent, /¥10\.00/);
+  assert.equal(popup.document.getElementById('label-print').disabled, true); image.onload(); popup.document.getElementById('label-print').click();
+  assert.equal(popup.prints, 1); assert.deepEqual(revoked, ['blob:synthetic-label']);
+  const stale = click('[data-mw=print-label]'); await click({ dataset: { mw: 'page', page: 'requests' } }); release(new Blob(['late'])); await stale;
+  assert.equal(opened[1].closed, true);
 });

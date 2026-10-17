@@ -12,13 +12,15 @@ const WAREHOUSES = [
 ];
 const FILE_LIMIT = 5 * 1024 * 1024;
 const BACKUP_LIMIT = 20 * 1024 * 1024;
+const STOCK_QR_PREFIX = 'LABOS-STOCK:1:';
 const TABLES = [
-  'material_categories', 'material_regions', 'material_catalog', 'material_requests',
+  'material_categories', 'material_regions', 'material_catalog', 'material_barcodes', 'material_requests',
   'material_request_items', 'material_request_revisions', 'material_receipts',
   'material_stock_locations', 'material_issues', 'material_stock_movements',
   'material_attachments', 'material_state', 'material_idempotency'
 ];
-const V1_TABLES = TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
+const V2_TABLES = TABLES.filter(table => table !== 'material_barcodes');
+const V1_TABLES = V2_TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
 function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx }) {
   db.exec(`
@@ -37,6 +39,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       spec TEXT NOT NULL, unit TEXT NOT NULL, category_id INTEGER NOT NULL REFERENCES material_categories(id),
       version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
       created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS material_barcodes(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE COLLATE BINARY CHECK(length(code)>0 AND length(code)<=512),
+      catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS material_requests(
       id INTEGER PRIMARY KEY AUTOINCREMENT, no TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
@@ -239,6 +246,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const result = one('SELECT * FROM material_catalog WHERE id=?', integer(id, '物资主档'));
     if (!result) error(400, '物资主档不存在');
     return result;
+  }
+  function catalogView(row) {
+    return { id: row.id, code: row.code, name: row.name, spec: row.spec, unit: row.unit,
+      categoryId: row.category_id, categoryName: dictionary('material_categories', row.category_id, '分类').name, version: row.version };
+  }
+  function barcodeCode(value) {
+    const code = text(value, '条码内容', 512);
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(code) || !code.isWellFormed()) error(400, '条码内容不能包含控制字符或无效文字');
+    return code;
+  }
+  function packageBarcode(value) {
+    const code = barcodeCode(value);
+    if (code.startsWith('LABOS-STOCK:')) error(400, '系统库存二维码前缀不能绑定为外包装条码');
+    return code;
+  }
+  function barcodeView(row) {
+    return { id: row.id, code: row.code, catalogId: row.catalog_id, createdBy: row.created_by,
+      creatorName: actorName(row.created_by), createdAt: row.created_at };
   }
   function request(id) {
     const result = one('SELECT * FROM material_requests WHERE id=?', integer(id));
@@ -579,7 +604,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         code: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
         regionId: row.region_id, regionName: row.region_name, warehouse: row.warehouse,
         ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date, categoryId: snapshot.categoryId, categoryName: snapshot.categoryName,
-          location: stockLocation(row)?.location || '', locationVersion: stockLocation(row)?.version || 0 } : {}),
+          location: stockLocation(row)?.location || '', locationVersion: stockLocation(row)?.version || 0,
+          qrPayload: STOCK_QR_PREFIX + JSON.stringify({ catalogId: row.catalog_id, catalogCode: snapshot.code, regionId: row.region_id,
+            warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date }) } : {}),
         qtyM: row.qty_m, amountCents: row.amount_cents, lastMovementAt: row.last_movement_at };
     });
     return page ? { items: rows, total, page: page.page, pageSize: page.pageSize } : rows;
@@ -753,8 +780,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   function listAcceptance(url, user) {
     const filters = [], args = [];
+    for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse']]) {
+      if (!url.searchParams.has(parameter)) continue;
+      filters.push(`a.${column}=?`);
+      args.push(parameter === 'warehouse' ? warehouse(url.searchParams.get(parameter)) : integer(url.searchParams.get(parameter), parameter));
+    }
     const status = url.searchParams.get('status');
-    if (status && status !== 'all') {
+    if (status === 'open') filters.push('a.qty_m-a.accepted_qty_m-a.closed_qty_m>0');
+    else if (status && status !== 'all') {
       if (!['pending', 'partial', 'done', 'closed'].includes(status)) error(400, '验收状态无效');
       filters.push('a.receipt_status=?'); args.push(status);
     }
@@ -812,6 +845,61 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         });
         return reply({ id: inserted.id, name: inserted.name, createdBy: inserted.created_by, createdAt: inserted.created_at }, 201);
       }
+    }
+    if ((match = route.match(/^\/catalog\/(\d+)\/barcodes$/))) {
+      const master = catalog(match[1]);
+      if (method === 'GET') return reply(paginate(all('SELECT * FROM material_barcodes WHERE catalog_id=? ORDER BY id', master.id).map(barcodeView), url));
+      if (method === 'POST') {
+        requireManager(user, 'materials.catalog.write');
+        const code = packageBarcode(input.code), reason = text(input.reason, '条码绑定原因', 1000);
+        const result = transaction(() => {
+          const existing = one('SELECT * FROM material_barcodes WHERE code=?', code);
+          if (existing) {
+            if (existing.catalog_id !== master.id) conflict('该条码已绑定其他物资，请核对后先解除原绑定');
+            return { barcode: barcodeView(existing), created: false };
+          }
+          const saved = run('INSERT INTO material_barcodes(code,catalog_id,created_by) VALUES(?,?,?)', code, master.id, user.id);
+          log(user, 'BIND_BARCODE', 'material_barcodes', saved.lastInsertRowid, JSON.stringify({ catalogId: master.id, code, reason }));
+          return { barcode: barcodeView(one('SELECT * FROM material_barcodes WHERE id=?', saved.lastInsertRowid)), created: true };
+        });
+        return reply({ barcode: result.barcode }, result.created ? 201 : 200);
+      }
+    }
+    if ((match = route.match(/^\/barcodes\/(\d+)$/)) && method === 'DELETE') {
+      requireManager(user, 'materials.catalog.write');
+      const reason = text(input.reason, '解除条码绑定原因', 1000);
+      transaction(() => {
+        const row = one('SELECT * FROM material_barcodes WHERE id=?', integer(match[1]));
+        if (!row) error(404, '条码绑定不存在，请重新读取');
+        run('DELETE FROM material_barcodes WHERE id=?', row.id);
+        log(user, 'UNBIND_BARCODE', 'material_barcodes', row.id, JSON.stringify({ catalogId: row.catalog_id, code: row.code, reason }));
+      });
+      return reply({ deleted: true });
+    }
+    if (route === '/scan/resolve' && method === 'POST') {
+      const code = barcodeCode(input.code);
+      if (code.startsWith('LABOS-STOCK:')) {
+        if (!code.startsWith(STOCK_QR_PREFIX)) error(400, '系统库存二维码版本不支持');
+        let saved;
+        try { saved = JSON.parse(code.slice(STOCK_QR_PREFIX.length)); } catch { error(400, '系统库存二维码格式无效'); }
+        const keys = ['catalogId', 'catalogCode', 'regionId', 'warehouse', 'batch', 'expiryDate'];
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved) || Object.keys(saved).length !== keys.length ||
+            keys.some(key => !Object.hasOwn(saved, key)) || !Number.isSafeInteger(saved.catalogId) || saved.catalogId <= 0 ||
+            !Number.isSafeInteger(saved.regionId) || saved.regionId <= 0 || typeof saved.catalogCode !== 'string' ||
+            typeof saved.batch !== 'string' || text(saved.batch, '二维码批号', 100, true) !== saved.batch ||
+            typeof saved.expiryDate !== 'string' || date(saved.expiryDate, '二维码有效期', true) !== saved.expiryDate) error(400, '系统库存二维码身份字段无效');
+        warehouse(saved.warehouse);
+        const master = one('SELECT * FROM material_catalog WHERE id=? AND code=?', saved.catalogId, saved.catalogCode);
+        if (!master) error(404, '系统二维码对应的物资不存在，请核对当前系统');
+        const query = new URL('http://materials.local/stock/batches');
+        for (const key of ['catalogId', 'regionId', 'warehouse', 'batch', 'expiryDate']) query.searchParams.set(key, saved[key]);
+        const batch = stockRows(query, false, true)[0];
+        if (!batch) error(404, '系统二维码对应的库存批次不存在');
+        return reply({ kind: 'stock', catalog: catalogView(master), batch });
+      }
+      const barcode = one('SELECT * FROM material_barcodes WHERE code=?', code);
+      if (!barcode) error(404, '该条码尚未绑定物资主档');
+      return reply({ kind: 'catalog', catalog: catalogView(catalog(barcode.catalog_id)), barcode: barcodeView(barcode) });
     }
     if (route === '/catalog') {
       if (method === 'GET') {
@@ -1134,7 +1222,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 2, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 3, generatedAt: now(),
       users: all('SELECT id,username FROM users ORDER BY id'), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
@@ -1152,6 +1240,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }));
   }
   function validateRestoredLedger() {
+    for (const row of all('SELECT * FROM material_barcodes')) {
+      if (packageBarcode(row.code) !== row.code) error(400, '条码内容未规范化');
+      catalog(row.catalog_id);
+    }
     if (!openingClosed() && one("SELECT 1 FROM material_receipts WHERE type='acceptance' LIMIT 1")) {
       error(400, '存在合格验收历史时不能恢复为开放期初');
     }
@@ -1258,10 +1350,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
-    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : TABLES;
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : TABLES;
     if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
         Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
@@ -1306,6 +1398,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     if (normalized.material_state.some(row => !['opening_closed', 'restored_once'].includes(row.key) || !['0', '1'].includes(row.value)) ||
         normalized.material_state.filter(row => row.key === 'opening_closed').length !== 1) error(400, '备份期初状态无效');
+    const barcodeCodes = new Set();
+    for (const row of normalized.material_barcodes) {
+      if (packageBarcode(row.code) !== row.code || barcodeCodes.has(row.code)) error(400, '备份条码未规范化或存在重复绑定');
+      barcodeCodes.add(row.code);
+    }
     const contents = new Map();
     let byteCount = 0;
     for (const file of payload.files) {

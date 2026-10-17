@@ -1,10 +1,10 @@
-# 0.3.2 部署配置；镜像及附件可用性以 v0.3.2 Release 的实际发布记录为准。
-# 仅首次安装使用默认 0.3.2 新卷；已有部署先停服完整备份，保留原 YML/项目/挂载/UID-GID，仅更新 LABOS_IMAGE。
+# 0.3.3 部署配置；镜像及附件可用性以 v0.3.3 Release 的实际发布记录为准。
+# 仅首次安装使用默认 0.3.3 新卷；已有部署先停服完整备份，保留原 YML/项目/挂载/UID-GID，仅更新 LABOS_IMAGE。
 version: '3.8'
 
 services:
   labos-init:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.2}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.3}"
     user: "0:0"
     restart: "no"
     command: ["node", "src/init-runtime.js"]
@@ -14,10 +14,10 @@ services:
     healthcheck:
       disable: true
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.3.2}:/var/lib/labos"
+      - "${LABOS_DATA_DIR:-labos-runtime-0.3.3}:/var/lib/labos"
 
   labos:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.2}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.3.3}"
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:
       labos-init:
@@ -32,7 +32,7 @@ services:
       LABOS_RUNTIME_DIR: /var/lib/labos
       LABOS_ADMIN_USER: "${LABOS_ADMIN_USER:-admin}"
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.3.2}:/var/lib/labos"
+      - "${LABOS_DATA_DIR:-labos-runtime-0.3.3}:/var/lib/labos"
     logging:
       driver: json-file
       options:
@@ -40,4 +40,4 @@ services:
         max-file: "3"
 
 volumes:
-  labos-runtime-0.3.2: {}
+  labos-runtime-0.3.3: {}

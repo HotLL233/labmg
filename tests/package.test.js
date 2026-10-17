@@ -81,6 +81,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   assert.match(launcher, /npm ci --omit=dev --ignore-scripts/);
   assert.ok(launcher.includes(`artifacts\\cache\\${version}\\npm`));
   assert.match(launcher, /if errorlevel 1 exit \/b 1/);
+    assert.ok(launcher.includes('node_modules\\zxing-wasm\\dist\\full\\zxing_full.wasm'), 'launcher installs scanner dependency on older extracted installations');
   assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile'), 'utf8'), /COPY[^\n]+package\.json package-lock\.json/);
   assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile.dockerignore'), 'utf8'), /^!package-lock\.json$/m);
   run(process.execPath, [path.join(extracted, 'scripts/check.js')]);
@@ -92,6 +93,8 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
     const installed = readJson(dependency);
     const lock = readJson(path.join(extracted, 'package-lock.json'));
     assert.equal(installed.version, lock.packages['node_modules/write-excel-file'].version);
+      assert.equal(readJson(path.join(extracted, 'node_modules/zxing-wasm/package.json')).version, lock.packages['node_modules/zxing-wasm'].version);
+      assert.ok(fs.existsSync(path.join(extracted, 'node_modules/zxing-wasm/dist/full/zxing_full.wasm')));
     run(process.execPath, ['-e', `const assert=require('node:assert/strict');const dependency=require.resolve('write-excel-file/node',{paths:[${JSON.stringify(extracted)}]});assert.ok(dependency.startsWith(${JSON.stringify(path.join(extracted, 'node_modules') + path.sep)}));require(dependency)`]);
   }
 

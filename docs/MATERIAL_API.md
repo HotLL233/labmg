@@ -1,4 +1,4 @@
-# 0.3.2 物资 API 合同（源码开发版，未发布镜像）
+# 0.3.3 物资 API 合同（源码开发版，未发布镜像）
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，返回 `{handle, backup, restore}`。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`。新业务只使用专表，不写旧 `records`。以下合同供前端与 HTTP 回归共同使用。
 
@@ -17,6 +17,30 @@
 - `POST /catalog`，正文 `{code,name,spec,unit,categoryId}` → 201 主档；ADMIN/MATERIAL + `materials.catalog.write`。编码唯一，已有编码不能改规格/单位。
 
 下文省略共同前缀 `/api/materials`。
+
+## 包装条码与库存二维码
+
+- `GET /catalog/:id/barcodes` → 统一分页，按绑定 ID 升序；所有登录用户可读。行 `{id,code,catalogId,createdBy,creatorName,createdAt}`。
+- `POST /catalog/:id/barcodes`，`{code,reason}` → 201 `{barcode}`；需要 ADMIN 或 MATERIAL + `materials.catalog.write`，复用 `manageCatalog` 能力。绑定原因必填并审计；同码已绑定同主档返回 200 原绑定，已绑定其他主档返回 409。
+- `DELETE /barcodes/:id`，`{reason}` → `{deleted:true}`；权限相同，解除原因必填并审计。绑定不直接修改；纠错先解除，再创建新绑定，新 ID 在当前数据库中不复用。旧表单删除已解除的 ID 返回 404，不会删除后来建立的绑定。
+
+一个主档可绑定多个外包装条码/二维码，同一个码只能绑定一个主档。`code` 为 1–512 字符字符串，去除首尾空白，保留前导零、大小写和内容；拒绝内部控制字符及无效 Unicode。`LABOS-STOCK:` 为系统库存二维码保留前缀，不能绑定为包装码。这里只按完整码查主档，不自动从 GS1 等包装内容提取数量、批号或有效期。
+
+`POST /scan/resolve`，正文 `{code}`，所有登录用户可用，只读解析且金额继续按权限省略：
+
+- 已绑定包装码 → `{kind:'catalog',catalog,barcode}`，`catalog` 使用主档列表行结构；包装码本身不决定仓库、区域或批次。
+- 系统库存二维码 → `{kind:'stock',catalog,batch}`，`batch` 为当前 `/stock/batches` 行，含最新数量、位置、位置版本及 `qrPayload`；耗尽但有历史流水的批次仍可定位。
+- 未绑定包装码、找不到对应主档或精确库存批次 → 404。保留前缀但版本、JSON 或字段无效 → 400。外部 URL 也只作为码字符串查找，不会请求其中地址。
+
+每条批次余额的 `qrPayload` 格式为 `LABOS-STOCK:1:` 加以下对象的 JSON 文本，字段全部必填且不接受额外字段：
+
+```json
+{"catalogId":1,"catalogCode":"MAT-001","regionId":1,"warehouse":"MAIN","batch":"","expiryDate":""}
+```
+
+主档/区域 ID 必须是正安全整数，主档编码必须与当前主档一致；仓库、批号、有效期按现有规则校验。空批号和空有效期必须保留为 `""`，用于精确定位，不能省略后扩大查询范围。二维码只含定位信息，不含数量金额、会话或记账授权。
+
+扫码入库先按主档及可用的区域/仓库筛选 `/acceptance?status=open`，由操作人选择已有申报行，再调用现有验收表单及 `POST /receipts`，仍检查 MATERIAL 权限、版本和幂等键。扫码领用先选择精确批次，再沿用普通人员申请、MATERIAL 发放；扫码解析不创建申报、不自由入库，也不直接扣库。
 
 ## 申报与修订
 
@@ -42,7 +66,7 @@
 
 ## 验收、结案与冲正
 
-- `GET /acceptance` → SQL 筛选与分页 `{...明细,requestNo,requestTitle,requestVersion,requestRevision,requestCreatedAt}`；仅已提交行；可用 `status=all|pending|partial|done|closed` 按 receiptStatus 筛选，`from,to` 按原申请创建日期筛选；`q` 覆盖名称/编码/规格、分类/区域及来源单号/标题。
+- `GET /acceptance` → SQL 筛选与分页 `{...明细,requestNo,requestTitle,requestVersion,requestRevision,requestCreatedAt}`；仅已提交行；可用 `status=all|pending|partial|done|closed` 按 receiptStatus 筛选，新增 `status=open` 按剩余数量大于零同时包含未验收及部分验收，SQL 总数和分页均只计算命中行。默认仍包含完成历史。可用 `catalogId,regionId,warehouse` 精确筛选，`from,to` 按原申请创建日期筛选；`q` 覆盖名称/编码/规格、分类/区域及来源单号/标题。
 - `GET /receipts?requestId=&itemId=` → 分页事件。事件含 `{id,type,requestId,itemId,requestRevision,snapshot,qtyM,rejectedQtyM,closedQtyM,amountCents?,reason,rejectedReason,zeroAmountReason,originalReceiptId,batch,expiryDate,date,actorId,actorName,createdAt,reversed}`。type 为 `acceptance|rejection|close|reversal`。
 - `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。
 - `POST /requests/:id/items/:itemId/close`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`，将当时剩余量结案，不产生库存。
@@ -55,7 +79,7 @@
 ## 库存与期初
 
 - `GET /stock` → 分页 `{id:复合稳定字符串,catalogId,code,name,spec,unit,regionId,regionName,warehouse,qtyM,amountCents?,lastMovementAt}`，可筛选 `regionId,warehouse,catalogId`。
-- `GET /stock/batches` → 分页的批次余额，保留 `/stock` 身份、数量及金额字段，另含 `batch,expiryDate,categoryId,categoryName,location,locationVersion`。按主档+仓库+区域+批号+有效期汇总；支持 `q,catalogId,regionId,warehouse,batch,expiryDate` 筛选，耗尽批次仍保留，未设置位置为 `""`、版本为 `0`。
+- `GET /stock/batches` → 分页的批次余额，保留 `/stock` 身份、数量及金额字段，另含 `batch,expiryDate,categoryId,categoryName,location,locationVersion,qrPayload`。按主档+仓库+区域+批号+有效期汇总；支持 `q,catalogId,regionId,warehouse,batch,expiryDate` 筛选，耗尽批次仍保留，未设置位置为 `""`、版本为 `0`。
 - `GET /stock/movements` → 分页 `{id,type,catalogId,regionId,warehouse,qtyM,amountCents?,sourceId,issueId,snapshot,batch,expiryDate,date,reason,actorId,actorName,createdAt}`，支持上述身份及 `batch,expiryDate` 筛选。后两项存在时精确匹配，空字符串仅匹配未填批次/有效期，省略则不限。type 为 `opening|receipt|reversal|adjustment|issue`；`sourceId` 是验收来源，领用来源使用 `issueId`。
 - `POST /stock/opening`，`{catalogId,categoryId?,regionId,warehouse,quantity,amount,zeroAmountReason?,batch?,expiryDate?,date?,requestIdempotencyKey}` → 201 `{movement,openingClosed}`，需要 MATERIAL + initialize 权限。
 - `POST /stock/opening/close`，`{reason}` → `{openingClosed:true}`；MATERIAL + initialize，永久关闭期初。首次合格验收入库也原子关闭期初。
@@ -97,12 +121,12 @@
 - `GET /export.xlsx?type=requests|stock|issues` → 真正 XLSX；需要 `materials.export`，金额列另看 amount 权限。`type` 省略时默认 `requests`。申报导出支持 `q,from,to,status=draft|submitted,requestId,version=current|original`，日期按申报创建日期筛选，筛选命中的单据包含全部明细；`version` 默认 current，original 先按当前单据筛选，再使用原提交快照，未提交草稿仍用当前内容。库存导出支持 `q,regionId,warehouse,catalogId`，含库存汇总及按相同条件筛选的批次库存、存放位置。领用导出支持 `q,status` 并遵守本人/管理员可见范围，含申请时位置和当前位置或发放时位置；未发放金额留空。导出全部筛选结果，不受列表页码限制；一次最多 1000 张申报单，明细、验收流水和修订记录各不超过 5000 条；库存、批次或领用各最多 5000 条，超限返回 413。
 - 页面申报列表导出沿用已查询的 `q,status,from,to`，库存列表沿用 `q,regionId,warehouse`，领用列表沿用 `q,status`；单据详情按 `requestId,version` 导出，不携带列表筛选。验收列表不提供按验收进度导出，通过每行“原单”进入来源申报后导出；`pending|partial|done|closed` 不是申报导出的 status 值。
 - 用户文本按文本单元格写，不识别公式。原版/当前申报明细完整导出；验收流水及修订记录仍保留所选单据的完整历史。修订记录的“修改前/后快照摘要”单元格最多32767字符，超长时明确加注“完整快照见修订历史/物资备份”，完整历史仍保留于系统及业务备份。
-- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十三张物资业务及辅助表（含存放位置、领用）、附件内容、稳定用户映射与所有快照，不含用户密码。
+- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十四张物资业务及辅助表（含包装码映射、存放位置、领用）、附件内容、稳定用户映射与所有快照，不含用户密码。包装码映射使用新表 `material_barcodes`；既有 Excel 导出保持原有数量金额及筛选口径，本轮不另加条码导出类型或原始 QR 文本列。
 - `POST /restore`，正文为上述完整备份对象 → `{restored:true,counts}`，需 backup.restore + materials.amount.read；只允许空的新业务库，验证格式、用户 username→当前ID 映射、外键、库存及来源唯一性，事务恢复；同份重放与追加恢复均拒绝。
 
-物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=2`，生成时间为完整 ISO UTC 时间。支持恢复 schema 1 的原十一表备份，两个新表按空数据补齐；schema 1 不能夹带新增表，schema 2 不能遗漏新表。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段（含其他 scope 或组合包字段）、未知表/字段、遗漏字段均拒绝，避免错误范围被静默忽略。领用处理人及快照同样按 username 映射现有用户。
+物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=3`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表及 schema 2 原十三表：schema 1 将位置、领用和包装码三表补空，schema 2 仅将包装码表补空。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段；schema 3 不能遗漏包装码表。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段（含其他 scope 或组合包字段）、未知表/字段、遗漏字段均拒绝，避免错误范围被静默忽略。领用处理人、条码创建人及快照同样按 username 映射现有用户。
 
-schema 2 恢复还逐项核对领用状态/版本、申请与发放流水一一对应、历史批次成本分摊、取消/驳回无流水、位置有对应批次和非负库存。旧服务不能恢复 schema 2；升级会扩展库存流水 CHECK 并新增表，回退必须恢复升级前完整运行数据，不能只切旧镜像。
+恢复继续逐项核对领用状态/版本、申请与发放流水一一对应、历史批次成本分摊、取消/驳回无流水、位置有对应批次和非负库存。schema 3 还验证包装码规范、唯一绑定和主档外键；失败时整次恢复回滚。0.3.2 服务不能恢复 schema 3；0.3.3 只新增包装码表，保留 0.3.2 的库存来源规则，回退必须恢复升级前完整运行数据，不能只切旧镜像。0.3.2 对更旧数据库扩展库存流水 CHECK 的历史升级要求仍保留。
 
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 

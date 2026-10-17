@@ -115,6 +115,7 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
       return { name, initName, base: `http://${binding}` };
     };
     const first = await start();
+    await docker(['exec', first.name, 'node', '-e', "const fs=require('node:fs'),assert=require('node:assert/strict');assert.ok(fs.statSync('/app/docs/THIRD_PARTY.md').size>100);for(const name of ['MIT-zxing-wasm.txt','Apache-2.0-zxing-cpp.txt','Apache-2.0-wrapper.txt','BSD-3-Clause-zint.txt','LICENSE-stb.txt'])assert.ok(fs.statSync('/app/docs/licenses/zxing-wasm/'+name).size>100)"]);
     const initial = await (await request(first.base, '/api/auth/me')).json();
     assert.equal(initial.user, null);
     assert.equal(initial.setupRequired, true);
@@ -124,6 +125,11 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     assert.ok(Number.isSafeInteger(administrator.id));
     assert.ok(setup.headers.get('set-cookie'), 'setup must create a session');
     const cookie = await login(first.base);
+    for (const [route, mime] of [['/vendor/zxing-wasm/3.1.5/index.js', /javascript/], ['/vendor/zxing-wasm/3.1.5/zxing_full.wasm', /^application\/wasm$/]]) {
+      const asset = await request(first.base, route);
+      assert.match(asset.headers.get('content-type'), mime);
+      assert.ok((await asset.arrayBuffer()).byteLength > 30000, 'scanner resources must be included in the image');
+    }
     const post = async (route, payload, expected = 201) => (await request(first.base, route, {
       method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     }, expected)).json();
@@ -143,6 +149,11 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
       requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34'
     }, 409);
     const catalog = await post('/api/materials/catalog', { code: 'DOCKER-MAT', name: '容器物资', spec: '1 L', unit: '瓶', categoryId: category.id });
+    const packagingCode = '0012345678905';
+    const barcode = (await post(`/api/materials/catalog/${catalog.id}/barcodes`, { code: packagingCode, reason: '容器包装码绑定验证' })).barcode;
+    assert.equal(barcode.code, packagingCode);
+    const catalogScan = await post('/api/materials/scan/resolve', { code: packagingCode }, 200);
+    assert.equal(catalogScan.kind, 'catalog'); assert.equal(catalogScan.catalog.id, catalog.id);
     materialRequest = await (await request(first.base, `/api/materials/requests/${materialRequest.id}/items/${materialRequest.items[0].id}`, {
       method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestVersion: materialRequest.version, version: materialRequest.items[0].version, catalogId: catalog.id, reason: '入库前规范匹配' })
@@ -167,6 +178,13 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     const requesterBatches = (await (await request(first.base, '/api/materials/stock/batches', { headers: { Cookie: requesterCookie } })).json()).items;
     assert.equal(requesterBatches[0].location, location);
     assert.equal(requesterBatches[0].amountCents, undefined, 'ordinary batch lookup must not expose money');
+    const scanPayload = { code: requesterBatches[0].qrPayload };
+    assert.ok(scanPayload.code.startsWith('LABOS-STOCK:1:'));
+    const scanned = await (await request(first.base, '/api/materials/scan/resolve', {
+      method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(scanPayload)
+    })).json();
+    assert.equal(scanned.kind, 'stock'); assert.equal(scanned.batch.location, location);
+    assert.equal(scanned.batch.qtyM, 1000); assert.equal(scanned.batch.amountCents, undefined);
     const application = (await (await request(first.base, '/api/materials/issues', {
       method: 'POST', headers: { Cookie: requesterCookie, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...stockIdentity, quantity: '0.25', purpose: '容器普通人员领用申请', requestIdempotencyKey: crypto.randomUUID() })
@@ -226,6 +244,12 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     const persistedBatches = (await (await request(second.base, '/api/materials/stock/batches', { headers: { Cookie: secondCookie } })).json()).items;
     assert.equal(persistedBatches[0].location, location); assert.equal(persistedBatches[0].locationVersion, 1);
     assert.equal(persistedBatches[0].qtyM, 750); assert.equal(persistedBatches[0].amountCents, 925);
+    assert.equal((await postAfterRestart('/api/materials/scan/resolve', { code: packagingCode })).catalog.id, catalog.id);
+    const rescanned = await postAfterRestart('/api/materials/scan/resolve', scanPayload);
+    assert.equal(rescanned.batch.qtyM, 750); assert.equal(rescanned.batch.amountCents, 925);
+    async function postAfterRestart(route, payload) {
+      return (await request(second.base, route, { method: 'POST', headers: { Cookie: secondCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })).json();
+    }
     const persistedIssue = (await (await request(second.base, `/api/materials/issues/${application.id}`, { headers: { Cookie: secondCookie } })).json()).issue;
     assert.equal(persistedIssue.status, 'issued'); assert.equal(persistedIssue.amountCents, 309); assert.equal(persistedIssue.snapshot.location, location);
     await assertIssueMovements(second.base, secondCookie);
