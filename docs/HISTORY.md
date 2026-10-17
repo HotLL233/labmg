@@ -196,3 +196,11 @@
 - 新增隔离真实升级专项：旧0.3.0同一未匹配草稿提交400、内容版本不变；保留原冻结YML/项目/0.3.0卷/UID-GID，仅.env改镜像到0.3.1后健康，原账号双角色与草稿完整、首设未重开，提交200且原快照catalogId仍null。第一轮辅助脚本误将role字符串读为roles数组，修正脚本后重跑通过，保留失败证据，未修改产品代码。最终报告 `validation/upgrade-6fb62ed3296339/report.json`，容器/卷0残留，合成明文凭据已删除。
 - [0.3.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.3.1) 已公开（ID `415602635`，prerelease=true），十附件大小/GitHub SHA-256与本地及九条校验记录一致。官方API匿名元数据/tag及八份小件/源码附件完整下载通过；amd64 TAR匿名下载300秒超时，失败证据保留，arm64 TAR未追加全量下载。两TAR正式容器及上传摘要验证已通过，不因额外大文件下载验证阻塞已完成修复交付，不记录十件匿名全量下载通过。最终报告 `github-release-verification.json` 为 `passed-with-network-limitations`，原尝试为 `github-release-verification-full-attempt.json`；未声称github.com网页验证通过。
 - 远端main及全部九个tag OID经匿名API核对与本地一致，报告 `protected-refs-verification.json`。冻结后仅更新三份文档，不重打ZIP/TAR、不移动标签，未在实际群晖、国内仓库或长期容量场景验收。
+
+## 2026-10-17：物资管理开源项目调研
+
+- 用户要求检索能参考并覆盖当前物资功能的开源项目。在独立 `feature/material-open-source-research` 分支，以0.3.1实际API/需求为基线，只读核查七组候选的官方仓库、文档、许可证、版本和部分实现，不用星数或功能宣传推断完全兼容。
+- 新增 `docs/research/MATERIAL_OPEN_SOURCE.md`：ERPNext适合完整ERP二开；InvenTree适合库存、OpenBoxes适合分批验收、jshERP适合中文请购交互；Odoo+OCA、Dolibarr、Part-DB同时保留能力及不足的说明。没有确认任何候选开箱原样满足全部定制规则。
+- 重点确认标准主档要求、同单按行协作与整单编辑的差异、原版快照/原因修订、每批实际金额、拒收/结案/一次冲正、区域金额与期初关闭等边界。ERPNext自定义库存维度不维护区域独立估值；jshERP当前有请购且master许可Apache-2.0，发布包与master区别记录；OCA实际模块许可与主版本独立核对。
+- 官方网页/API/raw源码与失败状态快照仅在 `artifacts/cache/0.3.1/research/`。未启动候选系统、未复制业务源码、未访问真实业务库、未压测或做NAS验收；业务版本/镜像/YML及历史标签保持0.3.1原状。此轮只更新研究及持续记忆文档，不生成业务版本。
+- 对照文档经三组专项只读复核，10份Markdown的31个相对链接、文本编码及Git差异检查通过；只改文档，未重复业务测试或重打冻结发布产物。
