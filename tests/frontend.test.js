@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const { test } = require('node:test');
 
 const publicDir = path.join(__dirname, '../src/public');
@@ -48,6 +49,9 @@ class Element {
   get textContent() { return this._text + this.children.map(node => node.textContent).join(''); }
   set textContent(value) { this._text = String(value); this.children = []; }
   appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
+  setAttribute(name, value) { this.attrs[name] = value; }
+  removeAttribute(name) { delete this.attrs[name]; }
   insertBefore(child, before) {
     child.parent = this;
     const position = this.children.indexOf(before);
@@ -62,6 +66,7 @@ class Element {
   }
   querySelectorAll(selector) {
     const matches = (node, simple) => {
+      if (simple.endsWith(':checked')) return node.checked && matches(node, simple.slice(0, -8));
       const attr = simple.match(/^\[([^=\]]+)(?:=["']?([^\]"']*)["']?)?\]$/);
       if (attr) return attr[2] === undefined ? attr[1] in node.attrs : node.attrs[attr[1]] === attr[2];
       if (simple.startsWith('#')) return node.id === simple.slice(1);
@@ -116,6 +121,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   const document = new Element('document'); parse(index, document);
   document.head = document.querySelector('head'); document.body = document.querySelector('body');
   document.createElement = tag => new Element(tag);
+  document.getElementById = id => document.querySelector('#' + id);
   const modules = ['archives', 'assets', 'quality', 'contracts', 'materials', 'finance', 'templates', 'people'];
   const records = modules.map((module, i) => ({
     id: i + 1, module, version: 4, title: `${module}-record`, code: module, category: '', status: '合格',
@@ -124,7 +130,8 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   }));
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
-  const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null };
+  const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
+    materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
   const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
   const fetch = async (input, options = {}) => {
@@ -149,8 +156,11 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/ui-config/nav') return response(nav);
     if (url.pathname === '/api/ui-config/dashboard') return response(modules.map(target => ({ key: target, kind: 'module', target, label: target, visible: 1, sort_order: 0 })));
     if (url.pathname === '/api/dashboard') return response({ totals: {}, finance: { income: 0, expense: 0 }, warnings: 0 });
-    if (url.pathname === '/api/permissions') return response({ catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
+    if (url.pathname === '/api/permissions') return response(state.permissionData || { catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
     if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: state.auth.user.role }]);
+    if (url.pathname === '/api/materials/meta') return response({ capabilities: { createRequest: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false });
+    if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog'].includes(url.pathname)) return response({ items: [], total: 0, page: 1, pageSize: 200 });
     if (url.pathname === '/api/records' && method === 'GET') {
       const module = url.searchParams.get('module'), q = url.searchParams.get('q') || '';
       const result = response(records.filter(row => row.module === module && row.title.includes(q)));
@@ -180,7 +190,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
   }
   const context = {
-    document, fetch, FormData, URL, Blob, Date, console, location: { origin: 'http://localhost', reload() {} },
+    document, fetch, FormData, URL, URLSearchParams, Blob, Date, console, crypto, location: { origin: 'http://localhost', reload() {} },
     confirm: () => true, prompt: () => null,
     setTimeout(callback, delay) { const id = Symbol(); timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval() {},
@@ -307,7 +317,7 @@ test('setup contention refreshes state into normal login without authenticating 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
   assert.deepEqual(scripts, ['app.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
-  for (const module of ['archives', 'assets', 'quality', 'contracts', 'materials', 'finance', 'templates', 'people']) {
+  for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
     assert.equal(app.run('current'), module);
@@ -336,6 +346,22 @@ test('actual script order keeps shared state and correct CRUD payloads across bu
     assert.equal(app.run('current'), module);
     assert.equal(app.run(`items.some(row=>row.id===${id})`), false);
   }
+});
+
+test('materials uses its authenticated workflow API and blocks the generic record editor for every logged-in role', async () => {
+  const app = await browser({ role: 'FINANCE', permissions: ['dashboard.read', 'finance.read'] });
+  assert.ok(app.$('[data-nav=materials]'), 'all authenticated users need the declaration entry');
+  await app.run("go('materials')");
+  assert.equal(app.run('current'), 'materials');
+  assert.equal(app.run('items.length'), 0);
+  assert.match(app.$('#page').innerHTML, /专用申报单/);
+  assert.ok(app.requests.some(request => request.url.pathname === '/api/materials/meta'));
+  assert.ok(app.requests.some(request => request.url.pathname === '/api/materials/requests'));
+  assert.equal(app.requests.some(request => request.url.pathname === '/api/records' && request.url.searchParams.get('module') === 'materials'), false);
+  assert.equal(app.$('#add').style.display, 'none');
+  app.run('openEditor()');
+  assert.equal(app.context.editor.open, false);
+  assert.match(app.$('#toast').textContent, /物资申报/);
 });
 
 test('search, date filters, equipment stages and return navigation use the same loader', async () => {
@@ -446,6 +472,7 @@ test('business section choices submit the matching scope for a limited writer', 
 
 test('read-only management keeps role, account, navigation and dashboard write controls hidden', async () => {
   const app = await browser({ role: 'AUDITOR', permissions: ['permissions.read'] });
+  await app.run("go('management')");
   app.run('renderRoles()');
   assert.equal(app.$('#create-role').hidden, true);
   assert.equal(app.$('#save-permissions').hidden, true);
@@ -461,6 +488,27 @@ test('read-only management keeps role, account, navigation and dashboard write c
   assert.equal(app.$('[data-edit-user=1]').hidden, true);
 });
 
+test('permission saves filter wildcard controls through the catalog and preserve selected material permissions', async () => {
+  const app = await browser();
+  const materialPermissions = Array.from(app.run('Object.keys(MATERIAL_PERMISSION_LABELS)'));
+  const catalog = ['dashboard.read', 'permissions.read', 'permissions.write', 'materials.read', 'backup.read', ...materialPermissions];
+  const selected = ['materials.read', 'materials.amount.read', 'materials.export', 'materials.request.edit_submitted'];
+  app.state.permissionData = { catalog, roles: [{ role: 'ADMIN', permissions: ['*'] }, { role: 'MATERIAL_REVIEWER', permissions: selected }], roleNames: {}, sections: {} };
+  await app.run("go('management')");
+  app.run('renderRoles()');
+  assert.equal(app.$('[data-perm="dashboard.write"]').checked, true, 'wildcard fixture must include an invalid checked control');
+  await app.$('#save-permissions').click();
+  const adminSave = app.requests.findLast(request => request.method === 'PUT');
+  assert.equal(adminSave.url.pathname, '/api/permissions/roles/ADMIN');
+  assert.deepEqual(adminSave.body.permissions.slice().sort(), catalog.slice().sort());
+  assert.ok(adminSave.body.permissions.every(permission => catalog.includes(permission)));
+  app.run("showRolePermission('MATERIAL_REVIEWER')");
+  await app.$('#save-permissions').click();
+  const customSave = app.requests.findLast(request => request.method === 'PUT');
+  assert.equal(customSave.url.pathname, '/api/permissions/roles/MATERIAL_REVIEWER');
+  assert.deepEqual(customSave.body.permissions.slice().sort(), selected.slice().sort());
+});
+
 test('user-controlled fields and account names stay out of executable markup', async () => {
   const app = await browser();
   const html = app.run(`field('x" autofocus onfocus="alert(1)', '<img src=x onerror=alert(1)>', 'text" onfocus="alert(1)', ['<img>'])`);
@@ -471,12 +519,10 @@ test('user-controlled fields and account names stay out of executable markup', a
   const namedOption = app.run(`field('choice', 'label', 'select', [['x" onfocus="alert(1)', '<img src=x>']])`);
   assert.doesNotMatch(namedOption, /<img|value="x" onfocus=/);
   assert.match(namedOption, /&quot;/);
-  app.records.find(row => row.module === 'materials').data.material_type = '<img src=x onerror=alert(1)>';
-  app.records.find(row => row.module === 'materials').data.flow = '<svg onload=alert(1)>';
-  app.records.find(row => row.module === 'materials').status = '隔离';
+  app.state.materialRequests[0].title = '<img src=x onerror=alert(1)><svg onload=alert(1)>';
   await app.run("go('materials')");
-  app.run("materialSub='abnormal';renderMaterials()");
   assert.doesNotMatch(app.$('#page').innerHTML, /<img|<svg/);
+  assert.match(app.$('#page').innerHTML, /&lt;img/);
   await app.run("go('management')"); app.run('renderAccounts()');
   await new Promise(resolve => setImmediate(resolve));
   assert.doesNotMatch(app.$('#page').innerHTML, /onclick="editUser|<img/);

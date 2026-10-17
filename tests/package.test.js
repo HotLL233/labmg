@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 
-test('versioned packages are isolated, verified, reusable and never overwritten', { timeout: 90000 }, t => {
+test('versioned packages are isolated, verified, reusable and never overwritten', { timeout: 120000 }, t => {
   const root = path.resolve(__dirname, '..');
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
@@ -22,7 +22,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   }
   fs.mkdirSync(path.join(fixture, 'config'));
   fs.copyFileSync(path.join(root, 'config/.env.example'), path.join(fixture, 'config/.env.example'));
-  for (const name of ['package.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
+  for (const name of ['package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
   for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'deploy/.env', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
     const file = path.join(fixture, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -57,6 +57,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   assert.equal(manifest.sourceSha256, crypto.createHash('sha256').update(JSON.stringify(manifest.sources)).digest('hex'));
   assert.ok(manifest.sources.some(source => source.path === 'config/.env.example'));
   assert.ok(manifest.sources.some(source => source.path === 'deploy/.env.example'));
+  assert.ok(manifest.sources.some(source => source.path === 'package-lock.json'));
   const zipHash = digest(archive);
   const zipMtime = fs.statSync(archive).mtimeMs;
   run('git', ['-c', 'user.name=Package Test', '-c', 'user.email=package-test@example.invalid', 'commit', '--allow-empty', '--quiet', '-m', 'same tree']);
@@ -69,14 +70,30 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   powershell(`Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archive)}, ${quote(extracted)})`);
   const files = fs.readdirSync(extracted, { recursive: true }).map(name => name.replaceAll('\\', '/'));
-  for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
+  for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
     assert.ok(files.includes(required), required);
   }
   assert.ok(files.every(file => !/(^|\/)(var|data|uploads|logs|artifacts|\.git|node_modules)(\/|$)/.test(file)), files.join('\n'));
   assert.ok(files.every(file => !/\.(log|db(-wal|-shm)?)$/i.test(file)), files.join('\n'));
   assert.deepEqual(files.filter(file => path.basename(file).startsWith('.env')).sort(), ['config/.env.example', 'deploy/.env.example']);
   for (const source of manifest.sources) assert.equal(digest(path.join(extracted, source.path)), source.sha256, source.path);
+  const launcher = fs.readFileSync(path.join(extracted, 'start-labos.cmd'), 'utf8');
+  assert.match(launcher, /npm ci --omit=dev --ignore-scripts/);
+  assert.ok(launcher.includes(`artifacts\\cache\\${version}\\npm`));
+  assert.match(launcher, /if errorlevel 1 exit \/b 1/);
+  assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile'), 'utf8'), /COPY[^\n]+package\.json package-lock\.json/);
+  assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile.dockerignore'), 'utf8'), /^!package-lock\.json$/m);
   run(process.execPath, [path.join(extracted, 'scripts/check.js')]);
+  if (process.env.LABOS_PACKAGE_INSTALL_TEST === '1') {
+    const npmCache = path.join(root, 'artifacts/cache', version, 'npm');
+    powershell(`& npm ci --offline --omit=dev --ignore-scripts --no-audit --no-fund --prefix ${quote(extracted)} --cache ${quote(npmCache)}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`);
+    const dependency = path.join(extracted, 'node_modules/write-excel-file/package.json');
+    assert.ok(fs.existsSync(dependency), 'ZIP dependencies must install into the extracted package');
+    const installed = readJson(dependency);
+    const lock = readJson(path.join(extracted, 'package-lock.json'));
+    assert.equal(installed.version, lock.packages['node_modules/write-excel-file'].version);
+    run(process.execPath, ['-e', `const assert=require('node:assert/strict');const dependency=require.resolve('write-excel-file/node',{paths:[${JSON.stringify(extracted)}]});assert.ok(dependency.startsWith(${JSON.stringify(path.join(extracted, 'node_modules') + path.sep)}));require(dependency)`]);
+  }
 
   const readme = path.join(fixture, 'README.md');
   const originalReadme = fs.readFileSync(readme);

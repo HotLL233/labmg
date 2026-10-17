@@ -42,6 +42,12 @@ try {
     $context = Join-Path $stage 'context'
     New-Item -ItemType Directory -Path $stage | Out-Null
     [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $release $sourceManifest.archive), $context)
+    foreach ($requiredSource in @('package.json', 'package-lock.json')) {
+        $source = @($sourceManifest.sources | Where-Object { $_.path -eq $requiredSource })
+        if ($source.Count -ne 1 -or (Get-Sha256 (Join-Path $context $requiredSource)) -ne $source[0].sha256) {
+            throw "Frozen source package is missing or has damaged dependency metadata: $requiredSource"
+        }
+    }
     $deploymentFiles = @{
         'deploy/docker-compose.yml' = 'docker-compose.yml'
         'deploy/.env.example' = '.env.example'

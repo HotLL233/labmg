@@ -22,7 +22,7 @@ try {
     foreach ($directory in @('.github', 'src', 'scripts', 'deploy', 'docs', 'tests')) {
         $inputs += Get-ChildItem -LiteralPath (Join-Path $root $directory) -Recurse -File -Force
     }
-    foreach ($file in @('config\.env.example', 'package.json', 'README.md', 'AGENTS.md')) {
+    foreach ($file in @('config\.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md')) {
         $inputs += Get-Item -LiteralPath (Join-Path $root $file) -Force
     }
     $sources = @($inputs | ForEach-Object {
@@ -70,7 +70,10 @@ try {
             throw 'Source changed during packaging; rerun with stable source files.'
         }
     }
-    @('@echo off', 'cd /d "%~dp0"', 'node src\server.js') |
+    @('@echo off', 'cd /d "%~dp0"',
+        'if not exist "node_modules\write-excel-file\package.json" (',
+        "  call npm ci --omit=dev --ignore-scripts --no-audit --no-fund --cache artifacts\cache\$version\npm",
+        '  if errorlevel 1 exit /b 1', ')', 'node src\server.js') |
         Set-Content -LiteralPath (Join-Path $payload 'start-labos.cmd') -Encoding ascii
     $archive = Join-Path $ready $archiveName
     [System.IO.Compression.ZipFile]::CreateFromDirectory($payload, $archive)

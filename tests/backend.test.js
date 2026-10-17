@@ -34,6 +34,7 @@ async function fixture(t, legacy = false, options = {}) {
       db.prepare('INSERT INTO records(module,title,data) VALUES(?,?,?)').run('samples', 'legacy sample fixture', '{}');
       db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(1, 'sample.txt', 'sample.txt', 'text/plain', 6);
       db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('LEGACY', '["samples.read"]');
+      db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('MATERIAL', JSON.stringify(options.materialPermissions || ['materials.read', 'materials.reagent.read']));
     });
     fs.writeFileSync(path.join(runtime, 'uploads/sample.txt'), 'sample');
   }
@@ -170,6 +171,7 @@ test('legacy passwords upgrade, backups hash idle passwords, startup preserves o
   assert.equal(f.sql(db => db.prepare('SELECT version FROM records WHERE module=?').get('samples').version), 1);
   assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM files WHERE record_id=1').get().n), 1);
   assert.equal(f.sql(db => db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('LEGACY').permissions), '["samples.read"]');
+  assert.equal(f.sql(db => db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL').permissions), '["materials.read","materials.reagent.read"]', 'custom existing MATERIAL permissions must not be silently expanded');
   assert.equal(fs.readFileSync(path.join(f.runtime, 'uploads/sample.txt'), 'utf8'), 'sample');
   const backup = (await f.request('GET', '/api/backup', f.admin.cookie)).data;
   assert.ok(backup.users.every(user => /^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(user.password)));
@@ -180,6 +182,20 @@ test('legacy passwords upgrade, backups hash idle passwords, startup preserves o
   await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [], users: [{ username: 'restored', password: 'old-backup-password', display_name: 'Restored', role: 'TESTER' }] });
   assert.match(f.sql(db => db.prepare('SELECT password FROM users WHERE username=?').get('restored').password), /^scrypt\$/);
   await f.login('restored', 'old-backup-password');
+});
+
+test('unchanged legacy MATERIAL defaults gain workflow permissions once and explicit revocations survive restart', { timeout: 30000 }, async t => {
+  const previous = ['dashboard.read', 'materials.read', 'materials.write'];
+  const f = await fixture(t, true, { materialPermissions: previous });
+  const material = await f.user('upgraded-material', ['MATERIAL']);
+  const permissions = (await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions;
+  for (const permission of ['materials.request.submit', 'materials.request.edit_submitted', 'materials.acceptance.write', 'materials.amount.read', 'materials.export']) assert.ok(permissions.includes(permission));
+  assert.equal((await f.request('GET', '/api/materials/meta', material.cookie)).data.capabilities.submitRequest, true);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin.cookie, { permissions: previous });
+  await f.restart();
+  assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, previous);
+  assert.equal((await f.request('GET', '/api/materials/meta', material.cookie)).data.capabilities.submitRequest, false);
+  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.0-material-permissions').n), 1);
 });
 
 test('logout and password resets revoke sessions, imports preserve omitted passwords, last admin survives', { timeout: 30000 }, async t => {
@@ -309,7 +325,7 @@ test('record versions reject missing/stale saves and track quality trigger chang
   const f = await fixture(t);
   const first = await f.user('writer-one', ['ADMIN']);
   const second = await f.user('writer-two', ['ADMIN']);
-  const record = await f.create({ module: 'materials', title: 'concurrent fixture', quantity: 10, data: {} });
+  const record = await f.create({ module: 'assets', title: 'concurrent fixture', quantity: 10, data: {} });
   assert.equal(record.version, 1);
   await f.request('PUT', `/api/records/${record.id}`, first.cookie, { title: 'missing version' }, 400);
   const results = await Promise.all([first, second].map((actor, index) => f.request('PUT', `/api/records/${record.id}`, actor.cookie, { version: record.version, quantity: 9 - index }, [200, 409])));
@@ -326,22 +342,72 @@ test('record versions reject missing/stale saves and track quality trigger chang
   await f.request('PUT', `/api/records/${oldQuality.id}`, first.cookie, { version: oldQuality.version, title: 'stale trigger save' }, 409);
 });
 
-test('Chinese material flows and finance directions resolve to configured section permissions', { timeout: 30000 }, async t => {
+test('legacy material flows retain section-filtered read access and reject writes while finance directions remain scoped', { timeout: 30000 }, async t => {
   const f = await fixture(t);
   await f.role('STOCK', ['materials.read', 'materials.write', 'materials.inbound.read', 'materials.inbound.write', 'materials.reagent.read', 'finance.read', 'finance.income.read']);
   const actor = await f.user('stock', ['STOCK']);
-  const inbound = await f.create({ module: 'materials', title: 'inbound fixture', data: { flow: '入库管理', material_type: '试剂' } });
-  const reagent = await f.create({ module: 'materials', title: 'ledger fixture', category: '试剂', data: { flow: '库存台账' } });
-  const outbound = await f.create({ module: 'materials', title: 'outbound fixture', data: { flow: '出库管理', material_type: '试剂' } });
-  await f.create({ module: 'materials', title: 'uncatalogued fixture', data: { flow: '采购申请', section: 'inbound', material_type: '试剂' } });
+  const legacyMaterial = (title, data, category = '') => f.sql(db => {
+    const added = db.prepare('INSERT INTO records(module,title,category,data) VALUES(?,?,?,?)').run('materials', title, category, JSON.stringify(data));
+    return { id: Number(added.lastInsertRowid), version: 1 };
+  });
+  const inbound = legacyMaterial('inbound fixture', { flow: '入库管理', material_type: '试剂' });
+  const reagent = legacyMaterial('ledger fixture', { flow: '库存台账' }, '试剂');
+  const outbound = legacyMaterial('outbound fixture', { flow: '出库管理', material_type: '试剂' });
+  legacyMaterial('uncatalogued fixture', { flow: '采购申请', section: 'inbound', material_type: '试剂' });
   const income = await f.create({ module: 'finance', title: 'income fixture', data: { direction: '收入' } });
   await f.create({ module: 'finance', title: 'expense fixture', data: { direction: '支出' } });
   assert.deepEqual((await f.request('GET', '/api/records?module=materials', actor.cookie)).data.filter(record => record.title.endsWith('fixture')).map(record => record.id).sort((a, b) => a - b), [inbound.id, reagent.id]);
   assert.deepEqual((await f.request('GET', '/api/records?module=finance', actor.cookie)).data.map(record => record.id), [income.id]);
-  await f.request('PUT', `/api/records/${inbound.id}`, actor.cookie, { version: inbound.version, quantity: 4 });
+  await f.request('PUT', `/api/records/${inbound.id}`, actor.cookie, { version: inbound.version, quantity: 4 }, 403);
   await f.request('PUT', `/api/records/${outbound.id}`, actor.cookie, { version: outbound.version, quantity: 4 }, 403);
-  await f.request('POST', '/api/records', actor.cookie, { module: 'materials', title: 'valid inbound', data: { flow: '入库管理', material_type: '试剂' } }, 201);
+  await f.request('POST', '/api/records', actor.cookie, { module: 'materials', title: 'valid inbound', data: { flow: '入库管理', material_type: '试剂' } }, 403);
   await f.request('POST', '/api/records', actor.cookie, { module: 'materials', title: 'forged section', data: { flow: '采购申请', section: 'inbound' } }, 403);
+});
+
+test('legacy materials stay read-only through generic files and trash, and generic restore cannot populate the new business tables', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const legacy = (await f.request('GET', '/api/records?module=materials', f.admin.cookie)).data[0];
+  assert.ok(legacy);
+  await f.request('POST', '/api/records', f.admin.cookie, { module: 'materials', title: 'blocked' }, 403);
+  await f.request('PUT', `/api/records/${legacy.id}`, f.admin.cookie, { version: legacy.version, quantity: 100 }, 403);
+  await f.request('DELETE', `/api/records/${legacy.id}`, f.admin.cookie, undefined, 403);
+  await f.request('POST', '/api/files', f.admin.cookie, { record_id: legacy.id, name: 'blocked.txt', type: 'text/plain', content: 'YQ==' }, 403);
+  const stockBefore = (await f.request('GET', '/api/materials/stock', f.admin.cookie)).data;
+  await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [{ id: 9999, module: 'materials', title: 'restored legacy', quantity: 8, data: { flow: '库存台账', material_type: '试剂' } }] });
+  const restored = (await f.request('GET', '/api/records?module=materials', f.admin.cookie)).data.find(row => row.title === 'restored legacy');
+  assert.ok(restored);
+  await f.request('PUT', `/api/records/${restored.id}`, f.admin.cookie, { version: restored.version, quantity: 99 }, 403);
+  assert.deepEqual((await f.request('GET', '/api/materials/stock', f.admin.cookie)).data, stockBefore);
+  const businessBackup = (await f.request('GET', '/api/materials/backup', f.admin.cookie)).data;
+  await f.request('POST', '/api/restore', f.admin.cookie, businessBackup, 400);
+  f.sql(db => db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(restored.id));
+  await f.request('POST', `/api/trash/${restored.id}/restore`, f.admin.cookie, {}, 403);
+  await f.request('DELETE', `/api/trash/${restored.id}`, f.admin.cookie, undefined, 403);
+});
+
+test('legacy material money and unstructured data are hidden in records, exports and trash, while backups and attachments require amount permission', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  await f.role('OLD_READER', ['materials.read', 'export.read', 'backup.read', 'backup.restore', 'trash.read']);
+  const reader = await f.user('old-material-reader', ['OLD_READER']);
+  const legacy = (await f.request('GET', '/api/records?module=materials', f.admin.cookie)).data[0];
+  const data = { unit: '瓶', material_type: '试剂', nested: { customMonetaryLabel: 987.65 } };
+  const fileId = f.sql(db => {
+    db.prepare('UPDATE records SET amount=?,data=? WHERE id=?').run(123.45, JSON.stringify(data), legacy.id);
+    return Number(db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(legacy.id, 'receipt.txt', 'legacy-receipt.txt', 'text/plain', 7).lastInsertRowid);
+  });
+  fs.writeFileSync(path.join(f.runtime, 'uploads/legacy-receipt.txt'), '123.45!');
+  const assertRedacted = record => { assert.ok(record); assert.equal(record.amount, undefined); assert.deepEqual(record.data, {}); };
+  for (const route of ['/api/records?module=materials', '/api/records']) assertRedacted((await f.request('GET', route, reader.cookie)).data.find(row => row.id === legacy.id));
+  assertRedacted((await f.request('GET', '/api/export?module=materials', reader.cookie)).data.records.find(row => row.id === legacy.id));
+  for (const route of ['/api/backup', '/api/backup?module=materials', `/api/files?record_id=${legacy.id}`, `/api/files/${fileId}/download`]) await f.request('GET', route, reader.cookie, undefined, 403);
+  await f.request('POST', '/api/restore', reader.cookie, { type: 'backup', records: [legacy] }, 403);
+  const full = (await f.request('GET', '/api/backup?module=materials', f.admin.cookie)).data;
+  assert.equal(full.scope, 'legacy-records-and-system'); assert.ok(full.excludedModules.includes('materials-workflow'));
+  assert.equal(full.records.find(row => row.id === legacy.id).amount, 123.45);
+  assert.deepEqual(full.records.find(row => row.id === legacy.id).data, data);
+  assert.equal((await f.request('GET', `/api/files/${fileId}/download`, f.admin.cookie)).data, '123.45!');
+  f.sql(db => db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(legacy.id));
+  assertRedacted((await f.request('GET', '/api/trash', reader.cookie)).data.find(row => row.id === legacy.id));
 });
 
 test('restore validates system identities and rolls back record/file changes together', { timeout: 30000 }, async t => {

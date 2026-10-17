@@ -1,6 +1,6 @@
 {
   "name": "labos",
-  "version": "0.2.0-rc.5",
+  "version": "0.3.0",
   "private": true,
   "description": "实验室综合管理系统 MVP",
   "scripts": {
@@ -11,5 +11,10 @@
     "package:zip": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\package.ps1",
     "package:docker": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\package-docker.ps1"
   },
-  "engines":{"node":">=22.13"}
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "write-excel-file": "4.1.1"
+  }
 }

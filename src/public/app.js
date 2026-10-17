@@ -1,4 +1,4 @@
-const M={dashboard:['工作台','▦','实验室数据总览'],archives:['资料档案','▤','纸质资料数字化、分类检索与附件归档'],templates:['电子模板','▧','模板调用、在线填写、导出与打印'],finance:['收支管理','￥','实验室收入、支出与经费台账'],assets:['设备管理','◈','设备全生命周期、检定校准和设备档案'],materials:['物资管理','◇','耗材试剂入库、出库与库存预警'],quality:['体系文件','✓','质量手册、程序文件、作业指导书、表单和法定标准'],contracts:['委托单位与合同','⌘','委托单位档案、合同、项目与结算管理'],people:['人员管理','♙','人员档案、培训、证书与能力授权'],datahub:['导出与备份','⇩','按模块和日期导出、备份与恢复'],management:['管理','⚙','人员账号、角色权限、侧边栏和系统日志管理'],permissions:['管理','⚙','人员账号、角色权限、侧边栏和系统日志管理'],trash:['回收站','⌫','查看、恢复或彻底删除已移除的记录'],audit:['审计日志','◎','所有新增、修改、删除和上传操作']};
+const M={dashboard:['工作台','▦','实验室数据总览'],archives:['资料档案','▤','纸质资料数字化、分类检索与附件归档'],templates:['电子模板','▧','模板调用、在线填写、导出与打印'],finance:['收支管理','￥','实验室收入、支出与经费台账'],assets:['设备管理','◈','设备全生命周期、检定校准和设备档案'],materials:['物资管理','◇','多人申报、分批验收与区域库存'],quality:['体系文件','✓','质量手册、程序文件、作业指导书、表单和法定标准'],contracts:['委托单位与合同','⌘','委托单位档案、合同、项目与结算管理'],people:['人员管理','♙','人员档案、培训、证书与能力授权'],datahub:['导出与备份','⇩','按模块和日期导出、备份与恢复'],management:['管理','⚙','人员账号、角色权限、侧边栏和系统日志管理'],permissions:['管理','⚙','人员账号、角色权限、侧边栏和系统日志管理'],trash:['回收站','⌫','查看、恢复或彻底删除已移除的记录'],audit:['审计日志','◎','所有新增、修改、删除和上传操作']};
 const C={archives:{cat:'资料类别',extra:[['version','版本号'],['keywords','关键词']]},templates:{cat:'模板类别',extra:[['section','模板分区','select',[['equipment_use','设备使用记录'],['sample_receipt','样品接收记录'],['reagent_inout','试剂出入库'],['calibration','检定校准'],['maintenance','维护保养']]],['fields','表单字段（逗号分隔）']]},finance:{cat:'费用科目',extra:[['direction','收支方向','select',['收入','支出','预算']],['account','经费账户']]},assets:{cat:'资产类别',extra:[['model','规格型号'],['location','存放地点']]},materials:{cat:'物资类别',extra:[['unit','计量单位'],['warning','预警库存','number'],['location','存放位置'],['batch','批号']]},quality:{cat:'文件类别',extra:[['quality_section','体系文件板块','select',['质量手册','程序文件','作业指导书','表单','法定标准']],['version','版本号'],['is_current','当前显示版本','select',['是','否']],['approver','批准人']]},contracts:{cat:'档案类别',extra:[['client_name','委托单位名称'],['contract_no','合同编号'],['contract_type','合同类型','select',['委托检测合同','技术服务合同','采购合同','框架合同','其他']],['project_name','关联项目'],['contract_amount','合同金额（元）','number'],['start_date','合同开始日期','date'],['end_date','合同结束日期','date'],['settlement_status','结算状态','select',['未结算','部分结算','已结算']]]},people:{cat:'岗位/人员类别',extra:[['section','人员分区','select',[['profile','人员档案'],['training','培训记录'],['authorization','能力授权'],['certificate','证书资质'],['evaluation','能力评价']]],['skills','授权能力'],['certificate','证书/资质'],['training','培训记录']]}};
 let current='dashboard',items=[],editing=null,selected=null,navConfig=[],currentUser=null,loadSequence=0;
 const $=s=>document.querySelector(s),esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -6,8 +6,8 @@ const call=async(u,o={})=>{const r=await fetch(u,{headers:{'Content-Type':'appli
 const toast=x=>{const t=$('#toast');t.textContent=x;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)};
 const menuDef=m=>{const n=navConfig.find(x=>x.target===m&&x.visible!==0);return n?[n.label,n.icon,n.description]:M[m]||[m,'□','']};
 const can=permission=>Boolean(currentUser?.permissions?.includes('*')||currentUser?.permissions?.includes(permission));
-function canOpen(module){if(module==='management'||module==='permissions')return can('permissions.read');if(module==='datahub')return ['export.read','backup.read','backup.restore'].some(can);return can(module+'.read')}
-function applyPermissions(){document.querySelectorAll('[data-permission]').forEach(x=>x.hidden=!can(x.dataset.permission));$('#add').style.display=C[current]&&can(current+'.write')?'':'none'}
+function canOpen(module){if(module==='materials')return Boolean(currentUser);if(module==='management'||module==='permissions')return can('permissions.read');if(module==='datahub')return ['export.read','backup.read','backup.restore'].some(can);return can(module+'.read')}
+function applyPermissions(){document.querySelectorAll('[data-permission]').forEach(x=>x.hidden=!can(x.dataset.permission));$('#add').style.display=current!=='materials'&&C[current]&&can(current+'.write')?'':'none';for(const id of ['global-from','global-to']){const node=$('#'+id);if(node)node.style.display=current==='materials'?'none':''}}
 function field(n,l,type='text',opts=[],v=''){
   if(type==='select')return `<div class="field"><label for="field_${esc(n)}">${esc(l)}</label><select id="field_${esc(n)}" name="${esc(n)}">${opts.map(x=>{const [value,label]=Array.isArray(x)?x:[x,x];return `<option value="${esc(value)}" ${value===v?'selected':''}>${esc(label)}</option>`}).join('')}</select></div>`;
   return `<div class="field"><label for="field_${esc(n)}">${esc(l)}</label><input id="field_${esc(n)}" name="${esc(n)}" type="${esc(type)}" value="${esc(v)}" ${n==='title'?'required':''}></div>`;
@@ -21,7 +21,7 @@ async function go(module){
   items=[];
   document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav===module));
   const d=menuDef(module);$('#title').textContent=d[0];$('#subtitle').textContent=d[2];
-  $('#search').style.display=C[module]?'':'none';
+  $('#search').style.display=module!=='materials'&&C[module]?'':'none';
   $('#add').onclick=()=>openEditor();
   $('#page').innerHTML='<div class="empty">正在加载…</div>';
   applyPermissions();
@@ -30,7 +30,7 @@ async function go(module){
 async function load(){
   const module=current,request=++loadSequence;
   try{
-    const rows=C[module]?await call(`/api/records?module=${module}&q=${encodeURIComponent($('#search').value)}`):[];
+    const rows=module!=='materials'&&C[module]?await call(`/api/records?module=${module}&q=${encodeURIComponent($('#search').value)}`):[];
     if(request!==loadSequence||current!==module)return;
     items=rows;
     const render={dashboard,archives:renderArchives,assets:renderAssets,materials:renderMaterials,quality:renderQuality,contracts:renderContracts,audit:renderAudit,management:renderManagement,permissions:renderManagement,trash:renderTrash,datahub:renderDataHub}[module]||renderRecords;
@@ -40,6 +40,7 @@ async function load(){
 }
 function renderRecords(){$('#page').innerHTML=`<div class="toolbar"><span>共 ${items.length} 条记录</span><button class="ghost" id="csv" data-permission="export.read">导出 CSV</button></div><div class="table"><table><thead><tr><th>名称 / 编号</th><th>类别</th><th>状态</th><th>负责人</th>${current==='finance'?'<th>金额</th>':''}${['assets','materials'].includes(current)?'<th>数量/原值</th>':''}<th>日期</th><th>操作</th></tr></thead><tbody>${items.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${esc(r.code||'未设置编号')}</small></td><td>${esc(r.category||'-')}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.owner||'-')}</td>${current==='finance'?`<td>¥${Number(r.amount).toLocaleString()}</td>`:''}${['assets','materials'].includes(current)?`<td>${current==='assets'?'¥'+Number(r.amount).toLocaleString():r.quantity}</td>`:''}<td>${esc(r.due_date||r.updated_at.slice(0,10))}</td><td class="ops"><button onclick="show(${r.id})">查看</button><button data-permission="${current}.write" onclick="openEditor(${r.id})">编辑</button><button class="danger" data-permission="${current}.delete" onclick="del(${r.id})">删除</button></td></tr>`).join('')}</tbody></table>${items.length?'':'<div class="empty">暂无数据，点击右上角新建记录。</div>'}</div>`;$('#csv').onclick=csv}
 window.openEditor=id=>{
+  if(current==='materials')return toast('旧物资台账仅供查询，请在物资申报中录入');
   if(!C[current]||!can(current+'.write'))return toast('没有新增或编辑权限');
   editing=id?items.find(x=>x.id===id):null;
   if(id&&!editing)return toast('记录已不在当前列表，请重新加载');

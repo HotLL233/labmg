@@ -124,6 +124,28 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     assert.ok(Number.isSafeInteger(administrator.id));
     assert.ok(setup.headers.get('set-cookie'), 'setup must create a session');
     const cookie = await login(first.base);
+    const post = async (route, payload, expected = 201) => (await request(first.base, route, {
+      method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    }, expected)).json();
+    await request(first.base, `/api/users/${administrator.id}`, {
+      method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ roles: ['ADMIN', 'MATERIAL'] })
+    });
+    const category = await post('/api/materials/categories', { name: '容器分类' });
+    const region = await post('/api/materials/regions', { name: '容器区域' });
+    const catalog = await post('/api/materials/catalog', { code: 'DOCKER-MAT', name: '容器物资', spec: '1 L', unit: '瓶', categoryId: category.id });
+    let materialRequest = await post('/api/materials/requests', { title: '容器物资入库' });
+    materialRequest = await post(`/api/materials/requests/${materialRequest.id}/items`, {
+      requestVersion: materialRequest.version, catalogId: catalog.id, categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '2'
+    });
+    materialRequest = await post(`/api/materials/requests/${materialRequest.id}/submit`, { requestVersion: materialRequest.version }, 200);
+    const materialReceipt = await post('/api/materials/receipts', {
+      requestId: materialRequest.id, itemId: materialRequest.items[0].id, requestVersion: materialRequest.version, version: materialRequest.items[0].version,
+      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34'
+    });
+    assert.equal(materialReceipt.receipt.amountCents, 1234);
+    const workbook = await request(first.base, `/api/materials/export.xlsx?type=requests&requestId=${materialRequest.id}`, { headers: { Cookie: cookie } });
+    assert.match(workbook.headers.get('content-type'), /spreadsheetml/);
+    assert.equal(Buffer.from(await workbook.arrayBuffer()).readUInt32LE(0), 0x04034b50, 'Linux dependencies must generate an actual XLSX ZIP');
     const title = `docker persistence ${runId}`;
     const record = await (await request(first.base, '/api/records', {
       method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ module: 'archives', title })
@@ -148,6 +170,9 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     assert.equal((await (await request(second.base, '/api/auth/me')).json()).setupRequired, false, 'container recreation must not reopen setup');
     await request(second.base, '/api/auth/setup', setupOptions, 409);
     const secondCookie = await login(second.base);
+    const materialStock = await request(second.base, '/api/materials/stock', { headers: { Cookie: secondCookie } });
+    const persistedMaterial = (await materialStock.json()).items.find(row => row.catalogId === catalog.id && row.regionId === region.id);
+    assert.equal(persistedMaterial.qtyM, 1000); assert.equal(persistedMaterial.amountCents, 1234);
     const records = await request(second.base, '/api/records?module=archives', { headers: { Cookie: secondCookie } });
     assert.ok((await records.json()).some(row => row.id === record.id && row.title === title));
     const files = await request(second.base, `/api/files?record_id=${record.id}`, { headers: { Cookie: secondCookie } });
