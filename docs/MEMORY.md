@@ -47,7 +47,11 @@ PG 镜像为 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`�
 
 随后独立下载诊断 artifact `12169560458`，核对在线 amd64、离线 amd64／arm64 三份原始 TAP：均有真实 root 初始化预检通过标记，各 1 项通过、0 失败、0 跳过；PG captured TAP 摘要与在线原日志一致。本次只是复核同一成功运行，没有重跑容器，报告为 `artifacts/cache/0.6.2/remote-validation/diagnostics/marker-evidence.json`。
 
-12 件附件及 11 条 SHA256SUMS 一致，10 个非 TAR 附件经官方公开 API 无凭据完整下载通过；两 TAR 在 runner 验证上传，本机未运行 Docker 或完整下载 TAR。小证据 artifact `12169331267` 为 13685 字节，SHA-256 `0c5910fa3990895a08a4d356d2d856136b4b0426141e305f4eeb72268ac9a7e2`，导入六项通过。双 TAR 尺寸及摘要见[开发历程](HISTORY.md)，公开核验为 `artifacts/cache/0.6.2/github-release-verification.json`。本轮未重跑 0.6.0 UI，未操作真实 `var/`；API 下载不等于浏览器 UI 或附件点击验收，实际群晖、手机证书及相机、USB 打印、BarTender 和长期容量仍未验收。发布后仅补文档，不移动标签或重打冻结附件，所有旧版历史保留。
+12 件附件及 11 条 SHA256SUMS 一致，10 个非 TAR 附件经官方公开 API 无凭据完整下载通过；两 TAR 在 runner 验证上传，发布时本机未运行 Docker 或完整下载 TAR。小证据 artifact `12169331267` 为 13685 字节，SHA-256 `0c5910fa3990895a08a4d356d2d856136b4b0426141e305f4eeb72268ac9a7e2`，导入六项通过。双 TAR 尺寸及摘要见[开发历程](HISTORY.md)，公开核验为 `artifacts/cache/0.6.2/github-release-verification.json`。本轮未重跑 0.6.0 UI，未操作真实 `var/`；API 下载不等于浏览器 UI 或附件点击验收，实际群晖、手机证书及相机、USB 打印、BarTender 和长期容量仍未验收。发布后仅补文档，不移动标签或重打冻结附件，所有旧版历史保留。
+
+### 0.6.2 本地镜像包补齐（2026-10-19）
+
+用户追问本地为何没有镜像包。实查此前本机发布目录只有 10 个非 TAR 文件，云端已上传镜像并不能代替本地可用 TAR。本次从原官方 Release 完整下载 `labos-0.6.2-linux-amd64.tar`（247920640 字节）与 `labos-0.6.2-linux-arm64.tar`（244634624 字节）到 `artifacts/releases/0.6.2/`，文件大小和 SHA-256 均与官方资产元数据、原发布记录、架构 JSON 及 SHA256SUMS 一致；报告为 `artifacts/cache/0.6.2/local-image-download-report.json`。这补充并替代上方“发布时本机未完整下载 TAR”的当前交付状态，原始发布记录不改写。仅下载原包，不重新构建或更换版本；后续交付须明确本地 TAR 是否实际存在，不能用云端已发布代替本地交付。未因此新增本机 Docker 或群晖实机验证。
 
 ## 0.6.1：群晖运行目录兼容补丁（已公开验证版，2026-10-19）
 
