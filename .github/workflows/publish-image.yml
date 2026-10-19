@@ -1,4 +1,4 @@
-name: Publish versioned image
+name: Publish frozen versioned image with pinned Compose
 
 on:
   push:
@@ -57,6 +57,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - uses: docker/setup-compose-action@v1
+        with:
+          version: v5.5.1
+      - run: docker compose version
       - run: npm ci --omit=dev --ignore-scripts --no-audit
       - run: npm run check
       - run: node --test tests/backend.test.js tests/frontend.test.js tests/materials.test.js tests/scanner.test.js tests/labels.test.js tests/compose.test.js tests/https.test.js
