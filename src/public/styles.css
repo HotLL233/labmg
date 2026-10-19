@@ -6,3 +6,94 @@
 .layout>main>header>.actions{min-width:0;flex-wrap:wrap}
 .layout>main>header>.actions>input{min-width:0;max-width:100%}
 .layout>main>header>.actions>button{white-space:nowrap}
+
+.side{overflow-y:auto}
+.side-foot{position:static;margin-top:24px}
+.page>*,.page section,.page aside,.page form,.page label,.grid>*,.detail-grid>*,.cards>*,.modules>*{min-width:0}
+.page :is(.archive-layout,.quality-layout,.permission-layout)>*{min-width:0}
+.page .table{max-width:100%;overscroll-behavior-x:contain}
+.page .table th{white-space:nowrap}
+.page .table td strong{max-width:320px;overflow-wrap:anywhere}
+.page :is(.archive-toolbar,.quality-toolbar,.asset-toolbar,.contract-toolbar,.toolbar,.permission-panel-head,.datahub-actions,.contract-tabs){gap:12px;flex-wrap:wrap}
+.page :is(.archive-head,.quality-head,.asset-head,.contract-head,.permission-head,.datahub-head,.hero)>div{min-width:0}
+.page :is(.management-card,.permission-group,.datahub-status,.role-tab),.detail-item,.modal-head>div,.file-row>span{overflow-wrap:anywhere}
+.page :is(.user-form,.nav-form,.datahub-grid) :is(input,select),.role-create input{width:100%;min-width:0;max-width:100%}
+.field :is(input,select,textarea){min-width:0;width:100%;max-width:100%}
+dialog{max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain}
+dialog .modal-head{gap:12px;align-items:flex-start}
+dialog .x{flex-shrink:0}
+dialog footer{flex-wrap:wrap}
+.file-row{gap:12px;align-items:flex-start}
+.file-row>span{min-width:0}
+#auth-error,#record-error{white-space:pre-wrap;overflow-wrap:anywhere}
+#login{max-width:420px}
+#login-form>.primary{width:100%;margin:12px 0}
+#login-form>.field{margin-top:14px}
+#login-form>small{display:block;line-height:1.6;overflow-wrap:anywhere}
+#toast{max-width:calc(100vw - 32px);max-height:35dvh;overflow:auto;overflow-wrap:anywhere;z-index:50}
+
+@media screen and (max-width:900px){
+  .layout{flex-direction:column}
+  .layout>.side{position:static;width:100%;padding:12px 16px;overflow:visible}
+  .side .brand{padding:0 0 10px;gap:9px}
+  .side .brand i{padding:5px 10px;font-size:18px}
+  .side .brand div{display:block}
+  .side .brand small{display:none}
+  .side .brand strong{font-size:17px}
+  .side .nav{display:flex;gap:6px;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}
+  .side .nav button{display:flex;align-items:center;flex:0 0 auto;min-height:44px;padding:10px 12px;white-space:nowrap}
+  .side .nav button b{display:inline;font-weight:500}
+  .side .nav span{width:23px}
+  .side .side-foot{display:none}
+  .layout>main{margin-left:0;width:100%}
+  .layout>main>header{padding:18px 20px;align-items:flex-start}
+  .layout>main>header>div{min-width:0}
+  .layout>main>header>.actions{width:100%;gap:8px}
+  .layout>main>header>.actions>#search{flex:1 1 210px;width:auto}
+  .page{padding:20px}
+  .page .archive-layout,.page .quality-layout,.page .permission-layout{grid-template-columns:minmax(0,1fr)}
+  .page :is(.archive-menu,.quality-menu){display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .page .permission-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .page .role-create{flex-wrap:wrap}
+  .page .role-create>label{flex:1 1 180px;min-width:0}
+}
+
+@media screen and (max-width:768px){
+  .layout>main>header{gap:12px}
+  .layout>main>header>.actions>input[type=date]{flex:1 1 125px;width:auto!important}
+  .page :is(.hero,.archive-head,.quality-head,.asset-head,.contract-head,.permission-head,.datahub-head){align-items:flex-start;flex-direction:column;gap:14px}
+  .page :is(.archive-head,.quality-head,.asset-head,.contract-head,.permission-head,.datahub-head){padding:18px}
+  .page :is(.asset-toolbar,.archive-toolbar,.quality-toolbar,.contract-toolbar,.permission-panel-head){align-items:flex-start}
+  .page .permission-panel-head>div{min-width:0}
+  .page .user-form,.page .nav-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .page :is(.user-form,.nav-form)>button{align-self:end}
+  .page .datahub-grid{grid-template-columns:minmax(0,1fr)}
+  .page .asset-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .page .table th,.page .table td{padding:12px}
+  button,.upload,.upload-btn{min-height:44px}
+  .upload-btn{padding:10px 15px}
+  input,select,textarea{font-size:16px;min-height:44px}
+  input[type=checkbox],input[type=radio]{min-height:24px;min-width:24px;vertical-align:middle}
+  dialog{width:calc(100vw - 24px);max-width:calc(100vw - 24px);padding:18px;margin:12px auto}
+  dialog .grid,dialog .detail-grid{grid-template-columns:minmax(0,1fr)}
+  dialog footer>button{flex:1 1 auto}
+  .file-row{flex-wrap:wrap}
+}
+
+@media screen and (max-width:600px){
+  .layout>main>header{padding:16px}
+  .layout>main>header h1{font-size:21px}
+  .layout>main>header>.actions>#search{flex-basis:100%}
+  .page{padding:16px}
+  .page :is(.cards,.modules,.management-cards,.permission-grid,.user-form,.nav-form){grid-template-columns:minmax(0,1fr)}
+  .page :is(.hero,.permission-panel,.datahub-panel){padding:16px}
+  .page .permission-panel-head{flex-direction:column}
+  .page .permission-panel-head>.user-actions{width:100%}
+  .page .role-create{align-items:stretch;flex-direction:column}
+  .page .role-create>label{flex-basis:auto}
+  .page .empty{padding:32px 16px}
+  .detail-grid{grid-template-columns:minmax(0,1fr)}
+  #toast{right:16px;bottom:16px}
+}
+
+@media print{dialog{max-height:none;overflow:visible}}

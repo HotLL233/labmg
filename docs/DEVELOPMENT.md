@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.6.2（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本版数据库为 PostgreSQL 18；0.6.0／0.6.1 的 PG17 验证与更早 SQLite 实现保留为历史，不替代本轮实际验证。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
+本源码版本为 **0.7.0（开发中，尚未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为 PostgreSQL 18；当前公开交付为下方 0.6.2，旧版测试、容器和实机结果不代替 0.7.0 的实际验证。发布状态以[版本说明](CHANGELOG.md)及 GitHub Release 为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -35,7 +35,7 @@ artifacts/             唯一构建产物与缓存目录，不提交
   legacy/              目录整理前的产物和数据迁移备份
 ```
 
-0.6.2 应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
+当前应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。0.7.0 配置中的镜像标签是待发布目标，不能当作镜像已存在。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
 
 用户最新明确“不用管旧版本旧库”，0.6.2 开发与发布按全新 PG18 部署，不实施 PG17／SQLite 迁移或旧库兼容检测，当时不读取、删除或搬迁旧运行文件。2026-10-19 后续授权 NAS 现场排障发现误挂 PG17 目录，在停库备份后新建 PG18，用户随后明确自行删除该旧库备份；这是现场部署处理，不是旧库迁移。历史文档中的 PG17、SQLite、仅换镜像升级与卷迁移行为只适用于当时版本，不作为本轮从旧库升级的承诺。
 
@@ -50,6 +50,22 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.7.0：中文 Excel 与打印、手机体验（进行中）
+
+从 `42f5963` 创建 `feature/v0.7.0-excel-names-and-label-printing`，版本为 0.7.0；缓存统一在 `artifacts/cache/0.7.0/`，交付目标为 `artifacts/releases/0.7.0/`。本轮尚未冻结、创建标签、构建正式镜像或公开 Release，`main`、0.6.2 标签和归档保持原样。
+
+用户要求库存及其他导入模板优先引用现有中文名称，程序编码只用于身份识别；错误尽量明确工作表及单元格，并要求导出 Excel 可回导。后续确认**仅库存和物资信息库需要回导**，因此不新增申报、验收或领用历史报表的导入入口。信息库按名称＋规格＋单位复用，库存按批次复制到期初／补录草稿，核对后再入库；不能把重复导入解释为历史恢复或自动去重。
+
+前端已按结构化 `IMPORT_VALIDATION` 错误显示工作表、实际行列、中文字段、输入值和原因，失败保留文件、表单及版本。物资选项优先显示中文名称／规格／单位，系统编码只读且非必填；后端自动编码、中文字典解析、整批事务校验、导出回导和中文仓库输出已完成源码集成，本机物资完整回归 43/43 通过（隔离 PG17.11），正式 PG18 CI 尚待执行、镜像未发布。解析工作簿后重新读取会话与权限，401／403 保留为权限错误。手机改动覆盖局部横向表格和导航、44px 触控、16px 输入、动态视口弹窗和固定保存栏。DL-886A（NEW）面板支持范围与首张试打，通过系统打印窗口使用现有 USB 驱动；不静默选择设备或调用 BarTender。详见 [打印说明](LABEL_PRINTING.md)和 [API 说明](MATERIAL_API.md)。
+
+参考下拉每类最多 5000 条，本次导出涉及的数据优先；参考库更大时该列表允许手填已有中文名称，服务端仍检查物资组合、分类、区域及仓库。此上限是工作簿引用列表及单次明细容量，不是信息库总量限制；各列独立下拉不能代替名称＋规格＋单位的联合身份校验。源码语法检查当次 36 个 JavaScript 通过，完整材料回归与正式容器结果仍按实际后续补记。
+
+已执行的有限检查：前端 VM 45/45；物资真实 Edge（模拟 API）390px／768px 共 29 项及 8 张截图目视，报告为 `artifacts/cache/0.7.0/material-ui/report.json`；全站响应式真实 Edge 用合成数据检查 13 模块、4 管理子页、长表单／附件／登录／打印布局，`tests/mobile-layout.test.js` 最新本机 1/1，无跳过。账号 CSV 前端 8/8，账号事务 API 在本地 PG17.11 专用隔离数据库及 HTTP 服务中 7/7、无失败或跳过，覆盖整批回滚、username 身份、密码／会话、最后 ADMIN 与权限保护；正式 CI 已纳入两份账号测试。上述检查不使用真实业务库，也不代表真手机、PG18、NAS 或打印硬件验收。XLSX 与标签的专项结果及后续完整业务回归和容器结果在完成后补记，不预写“全部通过”。
+
+发布准备沿用现有脚本：`package.ps1` 从 `package.version` 生成不可覆盖的源码 ZIP；`package-docker.ps1` 复用冻结 ZIP，每架构导出应用、`postgres:18-bookworm` 与 `caddy:2.11.7-alpine` 三镜像。最终仍须交付 GHCR amd64／arm64、两份本地实际存在且校验通过的 TAR、两份完整 YML、源码及摘要。发布流程动态读取标签与包版本，不需要把所有旧版本引用批量改成 0.7.0。当前只是准备配置与门禁计划，尚未执行冻结或远程发布。
+
+本轮另在 ignored 的 `artifacts/cache/0.7.0/` 准备 22 个发布 helper 模板，真实 commit／digest 尚空；21 个脚本语法、3 个内联脚本、四门禁绑定及合成三镜像 TAR 离线自检通过。当前两份 Compose 与 HTTPS 配置检查 2/2、无失败或跳过；这些不是容器生命周期或真实发布结果。执行顺序及仍需核实的输入记录在缓存内 `RELEASE-PREPARATION.md`，不提交生成物或改写旧 helper。
 
 ## 0.6.2：PostgreSQL 18 与两份完整 YML（已公开验证版）
 

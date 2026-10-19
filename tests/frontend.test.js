@@ -958,7 +958,10 @@ test('new catalogs default to individual tracking and numbering-rule edits requi
   };
   await click('[data-mw=dictionaries]'); await click('[data-mw=new-catalog]');
   assert.equal(app.$('#mw-fields [name=trackingMode]').value, 'unit');
-  fill({ code: 'NEW-UNIT', name: '逐瓶试剂', spec: '100 mL', unit: '瓶', categoryId: '1' }); await submit();
+  assert.equal(app.$('#mw-fields [name=code]').attrs.readonly, '');
+  assert.equal(app.$('#mw-fields [name=code]').attrs.required, undefined);
+  fill({ name: '逐瓶试剂', spec: '100 mL', unit: '瓶', categoryId: '1' }); await submit();
+  assert.equal(created.code, '');
   assert.equal(created.trackingMode, 'unit'); assert.equal(created.unit, '瓶');
   await click('[data-mw=unit-rule]');
   assert.match(app.$('#mw-intro').textContent, /UTC.*全局递增.*不按日期重置/);
@@ -1132,9 +1135,9 @@ test('closed openings stay visible and read-only while stock supplements require
 
 test('declaration lookup keeps server stock priority, passes the selected scope and reuses a zero-stock identity', async () => {
   const { app, row, click, fill, submit } = await materialApp(false);
-  const matches = [{ ...row, id: 7, code: 'LOCAL', localQtyM: 2000, stockQtyM: 3000 },
-    { ...row, id: 8, code: 'OTHER', localQtyM: 0, stockQtyM: 9000 },
-    { ...row, id: 9, code: 'ZERO', localQtyM: 0, stockQtyM: 0 }];
+  const matches = [{ ...row, id: 7, code: 'LOCAL', name: '本区域物资', localQtyM: 2000, stockQtyM: 3000 },
+    { ...row, id: 8, code: 'OTHER', name: '其他区域物资', localQtyM: 0, stockQtyM: 9000 },
+    { ...row, id: 9, code: 'ZERO', name: '零库存物资', localQtyM: 0, stockQtyM: 0 }];
   let declaration;
   app.state.materialResponse = ({ url, method, body }) => {
     if (url.pathname === '/api/materials/catalog' && url.searchParams.has('q')) {
@@ -1146,11 +1149,16 @@ test('declaration lookup keeps server stock priority, passes the selected scope 
   await click('[data-mw=request]'); await click('[data-mw=add-item]');
   fill({ catalogQuery: '合成', regionId: '2', warehouse: 'MAIN' }); await click('[data-mw=catalog-search]');
   const options = app.$('#mw-fields [name=catalogId]').textContent;
-  assert.ok(options.indexOf('LOCAL') < options.indexOf('OTHER')); assert.ok(options.indexOf('OTHER') < options.indexOf('ZERO'));
+  assert.ok(options.indexOf('本区域物资') < options.indexOf('其他区域物资')); assert.ok(options.indexOf('其他区域物资') < options.indexOf('零库存物资'));
+  assert.doesNotMatch(options, /LOCAL|OTHER|ZERO/);
   assert.match(options, /所选范围 2 \/ 全部库存 3 件/); assert.match(options, /全部库存 0 件/);
   fill({ catalogId: '9', quantity: '1' });
   app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
   assert.equal(app.$('#mw-fields [name=code]').value, 'ZERO'); assert.equal(app.$('#mw-fields [name=name]').readOnly, true);
+  fill({ catalogId: '' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.equal(app.$('#mw-fields [name=code]').value, ''); assert.equal(app.$('#mw-fields [name=code]').readOnly, true);
+  assert.equal(app.$('#mw-fields [name=name]').readOnly, false);
+  fill({ catalogId: '9' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
   await submit(); assert.equal(declaration.catalogId, 9); assert.equal(declaration.code, 'ZERO');
   assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname === '/api/materials/catalog'), false);
 });
@@ -1174,13 +1182,49 @@ test('catalog Excel controls use a strict template and preserve the current expo
   assert.equal(ordinary.app.$('#mw-dialog').open, false); assert.match(ordinary.app.$('#mw-status').textContent, /没有物资信息维护权限/);
 });
 
+test('Excel validation displays every cell error as text and retains the selected file and opening version for retry', async () => {
+  for (const kind of ['catalog', 'opening']) {
+    const { app, click, fill, submit } = await materialApp();
+    const opening = { id: 81, no: 'QC-81', kind: 'opening', title: '导入核对', date: '2026-10-19', version: 3, status: 'draft', items: [] };
+    const selected = { name: '中文库存.xlsx', size: 9 }, sent = [];
+    let invalid = true;
+    app.context.FileReader = class { readAsDataURL() { this.result = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,c3ludGhldGlj'; this.onload(); } };
+    app.state.materialResponse = ({ url, method, body }) => {
+      if (url.pathname === '/api/materials/openings/81' && method === 'GET') return { body: opening };
+      if (url.pathname === (kind === 'catalog' ? '/api/materials/catalog/import' : '/api/materials/openings/81/import')) {
+        sent.push(body);
+        if (invalid) return { status: 400, body: { error: 'Excel 校验失败，未导入任何数据', code: 'IMPORT_VALIDATION', totalErrors: 3, errors: [
+          { sheet: '库存明细', row: 2, column: 'C', field: '仓库', value: '<img src=x onerror=alert(1)>', message: '仓库不存在，请从下拉列表选择' },
+          { sheet: '库存明细', row: 8, column: 'G', field: '数量', value: '-2', message: '数量必须大于零' },
+          { sheet: '物资信息', row: 11, column: 'A', field: '物资名称', value: '', message: '物资名称不能为空' }
+        ] } };
+        return { status: 201, body: kind === 'catalog' ? { created: 0, skipped: 2 } : opening };
+      }
+    };
+    if (kind === 'catalog') { await click('[data-mw=dictionaries]'); await click('[data-mw=catalog-import]'); }
+    else { await click({ dataset: { mw: 'page', page: 'openings' } }); await click({ dataset: { mw: 'opening-detail', id: '81' } }); await click('[data-mw=opening-import]'); }
+    fill({ file: selected }); await submit();
+    const error = app.$('#mw-error');
+    assert.match(error.textContent, /工作表「库存明细」 第 2 行 C 列 （仓库）.*仓库不存在/);
+    assert.match(error.textContent, /第 8 行 G 列 （数量）.*数量必须大于零/);
+    assert.match(error.textContent, /工作表「物资信息」 第 11 行 A 列 （物资名称）.*不能为空/);
+    assert.match(error.textContent, /<img src=x onerror=alert\(1\)>/); assert.equal(error.querySelector('img'), null);
+    assert.equal(error.attrs.tabindex, '0'); assert.equal(error.attrs.role, 'alert');
+    assert.equal(app.$('#mw-dialog').open, true); assert.equal(app.$('#mw-save').disabled, false);
+    assert.equal(app.$('#mw-fields [name=file]').value, selected); assert.doesNotMatch(app.$('#mw-status').textContent, /导入完成|操作已保存/);
+    invalid = false; await submit(); assert.deepEqual(sent[1], sent[0]);
+    if (kind === 'opening') assert.equal(sent[1].version, 3);
+    assert.equal(app.$('#mw-dialog').open, false);
+  }
+});
+
 test('late stock matching results cannot replace a newer query or a changed warehouse scope', async () => {
   const { app, row, click, fill } = await materialApp(false); let release;
   app.state.materialResponse = async ({ url }) => {
     if (url.pathname !== '/api/materials/catalog' || !url.searchParams.has('q')) return;
     const query = url.searchParams.get('q');
     if (query === 'old' || query === 'scope') await new Promise(resolve => { release = resolve; });
-    return { body: { items: [{ ...row, id: 9, code: query, stockQtyM: 1000, localQtyM: 1000 }], total: 1, page: 1, pageSize: 200 } };
+    return { body: { items: [{ ...row, id: 9, name: query, code: query, stockQtyM: 1000, localQtyM: 1000 }], total: 1, page: 1, pageSize: 200 } };
   };
   await click('[data-mw=request]'); await click('[data-mw=add-item]'); fill({ catalogQuery: 'old' });
   const first = click('[data-mw=catalog-search]'); fill({ catalogQuery: 'new' }); await click('[data-mw=catalog-search]'); release(); await first;
@@ -1199,17 +1243,18 @@ test('managers create and link new materials with version conflict reloads, reas
       writes.push(body);
       if (writes.length === 1) { request.version++; item.version++; return { body: { error: '申报明细已变化，请重新读取' }, status: 409 }; }
       if (writes.length === 2) throw Error('synthetic response loss');
-      Object.assign(item, { catalogId: 6, code: body.code }); request.version++; request.revision++;
+      Object.assign(item, { catalogId: 6, code: body.code || 'MAT-AUTO-6' }); request.version++; request.revision++;
       return { body: { request }, status: 201 };
     }
   };
   await click('[data-mw=request]'); assert.ok(app.$('[data-mw=request-catalog]')); await click('[data-mw=request-catalog]');
   assert.equal(app.$('#mw-fields [name=name]').value, '新耗材'); assert.equal(app.$('#mw-fields [name=trackingMode]').value, 'unit');
-  fill({ code: 'NEW-6' }); await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /建档原因不能为空/);
+  assert.equal(app.$('#mw-fields [name=code]').attrs.readonly, '');
+  await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /建档原因不能为空/);
   fill({ reason: '确认无同规格库存或已建档信息' }); await submit();
-  assert.equal(writes[0].itemVersion, 1); assert.equal(writes[0].requestVersion, 1); assert.equal(writes[0].trackingMode, 'unit'); assert.ok(writes[0].requestIdempotencyKey);
+  assert.equal(writes[0].itemVersion, 1); assert.equal(writes[0].requestVersion, 1); assert.equal(writes[0].trackingMode, 'unit'); assert.equal(writes[0].code, ''); assert.ok(writes[0].requestIdempotencyKey);
   assert.equal(app.$('[data-mw=reload-form]').hidden, false); await click('[data-mw=reload-form]');
-  assert.equal(app.$('#mw-fields [name=code]').value, 'NEW-6'); await submit(); assert.equal(writes[1].requestVersion, 2); assert.equal(writes[1].itemVersion, 2);
+  assert.equal(app.$('#mw-fields [name=code]').value, ''); await submit(); assert.equal(writes[1].requestVersion, 2); assert.equal(writes[1].itemVersion, 2);
   assert.equal(app.$('#mw-save').textContent, '按原内容重试'); assert.equal(app.$('#mw-fields [name=code]').disabled, true);
   app.$('#mw-fields [name=code]').value = 'CHANGED-AFTER-SEND'; await submit(); assert.deepEqual(writes[2], writes[1]);
   assert.equal(app.$('[data-mw=request-catalog]'), null); assert.equal(app.$('#mw-dialog').open, false);

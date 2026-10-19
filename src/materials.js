@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS } = require('./material-xlsx');
+const { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, excelColumn, importFailure, referenceFeature } = require('./material-xlsx');
 
 const WAREHOUSES = [
   { code: 'MAIN', name: '默认仓库' },
@@ -122,25 +122,45 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   const normalized = value => String(value ?? '').normalize('NFKC').trim().toLowerCase();
   const sameMaterial = (left, right) => ['name', 'spec', 'unit'].every(field => normalized(left[field]) === normalized(right[field]));
+  const materialKey = row => JSON.stringify([row.name, row.spec, row.unit].map(normalized));
+  function indexRows(rows, key) {
+    const result = new Map();
+    for (const row of rows) { const value = key(row); if (!result.has(value)) result.set(value, []); result.get(value).push(row); }
+    return result;
+  }
+  function catalogIndex(rows) {
+    return { codes: indexRows(rows, row => normalized(row.code)), identities: indexRows(rows, materialKey),
+      names: new Set(rows.map(row => normalized(row.name))), specs: new Set(rows.map(row => JSON.stringify([row.name, row.spec].map(normalized)))) };
+  }
   async function catalogInput(input) {
-    const code = text(input.code, '物资编码', 64).normalize('NFKC').toUpperCase();
-    if (code.length > 64 || !/^[A-Z0-9][A-Z0-9._/-]*$/.test(code)) error(400, '编码最多64位，须由英文字母、数字及 . _ / - 组成');
+    const code = text(input.code ?? '', '物资编码', 64, true).normalize('NFKC').toUpperCase();
+    if (code.length > 64 || (code && !/^[A-Z0-9][A-Z0-9._/-]*$/.test(code))) error(400, '编码最多64位，须由英文字母、数字及 . _ / - 组成');
     return { code, name: text(input.name, '物资名称'), spec: text(input.spec, '规格'), unit: text(input.unit, '单位', 30),
       category_id: (await dictionary('material_categories', input.categoryId, '分类')).id,
       tracking_mode: trackingMode(input.trackingMode ?? 'quantity') };
   }
-  async function createCatalog(data, user, reuse = false) {
-    const rows = await all('SELECT * FROM material_catalog ORDER BY id');
-    const existing = rows.find(row => normalized(row.code) === normalized(data.code));
+  async function createCatalog(data, user, reuse = false, index = null) {
+    index ??= catalogIndex(await all('SELECT * FROM material_catalog ORDER BY id'));
+    const coded = data.code ? index.codes.get(normalized(data.code)) || [] : [];
+    if (coded.length > 1) conflict('物资编码规范化后有歧义，请联系管理员核对');
+    const existing = coded[0];
     if (existing) {
       if (reuse && sameMaterial(existing, data) && existing.category_id === data.category_id && existing.tracking_mode === data.tracking_mode) return { row: existing, created: false };
       conflict('物资编码已存在或信息冲突，请选择已有物资信息');
     }
-    if (rows.some(row => sameMaterial(row, data))) conflict('相同名称、规格和单位的物资信息已存在，请选择已有记录');
+    const matches = index.identities.get(materialKey(data)) || [];
+    if (matches.length) {
+      if (!data.code && matches.length === 1 && matches[0].category_id === data.category_id && matches[0].tracking_mode === data.tracking_mode) return { row: matches[0], created: false };
+      conflict('相同名称、规格和单位的物资信息已存在，分类或管理方式冲突，请选择已有记录');
+    }
+    data = { ...data, code: data.code || 'MAT-' + crypto.randomBytes(8).toString('hex').toUpperCase() };
     const inserted = await run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode) VALUES(?,?,?,?,?,?,?)',
       data.code, data.name, data.spec, data.unit, data.category_id, user.id, data.tracking_mode);
     await log(user, 'CREATE', 'material_catalog', inserted.lastInsertRowid, data.code);
-    return { row: await catalog(inserted.lastInsertRowid), created: true };
+    const row = await catalog(inserted.lastInsertRowid);
+    index.codes.set(normalized(row.code), [row]);
+    index.identities.set(materialKey(row), [row]);
+    return { row, created: true };
   }
   async function catalogRows(url) {
     const region = url.searchParams.has('regionId') ? (await dictionary('material_regions', url.searchParams.get('regionId'), '区域')).id : null;
@@ -495,7 +515,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return { id: row.id, code: row.code, sequence: row.sequence, qrPayload: row.code, catalogId: row.catalog_id,
       catalogCode: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
       regionId: row.region_id, regionName: (await dictionary('material_regions', row.region_id, '区域')).name,
-      warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date,
+      warehouse: row.warehouse, warehouseName: WAREHOUSES.find(entry => entry.code === row.warehouse)?.name || row.warehouse, batch: row.batch, expiryDate: row.expiry_date,
       location: row.status === 'in_stock' ? (await stockLocation(row))?.location || '' : exit ? JSON.parse(exit.snapshot).location || '' : '',
       status: row.status, sourceMovementId: row.source_movement_id, exitMovementId: row.exit_movement_id,
       sourceReceiptId: source.receipt_id, createdAt: row.created_at };
@@ -614,7 +634,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   async function postOpening(document, user) {
     const lines = (await all('SELECT * FROM material_opening_items WHERE opening_id=? ORDER BY id', document.id));
-    if (!lines.length || lines.length > 200) error(400, '单据须包含1至200条明细');
+    if (!lines.length || lines.length > 5000) error(400, '单据须包含1至5000条明细');
     const unitCount = safeSum(await mapRows(lines,async row => (await catalog(row.catalog_id)).tracking_mode === 'unit' ? row.qty_m / 1000 : 0));
     if (unitCount > 1000) error(400, '每张单据一次最多生成1000个单件码，请拆分单据');
     const locations = new Map();
@@ -970,6 +990,23 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       requestTitle: row.request_title, requestVersion: row.request_version, requestRevision: row.request_revision,
       requestCreatedAt: row.request_created_at }))), total, page, pageSize };
   }
+  function importRow(sheet, record, errors) {
+    const add = (field, message, status = 400) => {
+      errors.push({ sheet: sheet.sheet, row: record.row, column: excelColumn(Math.max(0, sheet.headers.indexOf(field))),
+        field, value: String(record.values[field] ?? '').slice(0, 200), message });
+      if (status === 409) errors.status = 409;
+    };
+    const check = async (field, callback) => {
+      try { return await callback(record.values[field]); }
+      catch (failure) { if (!failure.status || failure.status >= 500 || [401, 403].includes(failure.status)) throw failure; add(field, failure.message, failure.status); }
+    };
+    return { add, check };
+  }
+  function namedOption(options, value, label) {
+    const matches = options.get(normalized(value)) || [];
+    if (matches.length !== 1) error(400, `${label}${matches.length ? '名称有歧义，请联系管理员' : '不存在，请从参考表下拉选择或先在系统创建'}`);
+    return matches[0];
+  }
   async function dispatch(req, res, url, initialUser) {
     const route = url.pathname.slice('/api/materials'.length) || '/';
     const method = req.method;
@@ -1023,33 +1060,63 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if ((match = route.match(/^\/openings\/(\d+)\/import$/)) && method === 'POST') {
       (await openingWritable((await opening(match[1])), input, user));
       if (!permit(user, 'materials.amount.read')) error(403, '导入含金额的期初或补录明细需要金额读取权限');
-      let rows;
-      try { rows = await readOpeningWorkbook(input); } catch (failure) { error(failure.status || 400, failure.message); }
+      const sheet = await readOpeningWorkbook(input);
       user = tokenUser ? (await tokenUser(req)) : user;
       if (!user) error(401, '请先登录');
       if (!permit(user, 'materials.amount.read')) error(403, '导入含金额的期初或补录明细需要金额读取权限');
       const result = (await transaction(async () => {
         const document = (await opening(match[1])); (await openingWritable(document, input, user));
-        if ((await one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id)).total + rows.length > 200) error(400, '每张单据最多200条明细');
-        for (const [index, cells] of rows.entries()) {
-          try {
-            if (typeof cells[0] !== 'string') error(400, '物资编码须为文本，请将该列设置为文本后重新填写，避免丢失前导零');
-            const master = (await one('SELECT id FROM material_catalog WHERE code=?', String(cells[0]).trim()));
-            const region = (await one('SELECT id FROM material_regions WHERE name=?', String(cells[1]).trim()));
-            if (!master || !region) error(400, '物资编码或区域尚未建立');
-            const identity = (await stockIdentity({ catalogId: master.id, regionId: region.id, warehouse: cells[2], batch: cells[5] || '', expiryDate: cells[6] || '' }));
-            const current = (await stockLocation(identity));
-            const data = (await openingItemInput({ catalogId: master.id, regionId: region.id, warehouse: cells[2],
-              quantity: String(cells[3]), amount: String(cells[4]), batch: cells[5] || '', expiryDate: cells[6] || '',
-              location: cells[7] || current?.location || '', locationVersion: current?.version || 0, zeroAmountReason: cells[8] || '' }, user));
-            (await saveOpeningItem(document.id, data));
-          } catch (failure) {
-            if (failure.status) error(failure.status, `Excel 第${index + 2}行：${failure.message}`, failure.code);
-            throw failure;
+        if ((await one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id)).total + sheet.rows.length > 5000) error(400, '每张单据最多5000条明细');
+        const masters = catalogIndex(await all('SELECT * FROM material_catalog')), regions = indexRows(await all('SELECT * FROM material_regions'), row => normalized(row.name)), errors = [], prepared = [];
+        const legacy = sheet.headers.includes('物资编码'), storeField = legacy ? '仓库编码' : '仓库';
+        for (const record of sheet.rows) {
+          const { check, add } = importRow(sheet, record, errors), before = errors.length, cells = record.values;
+          let master;
+          if (legacy) master = await check('物资编码', value => {
+            const code = text(value, '物资编码', 64);
+            const found = masters.codes.get(normalized(code)) || [];
+            if (found.length !== 1) error(400, found.length ? '物资编码规范化后有歧义，请联系管理员核对' : '物资编码尚未建立；新版模板请使用中文名称、规格和单位');
+            return found[0];
+          });
+          else {
+            const name = await check('物资名称', value => text(value, '物资名称'));
+            const spec = await check('规格', value => text(value, '规格'));
+            const unit = await check('单位', value => text(value, '单位', 30));
+            if (name !== undefined && spec !== undefined && unit !== undefined) {
+              const matches = masters.identities.get(materialKey({ name, spec, unit })) || [];
+              if (matches.length > 1) add('物资名称', '名称、规格和单位对应多条物资，请联系管理员核对');
+              else if (!matches.length) {
+                const hasName = masters.names.has(normalized(name)), hasSpec = masters.specs.has(JSON.stringify([name, spec].map(normalized)));
+                add(!hasName ? '物资名称' : !hasSpec ? '规格' : '单位', !hasName ? '物资名称尚未建立，请先在物资信息库建立或导入' : '名称、规格和单位未对应同一条物资信息，请从参考表核对组合');
+              }
+              else master = matches[0];
+            }
           }
+          const region = await check('区域', value => namedOption(regions, value, '区域'));
+          const store = await check(storeField, value => {
+            const found = WAREHOUSES.find(row => normalized(row.name) === normalized(value) || (legacy && row.code === value));
+            if (!found) error(400, '仓库不存在，请选择：' + WAREHOUSES.map(row => row.name).join('、'));
+            return found.code;
+          });
+          const quantity = await check('数量', value => decimal(String(value), 3, '数量'));
+          const amount = await check('总金额（元）', value => decimal(String(value), 2, '总金额', true));
+          const batch = await check('批号', value => text(String(value), '批号', 100, true));
+          const expiryDate = await check('有效期', value => date(String(value), '有效期', true));
+          const location = await check('存放位置', value => text(String(value), '存放位置', 200, true));
+          const zeroAmountReason = await check('零金额原因', value => text(String(value), '零金额原因', 1000, amount !== 0));
+          if (master && quantity !== undefined) await check('数量', () => unitQuantity(master, quantity, '数量', 1000));
+          if (errors.length !== before) continue;
+          const identity = await stockIdentity({ catalogId: master.id, regionId: region.id, warehouse: store, batch, expiryDate });
+          const current = await stockLocation(identity);
+          const data = await check('存放位置', () => openingItemInput({ catalogId: master.id, regionId: region.id, warehouse: store,
+            quantity: String(cells['数量']), amount: String(cells['总金额（元）']), batch, expiryDate,
+            location: location || current?.location || '', locationVersion: current?.version || 0, zeroAmountReason }, user));
+          if (data) prepared.push(data);
         }
+        if (errors.length) importFailure(errors, errors.status || 400);
+        for (const data of prepared) await saveOpeningItem(document.id, data);
         (await run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id));
-        (await log(user, 'IMPORT', 'material_openings', document.id, `新增${rows.length}条草稿明细`));
+        (await log(user, 'IMPORT', 'material_openings', document.id, `新增${sheet.rows.length}条草稿明细`));
         return (await openingView(document.id));
       }));
       return reply(result, 201);
@@ -1064,7 +1131,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           if (old && input.itemVersion !== old.version) conflict('明细已变化，请重新读取后保存');
           if (method === 'DELETE') (await run('DELETE FROM material_opening_items WHERE id=?', old.id));
           else {
-            if (!old && (await one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id)).total >= 200) error(400, '每张单据最多200条明细');
+            if (!old && (await one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id)).total >= 5000) error(400, '每张单据最多5000条明细');
             (await saveOpeningItem(document.id, (await openingItemInput(input, user, old || {})), old?.id));
           }
           (await run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id));
@@ -1206,25 +1273,41 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     if (route === '/catalog/import' && method === 'POST') {
       requireManager(user, 'materials.catalog.write');
-      let rows;
-      try { rows = await readCatalogWorkbook(input); } catch (failure) { error(failure.status || 400, failure.message); }
+      const sheet = await readCatalogWorkbook(input);
       user = tokenUser ? await tokenUser(req) : user;
       if (!user) error(401, '请先登录');
       requireManager(user, 'materials.catalog.write');
       const result = await transaction(async () => {
         let created = 0, skipped = 0;
-        for (const [index, cells] of rows.entries()) {
-          try {
-            if (typeof cells[0] !== 'string') error(400, '物资编码须为文本，请将该列设置为文本后重新填写，避免丢失前导零');
-            const category = await one('SELECT id FROM material_categories WHERE name=?', String(cells[4]).trim());
-            if (!category) error(400, '物资分类不存在，请先创建分类');
-            const mode = { '逐件': 'unit', '数量': 'quantity' }[String(cells[5]).trim()];
-            if (!mode) error(400, '管理方式请填写逐件或数量');
-            const data = await catalogInput({ code: String(cells[0]), name: String(cells[1]), spec: String(cells[2]), unit: String(cells[3]), categoryId: category.id, trackingMode: mode });
-            const saved = await createCatalog(data, user, true);
-            if (saved.created) created++; else skipped++;
-          } catch (failure) { error(failure.status || 400, `第${index + 1}条导入明细：${failure.message}`); }
+        const categories = indexRows(await all('SELECT * FROM material_categories'), row => normalized(row.name)), masters = catalogIndex(await all('SELECT * FROM material_catalog')), errors = [];
+        for (const record of sheet.rows) {
+          const { check, add } = importRow(sheet, record, errors), before = errors.length;
+          const code = sheet.headers.includes('物资编码') ? await check('物资编码', value => text(value, '物资编码', 64)) : '';
+          const name = await check('物资名称', value => text(value, '物资名称'));
+          const spec = await check('规格', value => text(value, '规格'));
+          const unit = await check('单位', value => text(value, '单位', 30));
+          const category = await check('物资分类', value => namedOption(categories, value, '物资分类'));
+          const mode = await check('管理方式', value => {
+            const result = { '逐件': 'unit', '数量': 'quantity' }[String(value).trim()];
+            if (!result) error(400, '管理方式请从下拉列表选择逐件或数量');
+            return result;
+          });
+          if (errors.length !== before) continue;
+          const candidates = code ? masters.codes.get(normalized(code)) || [] : masters.identities.get(materialKey({ name, spec, unit })) || [];
+          if (candidates.length === 1) {
+            const existing = candidates[0];
+            for (const [field, next, previous] of [['物资名称', name, existing.name], ['规格', spec, existing.spec], ['单位', unit, existing.unit]]) {
+              if (normalized(next) !== normalized(previous)) add(field, '此编码对应的物资信息不同，请核对已有记录', 409);
+            }
+            if (category.id !== existing.category_id) add('物资分类', '已有相同物资的分类不同，请核对已有记录，导入不会覆盖分类', 409);
+            if (mode !== existing.tracking_mode) add('管理方式', '已有相同物资的管理方式不同，请核对；更改管理方式须使用专用维护入口', 409);
+          }
+          if (errors.length !== before) continue;
+          const saved = await check(sheet.headers.includes('物资编码') ? '物资编码' : '物资名称', async () =>
+            createCatalog(await catalogInput({ code, name, spec, unit, categoryId: category.id, trackingMode: mode }), user, true, masters));
+          if (saved?.created) created++; else if (saved) skipped++;
         }
+        if (errors.length) importFailure(errors, errors.status || 400);
         return { created, skipped };
       });
       return reply(result, 201);
@@ -1897,17 +1980,41 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       throw failure;
     }
   }
+  const decimalText = (value, digits) => `${Math.floor(value / (10 ** digits))}.${String(value % (10 ** digits)).padStart(digits, '0')}`;
+  const warehouseName = code => WAREHOUSES.find(row => row.code === code)?.name || code;
+  async function workbookReferences(sheets, openingSheet, selected = []) {
+    const cell = value => ({ type: String, value: String(value ?? '') });
+    const sheet = (name, headers, rows) => ({ sheet: name, data: [headers.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
+    const options = (preferred, rows, key) => {
+      const unique = [...new Map([...preferred, ...rows].map(row => [key(row), row])).values()];
+      return { rows: unique.slice(0, 5000), complete: rows.length <= 5000 && unique.length <= 5000 };
+    };
+    const masters = options(selected, await all('SELECT name,spec,unit FROM material_catalog ORDER BY name,spec,unit LIMIT 5001'), materialKey);
+    const categories = !openingSheet ? options(selected.filter(row => row.categoryName).map(row => ({ name: row.categoryName })), await all('SELECT name FROM material_categories ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
+    const regions = openingSheet ? options(selected.filter(row => row.regionName).map(row => ({ name: row.regionName })), await all('SELECT name FROM material_regions ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
+    sheets.push(sheet('物资参考', ['物资名称', '规格', '单位'], masters.rows.map(row => [row.name, row.spec, row.unit])));
+    sheets[0].referenceLists = Object.fromEntries(['A', 'B', 'C'].map(column => [column, { sheet: '物资参考', column, count: masters.rows.length, strict: openingSheet && masters.complete }]));
+    if (openingSheet) {
+      sheets.push(sheet('区域参考', ['区域'], regions.rows.map(row => [row.name])), sheet('仓库参考', ['仓库'], WAREHOUSES.map(row => [row.name])));
+      Object.assign(sheets[0].referenceLists, { D: { sheet: '区域参考', column: 'A', count: regions.rows.length, strict: regions.complete }, E: { sheet: '仓库参考', column: 'A', count: WAREHOUSES.length, strict: true } });
+    } else {
+      sheets.push(sheet('分类参考', ['物资分类'], categories.rows.map(row => [row.name])), sheet('管理方式参考', ['管理方式'], [['逐件'], ['数量']]));
+      Object.assign(sheets[0].referenceLists, { D: { sheet: '分类参考', column: 'A', count: categories.rows.length, strict: categories.complete }, E: { sheet: '管理方式参考', column: 'A', count: 2, strict: true } });
+    }
+    sheets.push(sheet('引用说明', ['说明'], [['引用下拉最多列出5000个选项，并优先包含本次导出数据。选项较多时可手填已存在的中文名称、规格或单位，导入仍须通过服务端精确校验。']]));
+  }
   async function catalogWorkbook(res, url, user, template) {
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
     const cell = value => ({ type: String, value: String(value ?? '') });
     const sheet = (name, headers, rows) => ({ sheet: name, data: [headers.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
     const rows = template ? [] : await catalogRows(url);
     if (rows.length > 5000) error(413, '一次最多导出5000条物资信息，请缩小筛选范围');
-    const sheets = [sheet('物资信息', CATALOG_HEADERS, rows.map(row => [row.code, row.name, row.spec, row.unit, row.categoryName, row.trackingMode === 'unit' ? '逐件' : '数量']))];
-    if (template) sheets.push(sheet('分类参考', ['物资分类'], (await all('SELECT name FROM material_categories ORDER BY name LIMIT 5000')).map(row => [row.name])),
-      sheet('填写说明', ['说明'], [['仅填写第一张物资信息表；分类须先在系统中创建，管理方式填写逐件或数量。'], ['每次最多200条，文件不超过5 MiB；编码须为文本，保留前导零。'], ['相同编码且信息一致时复用；相同名称、规格和单位不能用另一个编码重复建档。'], ['此表只建立物资信息，不改变库存；数量和金额请使用期初库存或存量补录单。'], ['不接受公式、宏、外部链接或旧版.xls。']]));
+    const sheets = [sheet('物资信息', CATALOG_HEADERS, rows.map(row => [row.name, row.spec, row.unit, row.categoryName, row.trackingMode === 'unit' ? '逐件' : '数量']))];
+    await workbookReferences(sheets, false, rows);
+    sheets.push(sheet('填写说明', ['说明'], [['填写物资名称、规格、单位；系统自动生成内部编码，无需手填。名称等可参考下拉或填写新值，分类及管理方式须选择已有选项。'], ['每次最多5000条，文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。'], ['按名称、规格、单位精确匹配；已有信息一致时跳过，分类或管理方式冲突时整批不导入。'], ['导出文件可再次导入物资信息库；此表不改变库存，数量和金额请使用期初库存或存量补录草稿。']]));
     const exporter = writeXlsx || require('write-excel-file/node').default;
-    const buffer = await exporter(sheets).toBuffer();
+    const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
+    if (rows.length) await readCatalogWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
     res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="labos-catalog-${template ? 'template' : today()}.xlsx"`, 'Content-Length': buffer.length });
     res.end(buffer);
@@ -1918,24 +2025,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const amount = permit(user, 'materials.amount.read');
     const cell = value => typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
     const sheet = (name, headings, rows) => ({ sheet: name, data: [headings.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
-    const headings = !document || amount ? OPENING_HEADERS : OPENING_HEADERS.filter((_, index) => index !== 4);
+    const headings = !document || amount ? OPENING_HEADERS : OPENING_HEADERS.filter(header => header !== '总金额（元）');
     const rows = document ? document.items.map(row => {
-      const values = [row.code, row.regionName, row.warehouse, row.qtyM / 1000, row.amountCents / 100, row.batch, row.expiryDate, row.location, row.zeroAmountReason];
-      return amount ? values : values.filter((_, index) => index !== 4);
+      const values = [row.name, row.spec, row.unit, row.regionName, warehouseName(row.warehouse), decimalText(row.qtyM, 3), amount ? decimalText(row.amountCents, 2) : '', row.batch, row.expiryDate, row.location, row.zeroAmountReason];
+      return amount ? values : values.filter((_, index) => index !== 6);
     }) : [];
     const sheets = [sheet('期初明细', headings, rows)];
     if (document) sheets.push(sheet('单据信息', ['单号', '主题', '日期', '类型', '状态', '说明', '补录原因', '入库人', '入库时间'],
       [[document.no, document.title, document.date, document.kind, document.status, document.description, document.reason, document.posterName, document.postedAt]]));
-    else {
-      const masters = (await all('SELECT * FROM material_catalog ORDER BY code LIMIT 5001'));
-      if (masters.length > 5000) error(413, '物资信息超过5000条，请联系管理员按实际物资编码填写导入模板');
-      sheets.push(sheet('物资信息参考', ['物资编码', '名称', '规格', '单位', '管理方式'], masters.map(row => [row.code, row.name, row.spec, row.unit, row.tracking_mode])),
-        sheet('区域参考', ['区域'], (await all('SELECT name FROM material_regions ORDER BY name LIMIT 5000')).map(row => [row.name])),
-        sheet('仓库参考', ['仓库编码', '仓库名称'], WAREHOUSES.map(row => [row.code, row.name])),
-        sheet('填写说明', ['说明'], [['仅填写第一张期初明细，编码、区域和仓库使用参考表中的值。'], ['每张单据最多200行；逐件物资数量为整数，入库时整单最多生成1000个单件码。'], ['数量最多3位小数，金额最多2位小数；金额为零必须填写零金额原因。'], ['有效期使用YYYY-MM-DD文本；不接受公式、宏、外部链接或旧版.xls。'], ['导入只增加草稿明细，核对后点击入库才改变库存。'], ['同批次位置必须一致；空位置沿用当前批次位置。']]));
-    }
+    await workbookReferences(sheets, true, document?.items || []);
+    sheets.push(sheet('填写说明', ['说明'], [['物资名称、规格、单位、区域、仓库均使用中文参考下拉，名称+规格+单位须对应同一条物资信息。'], ['每张单据最多5000行；逐件物资数量为整数，入库时整单最多生成1000个单件码。'], ['数量最多3位小数，金额最多2位小数；金额为零必须填写零金额原因。'], ['有效期使用YYYY-MM-DD文本；不接受公式、宏、外部链接或旧版.xls。'], ['导出文件可导入新的期初或补录草稿；核对后点击入库才改变库存，勿将同一批现有库存重复入库。'], ['同批次位置必须一致；空位置沿用当前批次位置。'], ...(!amount && document ? [['当前账号无金额读取权限，此脱敏文件仅供查看，不能直接回导。']] : [])]));
     const exporter = writeXlsx || require('write-excel-file/node').default;
-    const buffer = await exporter(sheets).toBuffer();
+    const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
+    if (document?.items.length && amount) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
     res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="labos-opening-${document ? document.no : 'template'}.xlsx"`, 'Content-Length': buffer.length });
     res.end(buffer);
@@ -1959,7 +2061,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       sheets = [sheet('领用申请', ['申请ID', '状态', '物资编码', '名称', '规格', '单位', '分类', '仓库', '区域', '批号', '有效期',
         '申请时位置', '当前位置或发放时位置', '领用数量', ...(amount ? ['发放金额（元）'] : []), '用途', '申请人', '申请时间', '处理人', '处理时间', '处理原因'],
       rows.map(row => [row.id, row.status, row.snapshot.code, row.snapshot.name, row.snapshot.spec, row.snapshot.unit,
-        row.snapshot.categoryName, row.warehouse, row.snapshot.regionName, row.batch, row.expiryDate, row.snapshot.location, row.location,
+        row.snapshot.categoryName, warehouseName(row.warehouse), row.snapshot.regionName, row.batch, row.expiryDate, row.snapshot.location, row.location,
         row.qtyM / 1000, ...(amount ? [row.status === 'issued' ? row.amountCents / 100 : null] : []), row.purpose, row.creatorName, row.createdAt, row.processorName, row.processedAt, row.reason]))];
     } else if (url.searchParams.get('type') === 'stock') {
       const rows = (await stockRows(url));
@@ -1967,10 +2069,17 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (rows.length > 5000 || batches.length > 5000) error(413, '一次最多导出5000条库存或批次，请缩小筛选范围');
       sheets = [
         sheet('库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '数量', ...(amount ? ['库存总金额（元）'] : [])],
-          rows.map(row => [row.code, row.name, row.spec, row.unit, row.warehouse, row.regionName, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])])),
-        sheet('批次库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '批号', '有效期', '库存位置', '数量', ...(amount ? ['库存总金额（元）'] : [])],
-          batches.map(row => [row.code, row.name, row.spec, row.unit, row.warehouse, row.regionName, row.batch, row.expiryDate, row.location, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])]))
+          rows.map(row => [row.code, row.name, row.spec, row.unit, warehouseName(row.warehouse), row.regionName, row.qtyM / 1000, ...(amount ? [row.amountCents / 100] : [])]))
       ];
+      if (amount) {
+        sheets.unshift(sheet('库存导入明细', OPENING_HEADERS, batches.filter(row => row.qtyM > 0).map(row => [row.name, row.spec, row.unit, row.regionName,
+          warehouseName(row.warehouse), decimalText(row.qtyM, 3), decimalText(row.amountCents, 2), row.batch, row.expiryDate, row.location,
+          row.amountCents === 0 ? '导出时库存金额为零，请核对' : ''])));
+        await workbookReferences(sheets, true, batches.filter(row => row.qtyM > 0));
+      } else sheets.push(sheet('批次库存', ['物资名称', '规格', '单位', '仓库', '区域', '批号', '有效期', '存放位置', '数量'],
+        batches.map(row => [row.name, row.spec, row.unit, warehouseName(row.warehouse), row.regionName, row.batch, row.expiryDate, row.location, row.qtyM / 1000])));
+      sheets.push(sheet('填写说明', ['说明'], [[amount ? '库存导入明细按批次导入新的期初或补录草稿；不会自动入库，核对后才确认，勿重复增加原有库存。' : '当前账号无金额读取权限，此脱敏报表不能直接回导。'],
+        ['零库存仅列于库存报表；导入明细仅含正库存，保留区域、仓库、批号、有效期和存放位置。'], ['每次最多5000条草稿；逐件库存每次入库最多1000件，需要时拆分为多张单据。']]));
     } else {
       let orders = (await listRequests(url, user, true));
       const original = url.searchParams.get('version') === 'original';
@@ -1986,9 +2095,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       sheets = [
         sheet('申报单信息', ['单号', '主题', '说明', '状态', '修订版', '创建人', '提交时间'], orders.map(order => [order.no, order.title, order.description, order.status, order.revision, order.creatorName, order.submittedAt])),
         sheet('申报明细', ['单号', '物资编码', '名称', '分类', '规格', '单位', '归属区域', '仓库', '申报数量', '用途', '填报人'],
-          items.map(({ order, line }) => [order.no, line.code, line.name, line.categoryName, line.spec, line.unit, line.regionName, line.warehouse, line.qtyM / 1000, line.purpose, line.authorName])),
+          items.map(({ order, line }) => [order.no, line.code, line.name, line.categoryName, line.spec, line.unit, line.regionName, warehouseName(line.warehouse), line.qtyM / 1000, line.purpose, line.authorName])),
         sheet('验收流水', ['事件ID', '类型', '申报修订版', '物资编码', '名称', '分类', '区域', '仓库', '合格数量', '拒收数量', '结案数量', ...(amount ? ['合格总金额（元）'] : []), '原因', '拒收原因', '日期'],
-          receipts.map(event => [event.id, event.type, event.requestRevision, event.snapshot.code, event.snapshot.name, event.snapshot.categoryName, event.snapshot.regionName, event.snapshot.warehouse,
+          receipts.map(event => [event.id, event.type, event.requestRevision, event.snapshot.code, event.snapshot.name, event.snapshot.categoryName, event.snapshot.regionName, warehouseName(event.snapshot.warehouse),
             event.qtyM / 1000, event.rejectedQtyM / 1000, event.closedQtyM / 1000, ...(amount ? [event.amountCents / 100] : []), event.reason, event.rejectedReason, event.date])),
         sheet('修订记录', ['申报单ID', '修订版', '修改原因', '操作人', '时间', '修改前快照摘要', '修改后快照摘要'],
           (await mapRows(revisions,async row => [row.request_id, row.revision, row.reason, (await actorName(row.actor_id)), row.created_at,
@@ -1996,7 +2105,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       ];
     }
     const exporter = writeXlsx || require('write-excel-file/node').default;
-    const buffer = await exporter(sheets).toBuffer();
+    const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
+    if (url.searchParams.get('type') === 'stock' && amount && sheets[0].data.length > 1) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
     res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="labos-materials-${today()}.xlsx"`, 'Content-Length': buffer.length });
     res.end(buffer);

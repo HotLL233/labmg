@@ -1,6 +1,6 @@
 # 手机实时扫码与群晖 HTTPS
 
-当前 **0.6.2** 的在线、本地两份完整 YML 都已经内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。使用全新 PostgreSQL 18 部署，实际发布状态以[版本说明](CHANGELOG.md)为准。
+**0.6.2 及后续版本**的在线、本地两份完整 YML 都已内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。当前源码为 **0.7.0（开发中，未发布）**，源码 YML 指向的新版镜像和离线包仍待实际构建、验收；当前部署使用 0.6.2 Release 的配套文件。数据库继续使用 PostgreSQL 18，同一 PG18 项目更新保留完整 runtime/ 和 https/；发布状态以[版本说明](CHANGELOG.md)为准。
 
 ## 为什么 HTTP 不能实时扫码
 
@@ -34,7 +34,7 @@ YML所在目录/https/data/caddy/pki/authorities/local/root.crt
 
 ## 历史：0.6.1 及更早的可选 HTTPS overlay
 
-下文保留原先需要额外 Caddyfile 与叠加 YML 的操作记录。0.6.2 直接使用上方完整 YML，不叠加旧 docker-compose.https.yml，也不需要按旧步骤预建 HTTPS 子目录。
+下文保留原先需要额外 Caddyfile 与叠加 YML 的操作记录。0.6.2 及后续版本直接使用上方完整 YML，不叠加旧 docker-compose.https.yml，也不需要按旧步骤预建 HTTPS 子目录。
 
 当前 0.6.1使用 PostgreSQL，仍复用本页可选 HTTPS 入口；先按[群晖部署](SYNOLOGY.md)准备当前三服务新项目。0.5.1 的 SQLite 容器与 HTTPS 验证记录保留为历史，不能视为本版群晖或手机实机验收。
 

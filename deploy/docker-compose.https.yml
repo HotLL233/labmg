@@ -1,5 +1,5 @@
 # Historical overlay for the 0.6.1 and earlier matching base YML.
-# 0.6.2 online/local YML files already include HTTPS; do not merge this overlay with them.
+# 0.6.2 and later online/local YML files already include HTTPS; do not merge this overlay with them.
 version: "3.8"
 services:
   labos-https:

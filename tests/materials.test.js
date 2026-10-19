@@ -146,15 +146,20 @@ function workbookXml(bytes) {
 }
 
 async function openingExcel(rows) {
-  const { OPENING_HEADERS } = require('../src/material-xlsx');
+  const { LEGACY_OPENING_HEADERS: OPENING_HEADERS } = require('../src/material-xlsx');
   const cell = value => value && typeof value === 'object' ? value : typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
   return require('write-excel-file/node').default([{ sheet: '期初明细', data: [OPENING_HEADERS.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
 }
 
 async function catalogExcel(rows) {
-  const { CATALOG_HEADERS } = require('../src/material-xlsx');
+  const { LEGACY_CATALOG_HEADERS: CATALOG_HEADERS } = require('../src/material-xlsx');
   const cell = value => value && typeof value === 'object' ? value : ({ type: String, value: String(value ?? '') });
   return require('write-excel-file/node').default([{ sheet: '物资信息', data: [CATALOG_HEADERS.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
+}
+
+async function namedExcel(headers, rows) {
+  const cell = value => ({ type: typeof value === 'number' ? Number : String, value });
+  return require('write-excel-file/node').default([{ sheet: '中文明细', data: [headers.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
 }
 
 test('materials dictionaries require administrator roles while all authenticated roles can declare and own their draft rows', { timeout: 45000 }, async t => {
@@ -257,15 +262,17 @@ test('catalog XLSX template import and export round-trip literal codes, skip ide
   await f.request('POST', '/api/materials/catalog/import', ordinary, payload, 403);
   const numericCode = await catalogExcel([[{ type: Number, value: 123, format: '00000000' }, 'numeric code', '1', '瓶', s.category.name, '逐件']]);
   const numericFailure = await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'numeric.xlsx', content: numericCode.toString('base64') }, 400);
-  assert.match(numericFailure.data.error, /物资编码须为文本/);
+  assert.match(numericFailure.data.error, /物资编码.*文本/);
   assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, payload, 201)).data, { created: 2, skipped: 0 });
   assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, payload, 201)).data, { created: 0, skipped: 2 });
   const exported = await f.request('GET', '/api/materials/catalog/export.xlsx?q=00000123', f.admin);
   const roundTrip = await require('../src/material-xlsx').readCatalogWorkbook({ name: 'round-trip.xlsx', content: exported.bytes.toString('base64') });
-  assert.deepEqual(roundTrip, [['00000123', '=literal name', '250 mL', '瓶', s.category.name, '逐件']]);
+  assert.deepEqual(roundTrip.headers, require('../src/material-xlsx').CATALOG_HEADERS);
+  assert.deepEqual(roundTrip.rows, [{ row: 2, values: { '物资名称': '=literal name', '规格': '250 mL', '单位': '瓶', '物资分类': s.category.name, '管理方式': '逐件' } }]);
   const conflictBytes = await catalogExcel([['ROLLBACK-XLSX', 'must disappear', 'x', '盒', s.category.name, '数量'], ['00000123', 'different identity', '250 mL', '瓶', s.category.name, '逐件']]);
   const failure = await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'bad.xlsx', content: conflictBytes.toString('base64') }, 409);
-  assert.match(failure.data.error, /第2条/);
+  assert.match(failure.data.error, /第3行B列/);
+  assert.equal(failure.data.code, 'IMPORT_VALIDATION'); assert.equal(failure.data.errors[0].row, 3);
   assert.equal((await f.request('GET', '/api/materials/catalog?q=ROLLBACK-XLSX', ordinary)).data.total, 0);
   const alias = await catalogExcel([['ALIAS', '＝literal name', '250 mL', '瓶', s.category.name, '逐件']]);
   await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'alias.xlsx', content: alias.toString('base64') }, 409);
@@ -291,6 +298,134 @@ test('catalog import rechecks session and maintenance grants after parsing befor
   reads = 0; fresh = authorized;
   await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/catalog/import'));
   assert.deepEqual(response, { status: 201, data: { created: 1, skipped: 0 } });
+});
+
+test('Chinese catalog templates reference names, generate internal codes and round-trip without exposing code columns', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), { CATALOG_HEADERS } = require('../src/material-xlsx');
+  const template = workbookXml((await f.request('GET', '/api/materials/catalog/template', f.admin)).bytes);
+  assert.match(template.get('xl/workbook.xml'), /LABOS_S1_D/);
+  assert.match(template.get('xl/worksheets/sheet1.xml'), /sqref="D2:D5001"/);
+  assert.match(template.get('xl/worksheets/sheet1.xml'), /showErrorMessage="0"[^>]*sqref="A2:A5001"/);
+  assert.doesNotMatch([...template.values()].join('\n'), /物资编码|仓库编码/);
+  const automatic = (await f.request('POST', '/api/materials/catalog', f.admin, { name: '中文自动物资', spec: '100 mL', unit: '瓶', categoryId: s.category.id }, 201)).data;
+  assert.match(automatic.code, /^MAT-[A-F0-9]{16}$/);
+  const same = (await f.request('POST', '/api/materials/catalog', f.admin, { name: ' 中文自动物资 ', spec: '100 mL', unit: '瓶', categoryId: s.category.id }, 201)).data;
+  assert.equal(same.id, automatic.id);
+  const bytes = await namedExcel(CATALOG_HEADERS, [
+    ['　中文自动物资　', '１００ ｍＬ', ' 瓶 ', ' ｈｔｔｐ分类 ', '数量'],
+    ['中文导入耗材', '10个/包', '包', s.otherCategory.name, '数量'],
+    [' 中文导入耗材 ', '１０个／包', ' 包 ', ' 另一分类 ', '数量']
+  ]);
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '中文.xlsx', content: bytes.toString('base64') }, 201)).data, { created: 1, skipped: 2 });
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=中文自动物资', s.material)).data.items[0].id, automatic.id);
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=中文导入耗材', s.material)).data.total, 1);
+  const imported = (await f.request('GET', '/api/materials/catalog?q=中文导入耗材', s.material)).data.items[0];
+  assert.match(imported.code, /^MAT-[A-F0-9]{16}$/);
+  const exported = await f.request('GET', '/api/materials/catalog/export.xlsx?q=中文导入耗材', f.admin);
+  const parsed = await require('../src/material-xlsx').readCatalogWorkbook({ name: '导出.xlsx', content: exported.bytes.toString('base64') });
+  assert.deepEqual(parsed.headers, CATALOG_HEADERS); assert.equal(parsed.rows[0].values['物资名称'], imported.name);
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '导出.xlsx', content: exported.bytes.toString('base64') }, 201)).data, { created: 0, skipped: 1 });
+  const conflicting = await namedExcel(CATALOG_HEADERS, [['不应保留的临时物资', 'x', '盒', s.category.name, '数量'], ['中文自动物资', '100 mL', '瓶', s.otherCategory.name, '逐件']]);
+  const conflict = (await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '分类管理冲突.xlsx', content: conflicting.toString('base64') }, 409)).data;
+  assert.equal(conflict.code, 'IMPORT_VALIDATION'); assert.equal(conflict.totalErrors, 2);
+  assert.deepEqual(conflict.errors.map(error => [error.row, error.column, error.field]), [[3, 'D', '物资分类'], [3, 'E', '管理方式']]);
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=不应保留的临时物资', s.material)).data.total, 0);
+  await f.db.prepare('INSERT INTO material_categories(name,created_by) VALUES(?,?)').run('ＨＴＴＰ分类', f.admin.id);
+  const ambiguous = await namedExcel(CATALOG_HEADERS, [['不应建立', '1 kg', '袋', s.category.name, '数量']]);
+  const failure = (await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '歧义.xlsx', content: ambiguous.toString('base64') }, 400)).data;
+  assert.equal(failure.errors[0].column, 'D'); assert.match(failure.errors[0].message, /歧义/);
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=不应建立', s.material)).data.total, 0);
+});
+
+test('templates and filtered round-trip exports remain available above 5000 catalog records and prioritize selected references', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  await f.db.prepare(`INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by)
+    SELECT 'REF-'||n::text,'参考物资'||lpad(n::text,5,'0'),'1 mL','瓶',?,? FROM generate_series(1,5000) AS n`).run(s.category.id, f.admin.id);
+  assert.equal((await f.db.prepare('SELECT COUNT(*) AS total FROM material_catalog').get()).total, 5001);
+  const last = await f.db.prepare('SELECT * FROM material_catalog ORDER BY name,spec,unit OFFSET 5000 LIMIT 1').get();
+  const worksheets = bytes => require('read-excel-file/universal').default(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length));
+  const materialReferences = sheets => sheets.find(sheet => sheet.sheet === '物资参考').data;
+  const template = await f.request('GET', '/api/materials/catalog/template', f.admin);
+  const templateSheets = await worksheets(template.bytes);
+  assert.equal(materialReferences(templateSheets).length, 5001);
+  assert.equal(materialReferences(templateSheets).some(row => row[0] === last.name), false);
+  const exported = await f.request('GET', '/api/materials/catalog/export.xlsx?q=' + encodeURIComponent(last.name), f.admin);
+  const parsed = await require('../src/material-xlsx').readCatalogWorkbook({ name: '小范围.xlsx', content: exported.bytes.toString('base64') });
+  assert.equal(parsed.rows.length, 1); assert.equal(parsed.rows[0].values['物资名称'], last.name);
+  assert.deepEqual(materialReferences(await worksheets(exported.bytes))[1], [last.name, last.spec, last.unit]);
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '小范围.xlsx', content: exported.bytes.toString('base64') }, 201)).data, { created: 0, skipped: 1 });
+  const openingTemplate = await f.request('GET', '/api/materials/openings/template.xlsx', s.material);
+  const openingXml = workbookXml(openingTemplate.bytes).get('xl/worksheets/sheet1.xml');
+  for (const column of ['A', 'B', 'C']) assert.match(openingXml, new RegExp(`showErrorMessage="0"[^>]*sqref="${column}2:${column}5001"`));
+  assert.match(openingXml, /showErrorMessage="1"[^>]*sqref="E2:E5001"/);
+  await f.request('POST', '/api/materials/stock/opening', s.material, { catalogId: last.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '1', amount: '2.34', requestIdempotencyKey: key() }, 201);
+  const stock = await f.request('GET', '/api/materials/export.xlsx?type=stock&q=' + encodeURIComponent(last.name), s.material);
+  const opening = await require('../src/material-xlsx').readOpeningWorkbook({ name: '筛选库存.xlsx', content: stock.bytes.toString('base64') });
+  assert.equal(opening.rows.length, 1); assert.equal(opening.rows[0].values['物资名称'], last.name);
+  assert.deepEqual(materialReferences(await worksheets(stock.bytes))[1], [last.name, last.spec, last.unit]);
+});
+
+test('Chinese opening import collects exact physical cell errors atomically and rejects material or region ambiguity', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), { OPENING_HEADERS } = require('../src/material-xlsx');
+  const document = (await f.request('POST', '/api/materials/openings', s.material, { title: '中文导入核对' }, 201)).data;
+  const template = workbookXml((await f.request('GET', '/api/materials/openings/template.xlsx', s.material)).bytes);
+  for (const column of ['A', 'B', 'C', 'D', 'E']) assert.match(template.get('xl/worksheets/sheet1.xml'), new RegExp(`sqref="${column}2:${column}5001"`));
+  assert.doesNotMatch([...template.values()].join('\n'), /物资编码|仓库编码/);
+  const valid = [s.catalog.name, s.catalog.spec, s.catalog.unit, s.region.name, '默认仓库', 2, 10.25, '', '', '中文位置', ''];
+  const wrongSpec = [s.catalog.name, '不同规格', '瓶', '不存在区域', 'MAIN', 0, -1, '', '2026-02-30', '', ''];
+  const wrongUnit = [s.catalog.name, s.catalog.spec, '袋', s.region.name, '默认仓库', 1, 0, '', '', '', ''];
+  const invalid = await namedExcel(OPENING_HEADERS, [valid, [], wrongSpec, wrongUnit]);
+  const failure = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '中文.xlsx', content: invalid.toString('base64') }, 400)).data;
+  assert.equal(failure.code, 'IMPORT_VALIDATION'); assert.equal(failure.totalErrors, 8);
+  assert.deepEqual(failure.errors.map(error => [error.row, error.column]), [[4, 'B'], [4, 'D'], [4, 'E'], [4, 'F'], [4, 'G'], [4, 'I'], [5, 'C'], [5, 'K']]);
+  assert.ok(failure.errors.every(error => error.sheet === '中文明细' && error.field && error.message));
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${document.id}`, s.material)).data, document);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements', s.material)).data.total, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='IMPORT'").get()).total, 0);
+  await f.db.prepare('INSERT INTO material_regions(name,created_by) VALUES(?,?)').run('ＨＴＴＰ区域', f.admin.id);
+  const ambiguous = await namedExcel(OPENING_HEADERS, [valid]);
+  const regionFailure = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '歧义.xlsx', content: ambiguous.toString('base64') }, 400)).data;
+  assert.equal(regionFailure.errors[0].column, 'D'); assert.match(regionFailure.errors[0].message, /歧义/);
+  await f.db.prepare('DELETE FROM material_regions WHERE name=?').run('ＨＴＴＰ区域');
+  await f.db.prepare('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by) VALUES(?,?,?,?,?,?)').run('AMBIGUOUS-IMPORT', s.catalog.name, s.catalog.spec, s.catalog.unit, s.category.id, f.admin.id);
+  const materialFailure = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '歧义.xlsx', content: ambiguous.toString('base64') }, 400)).data;
+  assert.equal(materialFailure.errors[0].column, 'A'); assert.match(materialFailure.errors[0].message, /多条物资/);
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${document.id}`, s.material)).data, document);
+  await f.db.prepare('DELETE FROM material_catalog WHERE code=?').run('AMBIGUOUS-IMPORT');
+  const normalized = await namedExcel(OPENING_HEADERS, [[' ｈｔｔｐ ｒｅａｇｅｎｔ ', '５００ ｍｌ', ' 瓶 ', ' ｈｔｔｐ区域 ', '　默认仓库　', 2, 10.25, '', '', '中文位置', '']]);
+  const imported = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '名称规范化.xlsx', content: normalized.toString('base64') }, 201)).data;
+  assert.equal(imported.items.length, 1); assert.equal(imported.items[0].catalogId, s.catalog.id); assert.equal(imported.items[0].regionId, s.region.id);
+  assert.equal(imported.items[0].warehouse, 'MAIN'); assert.equal(imported.items[0].qtyM, 2000);
+});
+
+test('stock exports re-import exact batch balances and positions into a draft without issuing stock or exposing redacted amounts', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const base = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN' };
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...base, quantity: '1.125', amount: '12.34', batch: '批次甲', expiryDate: '2028-01-01', location: '甲柜 / 1层', requestIdempotencyKey: key() }, 201);
+  await f.request('POST', '/api/materials/stock/opening', s.material, { ...base, quantity: '2', amount: '0', zeroAmountReason: '赠品', batch: '批次乙', expiryDate: '2029-02-01', location: '乙柜 / 2层', requestIdempotencyKey: key() }, 201);
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...base, batch: '批次甲', expiryDate: '2028-01-01', location: '甲柜 / 1层', version: 0, reason: '批次摆放' });
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...base, batch: '批次乙', expiryDate: '2029-02-01', location: '乙柜 / 2层', version: 0, reason: '批次摆放' });
+  const stock = (await f.request('GET', '/api/materials/stock', s.material)).data;
+  const movements = (await f.request('GET', '/api/materials/stock/movements', s.material)).data;
+  const exported = await f.request('GET', '/api/materials/export.xlsx?type=stock', s.material);
+  const parsed = await require('../src/material-xlsx').readOpeningWorkbook({ name: '库存.xlsx', content: exported.bytes.toString('base64') });
+  assert.equal(parsed.sheet, '库存导入明细'); assert.equal(parsed.rows.length, 2);
+  assert.deepEqual(parsed.rows.map(record => record.values['仓库']), ['默认仓库', '默认仓库']);
+  const target = (await f.request('POST', '/api/materials/openings', s.material, { title: '库存快照重新清点' }, 201)).data;
+  const copied = (await f.request('POST', `/api/materials/openings/${target.id}/import`, s.material, { version: target.version, name: '库存.xlsx', content: exported.bytes.toString('base64') }, 201)).data;
+  assert.equal(copied.status, 'draft');
+  assert.deepEqual(copied.items.map(row => [row.batch, row.expiryDate, row.location, row.qtyM, row.amountCents]).sort(), [['批次乙', '2029-02-01', '乙柜 / 2层', 2000, 0], ['批次甲', '2028-01-01', '甲柜 / 1层', 1125, 1234]].sort());
+  assert.deepEqual((await f.request('GET', '/api/materials/stock', s.material)).data, stock);
+  assert.deepEqual((await f.request('GET', '/api/materials/stock/movements', s.material)).data, movements);
+  assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 0);
+  const limited = await f.customAccount('STOCK_EXPORT_READER', ['materials.read', 'materials.export']);
+  const redacted = await f.request('GET', '/api/materials/export.xlsx?type=stock', limited);
+  assert.doesNotMatch([...workbookXml(redacted.bytes).values()].join('\n'), /总金额（元）|库存总金额|12\.34|amountCents/);
+  await assert.rejects(require('../src/material-xlsx').readOpeningWorkbook({ name: '脱敏.xlsx', content: redacted.bytes.toString('base64') }), /表头不匹配/);
+  const before = (await f.request('GET', `/api/materials/openings/${target.id}`, s.material)).data;
+  await f.request('POST', `/api/materials/openings/${target.id}/import`, s.material, { version: before.version, name: '脱敏.xlsx', content: redacted.bytes.toString('base64') }, 400);
+  await f.request('POST', `/api/materials/openings/${target.id}/import`, limited, { version: before.version, name: '库存.xlsx', content: exported.bytes.toString('base64') }, 403);
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${target.id}`, s.material)).data, before);
 });
 
 test('new free-text materials submit without a catalog but require explicit controlled matching before receipt events', { timeout: 45000 }, async t => {
@@ -647,7 +782,7 @@ test('server removes monetary fields recursively and generates genuine XLSX with
       const entries = workbookXml(response.bytes), xml = [...entries].filter(([name]) => name.startsWith('xl/')).map(([, value]) => value).join('\n');
       assert.match(xml, /HYPERLINK/); assert.match(xml, /safe-text/);
       for (const [name, value] of entries) if (name.startsWith('xl/worksheets/')) assert.doesNotMatch(value, /<f(?:\s|>)/, 'user input became an Excel formula');
-      if (actor === exporter) assert.doesNotMatch(xml, /金额|amountCents|含税总额/);
+      if (actor === exporter) assert.doesNotMatch(xml, /库存总金额|总金额（元）|发放金额|amountCents|123\.45|含税总额/);
     }
   }
 });
@@ -772,7 +907,7 @@ test('stock locations are exact-batch metadata with role permissions, optimistic
   const other = (await f.request('GET', '/api/materials/stock/batches?batch=OTHER&expiryDate=', s.material)).data.items[0];
   assert.equal(other.location, ''); assert.equal(other.locationVersion, 0);
   const xml = [...workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=stock', s.material)).bytes).values()].join('\n');
-  assert.match(xml, /批次库存/); assert.match(xml, new RegExp(current.location));
+  assert.match(xml, /库存导入明细/); assert.match(xml, new RegExp(current.location));
   await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: ['materials.read'] });
   assert.equal((await f.request('GET', '/api/materials/meta', s.material)).data.capabilities.manageLocation, false);
   await f.request('PUT', '/api/materials/stock/location', s.material, { ...update, version: 2 }, 403);
@@ -1341,6 +1476,7 @@ test('opening documents keep drafts separate, post once, generate whole-item lab
   assert.equal(document.status, 'posted'); assert.equal(document.unitCount, 2); assert.equal(document.items[0].unitCount, 2);
   const units = (await f.request('GET', `/api/materials/stock/units?openingId=${document.id}`, ordinary)).data;
   assert.equal(units.total, 2); assert.equal(units.items[0].location, '期初柜');
+  assert.equal(units.items[0].warehouseName, '默认仓库');
   await f.request('PATCH', `/api/materials/openings/${document.id}`, s.material, { ...header, version: document.version }, 409);
   await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, { ...action, requestIdempotencyKey: key() }, 409);
   const oldDraft = (await f.request('POST', '/api/materials/openings', s.material, header, 201)).data;
@@ -1372,7 +1508,7 @@ test('opening XLSX import validates every row before adding a draft, rejects uns
   const header = { title: 'Excel 清点', date: '2026-10-19' };
   let document = (await f.request('POST', '/api/materials/openings', s.material, header, 201)).data;
   const template = await f.request('GET', '/api/materials/openings/template.xlsx', s.material);
-  assert.match([...workbookXml(template.bytes).values()].join('\n'), /物资编码/);
+  assert.match([...workbookXml(template.bytes).values()].join('\n'), /物资名称/);
   const rows = [[master.code, s.region.name, 'MAIN', 2, 10.25, 'B1', '2028-01-01', '=柜 A', ''],
     [s.catalog.code, s.otherRegion.name, 'REAGENT', '1.5', '0', '', '', '', '历史赠品']];
   const importBody = bytes => ({ version: document.version, name: '盘点.xlsx', content: bytes.toString('base64') });

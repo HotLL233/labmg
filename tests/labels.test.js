@@ -16,22 +16,23 @@ function fixture({ template, createBarcode, createQr, imageFailure = false, onYi
   function popup() {
     const events = {}, controls = {}, status = node();
     const result = {
-      closed: false, opener: {}, printCount: 0,
+      closed: false, opener: {}, printCount: 0, printed: [],
       addEventListener(name, callback) { (events[name] ||= []).push(callback); },
       close() { if (this.closed) return; this.closed = true; for (const callback of events.pagehide || []) callback(); },
-      print() { this.printCount++; },
+      print() { this.printCount++; this.printed.push(this.document.labels.flatMap((label,index) => label.hidden ? [] : [index + 1])); },
       document: {
-        images: [], body: { replaceChildren(value) { this.error = value.textContent; } },
+        images: [], labels: [], body: { replaceChildren(value) { this.error = value.textContent; } },
         createElement: node,
         open() { for (const name of Object.keys(events)) delete events[name]; },
         write(html) {
           this.html = html;
           this.images = Array.from(html.matchAll(/<img /g), () => ({ complete: true, naturalWidth: imageFailure ? 0 : 64 }));
-          if (html.includes('id="print"')) controls.print = { ...node(), disabled: true };
-          if (html.includes('id="csv"')) controls.csv = node();
+          this.labels = Array.from(html.matchAll(/<section class="label">/g), () => ({ hidden: false, classes: new Set(), classList: { toggle(name, show) { show ? this.owner.classes.add(name) : this.owner.classes.delete(name); } } }));
+          for (const label of this.labels) label.classList.owner = label;
+          for (const match of html.matchAll(/<(button|input) id="([^"]+)"([^>]*)>/g)) controls[match[2]] = { ...node(), disabled: /\bdisabled\b/.test(match[3]), value: match[3].match(/\bvalue="([^"]*)"/)?.[1] || '' };
           controls.status = status;
         },
-        close() {}, querySelector() { return status; }, getElementById(name) { return controls[name]; }
+        close() {}, querySelector() { return status; }, querySelectorAll() { return this.labels; }, getElementById(name) { return controls[name]; }
       }
     };
     popups.push(result); return result;
@@ -67,12 +68,16 @@ test('CSV is UTF-8 BOM text with exact codes, twelve headers, escaped quotes, co
   assert.ok(text.startsWith('\uFEFF"Code","QRPayload","Name","CatalogCode","Specification","Unit","Region","Warehouse","Location","Batch","ExpiryDate","Status"\r\n'));
   assert.ok(text.endsWith('"000001","LAB-000001","乙醇,""分析纯""\n第二行","","","","","","","","",""\r\n'));
   assert.equal(csv([{ code: '01' }, { code: '02' }]).split('\r\n').length, 4);
+  assert.match(csv([{ code: 'A', warehouse: 'MAIN', warehouseName: '中心仓库' }]), /"中心仓库"/);
 });
 
 test('label content is escaped and preview CSS cannot change other elements or the main print page size', () => {
   const html = labelHtml({ code: '<img src=x onerror=alert(1)>', name: '<script>bad()</script>' }, defaults);
   assert.doesNotMatch(html, /<script>|onerror=alert\(1\)>/);
   assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  const warehouseTemplate = clone(defaults); warehouseTemplate.elements.find(item => item.field === 'warehouse').show = true;
+  const warehouse = labelHtml({ warehouse: 'MAIN', warehouseName: '<中心仓库>' }, warehouseTemplate);
+  assert.match(warehouse, /&lt;中心仓库&gt;/); assert.doesNotMatch(warehouse, />MAIN</);
   assert.match(layoutCss(defaults), /@page\{size:60mm 40mm;margin:0\}/);
   const preview = layoutCss(defaults, true);
   assert.doesNotMatch(preview, /@page/);
@@ -89,11 +94,34 @@ test('ready label popups print at the configured size and release every blob aft
   const app = fixture(); await app.api.printUnits([{ code: 'A001' }, { code: 'A002' }], { title: '<script>unsafe</script>' });
   const popup = app.popups[0];
   assert.equal(popup.opener, null); assert.equal(popup.document.getElementById('print').disabled, false);
+  assert.match(popup.document.html, /DL-886A（NEW）标签打印/);
+  assert.match(popup.document.html, /name="viewport"/);
+  assert.match(popup.document.html, /min-height:44px/);
   assert.match(popup.document.html, /&lt;script&gt;unsafe&lt;\/script&gt;/);
   assert.match(popup.document.html, /@page\{size:60mm 40mm;margin:0\}/);
   assert.equal(app.urls.size, 4);
   popup.document.getElementById('print').onclick(); assert.equal(popup.printCount, 1);
   popup.close(); assert.equal(app.urls.size, 0); assert.equal(app.revoked.length, 4);
+});
+
+test('DL-886A print range validates input, previews selected labels and restores selection after a one-label trial', async () => {
+  const app = fixture(); await app.api.printUnits([{ code: 'A001' }, { code: 'A002' }, { code: 'A003' }]);
+  const popup = app.popups[0], doc = popup.document, from = doc.getElementById('from'), to = doc.getElementById('to');
+  from.value = '2'; to.value = '3'; from.oninput();
+  assert.deepEqual(doc.labels.map(label => label.hidden), [true, false, false]);
+  assert.equal(doc.labels[2].classes.has('print-last'), true);
+  doc.getElementById('test-print').onclick();
+  assert.deepEqual(popup.printed, [[2]]);
+  assert.deepEqual(doc.labels.map(label => label.hidden), [true, false, false]);
+  doc.getElementById('print').onclick(); assert.deepEqual(popup.printed, [[2], [2, 3]]);
+  for (const [first,last] of [['0','3'],['2.5','3'],['3','2'],['1','4'],['','3']]) {
+    from.value = first; to.value = last; doc.getElementById('print').onclick();
+    assert.match(doc.getElementById('status').textContent, /1–3 内的整数/);
+  }
+  assert.equal(popup.printCount, 2);
+  assert.match(doc.html, /每张 1 份/);
+  assert.match(doc.html, /网页无法自动选定 USB 设备/);
+  popup.close(); assert.equal(app.urls.size, 0);
 });
 
 test('closing during pending source or barcode generation settles promptly without creating a late label', async () => {
@@ -129,7 +157,7 @@ test('batch labels contain their real QR and no unavailable Code128 placeholder'
 });
 
 test('changing pages after label generation closes a stale popup instead of issuing a print or download', async () => {
-  for (const action of ['print', 'csv']) {
+  for (const action of ['print', 'test-print', 'csv']) {
     let active = true;
     const app = fixture(); await app.api.printUnits([{ code: 'A001' }], { isActive: () => active });
     active = false; app.popups[0].document.getElementById(action).onclick();

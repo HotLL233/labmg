@@ -1,10 +1,10 @@
-# 0.6.0 物资 API 合同
+# 0.7.0 物资 API 合同（开发中）
 
-实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，三个方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。本轮全新部署，不读取 SQLite；物资 JSON 备份兼容合同继续保留。以下合同供前端与真实 PostgreSQL HTTP 回归共同使用，不代表本版镜像已发布。
+实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，三个方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验、回导及中文仓库输出已集成到源码；本机物资完整回归 43/43 通过（隔离 PG17.11），正式 PG18 CI 尚待执行、镜像未发布，不能据本说明认定完整验收通过。旧发布合同与结果保留在版本说明。
 
-所有接口需要登录。错误为 `{error, code?}`；400 输入错误，403 无权，404 不存在，409 版本/状态/幂等冲突。`quantity`、`amount` 写入必须是非指数十进制**字符串**，最多三位/两位小数；读取为整数 `qtyM`、`amountCents`。金额无权限时所有响应、历史快照均省略金额字段。
+所有接口需要登录。普通错误为 `{error, code?}`；401 登录失效，400 输入错误，403 无权，404 不存在，409 版本/状态/幂等冲突。Excel 校验错误另含 `{code:'IMPORT_VALIDATION',errors:[{sheet,row,column,field,value,message}],totalErrors}`：`row` 是 Excel 实际行号、`column` 为 A/B/…列字母、`field` 是中文表头；一次最多返回前 200 个明细并给出错误总数，文件级错误可能没有工作表和坐标。页面以纯文本逐条显示，保留选中文件及表单。解析工作簿后重新验证会话和权限；401／403 直接返回，不伪装成单元格错误。`quantity`、`amount` 写入必须是非指数十进制**字符串**，最多三位/两位小数；读取为整数 `qtyM`、`amountCents`。金额无权限时所有响应、历史快照均省略金额字段。
 
-列表统一 `{items,total,page,pageSize}`，查询 `page` 默认 1、`pageSize` 默认 50，最大 200，`q` 搜索。ID 为正整数。仓库代码由 meta 返回。区域、分类是管理员维护的稳定 ID；库存合并键为物资 ID + 仓库代码 + 区域 ID。
+列表统一 `{items,total,page,pageSize}`，查询 `page` 默认 1、`pageSize` 默认 50，最大 200，`q` 搜索。ID 为正整数。API 仓库代码由 meta 返回，网页和新 Excel 使用中文仓库名称；区域、分类是管理员维护的稳定 ID，输入界面显示中文名。库存合并键为物资 ID + 仓库代码 + 区域 ID。
 
 ## 元数据与字典
 
@@ -14,11 +14,11 @@
 - `GET /categories`、`GET /regions` → 分页；行 `{id,name,createdBy,createdAt}`。
 - `POST /categories`、`POST /regions`，正文 `{name}` → 201 创建行。ADMIN 或 MATERIAL + 对应动作权限；首期只新增，不删历史选项。
 - `GET /catalog` → 分页；支持 `q,categoryId,trackingMode,regionId,warehouse`。行 `{id,code,name,spec,unit,trackingMode,categoryId,categoryName,version,stockQtyM,localQtyM?}`。
-- `POST /catalog`，正文 `{code,name,spec,unit,categoryId,trackingMode?}` → 201 物资信息；ADMIN/MATERIAL + `materials.catalog.write`。编码唯一；规范化后同编码或同名称＋规格＋单位重复返回 409，不另建重复身份。
+- `POST /catalog`，正文 `{code?,name,spec,unit,categoryId,trackingMode?}` → 201 物资信息；ADMIN/MATERIAL + `materials.catalog.write`。0.7.0 约定省略或空 `code` 时系统分配内部编码，网页不要求手填；显式传入编码仍须唯一且与身份一致。规范化后重复身份不另建；请求建档关联与导入的复用语义见下文。
 
 下文省略共同前缀 `/api/materials`。
 
-## 物资信息库与库存匹配（0.6.0）
+## 物资信息库与库存匹配（0.6.0 起，0.7.0 改造中）
 
 “主档”在页面称为“物资信息库”，保存标准身份信息，不代表库存。`stockQtyM` 为该物资所有区域／仓库的库存毫单位总量；传 `regionId` 或 `warehouse` 时另含筛选范围的 `localQtyM`。检索先按所选范围正库存、其他范围正库存、零库存排序；不传范围时全局正库存优先。`q` 对编码、名称、规格进行规范化包含搜索，只帮助选项查找，不能据此自动合并物资。
 
@@ -26,12 +26,16 @@
 
 | 接口 | 合同 |
 | --- | --- |
-| `GET /catalog/template` | 下载 XLSX 空模板和分类参考，需 `materials.export`；路径没有 `.xlsx` 后缀 |
+| `GET /catalog/template` | 下载中文 XLSX 空模板及引用参考页，需 `materials.export`；路径没有 `.xlsx` 后缀 |
 | `GET /catalog/export.xlsx` | 导出全部符合 catalog 检索条件的标准信息，需 `materials.export`；最多 5000 条，超限 413 |
 | `POST /catalog/import` | `{name,content}`，`content` 是 XLSX canonical base64；ADMIN/MATERIAL + `materials.catalog.write`；201 `{created,skipped}` |
-| `POST /requests/:requestId/items/:itemId/catalog` | `{requestVersion,itemVersion,requestIdempotencyKey,code,name,spec,unit,categoryId,trackingMode?,reason}`；复用或创建物资信息并原子关联；首次 201 `{request}`，幂等重试 200 |
+| `POST /requests/:requestId/items/:itemId/catalog` | `{requestVersion,itemVersion,requestIdempotencyKey,code?,name,spec,unit,categoryId,trackingMode?,reason}`；复用或创建物资信息并原子关联；首次 201 `{request}`，幂等重试 200；0.7.0 空编码时自动分配 |
 
-信息库模板和导出列严格为：**物资编码、物资名称、规格、单位、物资分类、管理方式**。管理方式填写“逐件”或“数量”，分类必须已存在；编码必须使用文本单元格，保留前导零。每次导入 1–200 行、文件不超过 5 MiB，复用期初 XLSX 的压缩结构、公式／宏／外链及解压大小限制。解析后重新验证登录会话及维护权限，全批校验并在同一事务写入；同规范化编码且名称、规格、单位、分类、管理方式均一致的记录跳过，其他编码或身份冲突整批回滚。**导入不增加库存、不生成单件码**；数量金额与位置从期初／补录单导入并确认入库。
+0.7.0 信息库模板和导出列为：**物资名称、规格、单位、物资分类、管理方式**。名称／规格／单位可从引用下拉参考已有物资，也可填写新值；分类须为已有中文名称，管理方式为“逐件”或“数量”。参考列表基于导出时的数据，不能代替导入时的服务端校验。旧版含“物资编码”的六列表头仍可识别，旧编码须文本以保留前导零；新模板不要求人工编码。
+
+物资、分类及区域参考列表各最多 5000 条，优先带入本次导出涉及的数据；工作簿明细及每次导出仍最多 5000 条，但不限制信息库或字典的总记录数。某参考库超过 5000 条时，截断列表的相应列允许手填已有中文名称，不强迫只能选到前 5000 条；仓库和管理方式的固定小列表保持严格选项。服务端按完整当前数据验证，列表内外都不能绕过身份、权限或字段规则。名称／规格／单位各自下拉是独立选择，组合仍须匹配同一物资；目录导入则允许确实不存在的新组合。
+
+每次导入 1–5000 行、文件不超过 5 MiB，受下文 XLSX 压缩与公式等限制。按规范化的**名称＋规格＋单位**精确匹配；唯一已有身份且分类／管理方式一致则跳过复用，不重复建档，有歧义或字段冲突返回具体位置，整批不写。分类或管理方式冲突定位到实际对应列，新五列表分别为 D／E，不笼统归到物资名称。导出的信息库可原样导回，不增加库存或实物码；不能用信息库导入修改已经引用的物资身份。解析后重新验证会话与权限，在同一事务校验并写入；数量金额与位置继续从期初／补录草稿导入并确认入库。
 
 原单建档关联需要 ADMIN/MATERIAL + `materials.catalog.write` 以及该行 `mayEdit` 资格；只有未关联、没有历史验收／拒收／结案事件的行可用。已提交单另须 MATERIAL + `materials.request.edit_submitted`，原因、父单及行版本必填。创建信息、关联、版本递增、审计及修订快照处于同一事务，保留原提交版，不直接增加库存；同幂等键异文或版本过期返回 409。已有信息可在普通修订中直接选择关联。
 
@@ -49,7 +53,7 @@
 逐件主档的合格验收、期初与正调整按实际数量自动生成 N 个不同码，每次最多 1000 件；拒收、结案不生成。单件不单独估值，金额继续使用原批次均价核算。冲正只允许原验收生成的全部具体单件仍在库时整笔办理，不能用后来同批入库的其他瓶替代。
 
 - `GET /stock/units` → 统一分页。支持 `receiptId,issueId,catalogId,regionId,warehouse,batch,expiryDate,status,q`，空批号／效期存在时精确匹配。`status` 为 `in_stock|issued|void`，默认包括全部状态。
-- 单件行：`{id,code,sequence,qrPayload,catalogId,catalogCode,name,spec,unit,regionId,regionName,warehouse,batch,expiryDate,location,status,sourceMovementId,exitMovementId,sourceReceiptId,createdAt}`；`qrPayload` 为单件码本身。
+- 单件行：`{id,code,sequence,qrPayload,catalogId,catalogCode,name,spec,unit,regionId,regionName,warehouse,warehouseName,batch,expiryDate,location,status,sourceMovementId,exitMovementId,sourceReceiptId,createdAt}`；`qrPayload` 为单件码本身，`warehouseName` 为中文仓库名，`warehouse` 继续用于程序识别。
 - 验收行增加 `unitCount`，验收／冲正写入回包另含 `units`；主档、库存及领用增加 `trackingMode`。领用列表返回单件数，详情／处理回包的 `units` 为实发单件，避免历史列表展开过大；完整单件从分页接口读取。
 - `POST /scan/resolve` 命中单件 → `{kind:'unit',catalog,unit,batch}`；已领用／作废仍可追溯，但不可重复出库。单件码指向既有入库实物，不能拿它再验收入库。
 - 逐件 `POST /issues/:id/issue` 及减少库存的 `POST /stock/adjustments` 必须传 `unitIds:number[]` 或 `unitCodes:string[]`，两者只选一个。编号不得重复，必须同一精确批次且仍在库，个数须等于申请／调整数量；检查、状态更改与扣库同事务。按数量主档拒绝这两个字段。
@@ -130,17 +134,19 @@
 | `PUT /openings/:id/items/:itemId` | 同上，另需 `itemVersion`；更新草稿行 |
 | `DELETE /openings/:id/items/:itemId` | `{version,itemVersion}`，删除草稿行 |
 | `POST /openings/:id/import` | `{version,name,content}`；XLSX canonical base64，201 全部追加草稿 |
-| `GET /openings/template.xlsx` | 带主档、区域、仓库参考页的空模板，需 `materials.export` |
+| `GET /openings/template.xlsx` | 带物资、区域、中文仓库引用下拉的空模板，需 `materials.export` |
 | `GET /openings/:id/export.xlsx` | 导出当前单据，需 `materials.export`，金额按权限裁剪 |
 | `POST /openings/:id/post` | `{version,requestIdempotencyKey}`；201 首次成功／200 同正文重试，返回 `{opening,openingClosed}` |
 
 单据含 `id,no,title,date,description,kind(opening|supplement),reason,status(draft|posted),version,createdBy,creatorName,createdAt,postedBy,posterName,postedAt,itemCount,unitCount,items`。明细包含主档／分类／区域名称与 ID、仓库、`qtyM,amountCents,batch,expiryDate,location,locationVersion,zeroAmountReason,movementId,unitCount,version`。其他详情／写操作直接返回单据。
 
-每单最多 200 行，一次入库最多生成 1000 个新单件码。入库将全部行、位置、库存流水、固定码及幂等记录置于一个事务；任何行失败全部回滚。`GET /stock/units?openingId=:id` 查询此单生成的实物，重印沿用原码；旧无单据期初通过 `GET /stock/movements?type=opening` 查历史，不虚构单据。
+0.7.0 每单最多 5000 行，一次入库最多生成 1000 个新单件码，超过实物数量限制须拆单。入库将全部行、位置、库存流水、固定码及幂等记录置于一个事务；任何行失败全部回滚。`GET /stock/units?openingId=:id` 查询此单生成的实物，重印沿用原码；旧无单据期初通过 `GET /stock/movements?type=opening` 查历史，不虚构单据。
 
 首次验收或手动关闭后，原 opening 草稿只读，需另建有原因的 supplement。补录写正向 adjustment，来源为 `opening-doc:<docId>:<lineId>`，流水带单号和原因，不重开全局期初。
 
-导入额外要求 `materials.amount.read`；限 5 MiB、128 个 ZIP 条目，单条解压 6 MiB、总解压 12 MiB。只读取第一页，表头严格为“物资编码、区域、仓库编码、数量、总金额（元）、批号、有效期、存放位置、零金额原因”。精确匹配已有主档编码、区域名称、仓库编码；日期用 YYYY-MM-DD 文本，拒绝公式、宏、外链、嵌入对象、XML 实体及异常工作表范围。先完整验证再追加草稿，不直接入库，不部分导入。
+导入额外要求 `materials.amount.read`；限 5 MiB、128 个 ZIP 条目，单条解压 6 MiB、总解压 12 MiB。0.7.0 在工作簿中识别完整匹配的明细表头：**物资名称、规格、单位、区域、仓库、数量、总金额（元）、批号、有效期、存放位置、零金额原因**。前五列引用现有中文选项，物资名称＋规格＋单位须对应同一条已有信息，区域及仓库按中文名识别；各列分别下拉仍可能选出不匹配组合，服务端继续核对。旧版“物资编码、区域、仓库编码、数量、总金额（元）、批号、有效期、存放位置、零金额原因”九列表头作为兼容入口保留。
+
+日期用 YYYY-MM-DD 文本，拒绝单元格计算公式、宏、外链、嵌入对象、XML 实体及异常范围；模板内用于验证列表的引用定义不作为可执行单元格公式。错误尽量返回工作表与实际坐标，一批错误先显示前 200 条及总数。先完整验证再追加草稿，不覆盖已有行、不直接入库、不部分导入。已入库单导出只复制明细到新草稿，不恢复原流水、单件码或入库状态；重复导入不会自动消除重复库存。
 
 ### 原有库存接口
 
@@ -184,6 +190,9 @@
 
 ## Excel 与业务备份
 
+- 0.7.0 回导范围仅限**物资信息库与库存**，包括期初／补录明细；申报、验收和领用导出保持历史报表，不提供回放导入。Excel 回导与完整 JSON 恢复不同，不携带历史办理人、状态、流水或原单件码。
+- 物资相关 Excel 导出的仓库列统一输出中文仓库名称；内部 `warehouse` 代码继续用于 API 身份及精确批次定位，不要求新模板填写机器码。
+- 有金额读取权限的库存导出增加 `库存导入明细` 页，按当前正库存批次输出上述十一列，并带中文引用下拉；可直接交给 `POST /openings/:id/import` 追加新草稿，核对确认后才入库。保留物资＋区域＋仓库＋批号＋有效期＋位置，不把库存汇总当作批次明细。无金额权限的脱敏导出不包含完整回导页，文件明确标记仅供查看，服务端不会用缺失金额补零入库。
 - `GET /export.xlsx?type=requests|stock|issues` → 真正 XLSX；需要 `materials.export`，金额列另看 amount 权限。`type` 省略时默认 `requests`。申报导出支持 `q,from,to,status=draft|submitted,requestId,version=current|original`，日期按申报创建日期筛选，筛选命中的单据包含全部明细；`version` 默认 current，original 先按当前单据筛选，再使用原提交快照，未提交草稿仍用当前内容。库存导出支持 `q,regionId,warehouse,catalogId`，含库存汇总及按相同条件筛选的批次库存、存放位置。领用导出支持 `q,status` 并遵守本人/管理员可见范围，含申请时位置和当前位置或发放时位置；未发放金额留空。导出全部筛选结果，不受列表页码限制；一次最多 1000 张申报单，明细、验收流水和修订记录各不超过 5000 条；库存、批次或领用各最多 5000 条，超限返回 413。
 - 页面申报列表导出沿用已查询的 `q,status,from,to`，库存列表沿用 `q,regionId,warehouse`，领用列表沿用 `q,status`；单据详情按 `requestId,version` 导出，不携带列表筛选。验收列表不提供按验收进度导出，通过每行“原单”进入来源申报后导出；`pending|partial|done|closed` 不是申报导出的 status 值。
 - 用户文本按文本单元格写，不识别公式。原版/当前申报明细完整导出；验收流水及修订记录仍保留所选单据的完整历史。修订记录的“修改前/后快照摘要”单元格最多32767字符，超长时明确加注“完整快照见修订历史/物资备份”，完整历史仍保留于系统及业务备份。
