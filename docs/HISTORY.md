@@ -325,3 +325,13 @@ README、开发说明和群晖文档补充原 YML 仅换镜像升级、首设异
 
 0.6.0真实隔离Edge + 独立PG目录UI26/26通过，8张桌面/390px截图已目视，长表单内部滚动及保存实际可用；验证Excel模板/导入/筛选导出、库存候选排序与零库存复用、ADMIN/MATERIAL/普通角色、提交新物资、原因必填、建档关联revision2/原版保留及强制越权拒绝。前几轮缓存helper未等待最终异步GET/页面渲染造成断言时机失败，仅修helper后通过，没有业务修补。6个相关源码hash一致，数据库、runtime、profile清理实查通过；报告位于artifacts/cache/0.6.0/validation/ui/catalog-ui-report.json。下一步冻结、云端构建及真实容器交付，不扩大到物理手机/NAS/相机或USB打印。
 最终增加390px两个长表单滚动到保存按钮并直接点击保存的实际检查，UI为28/28、10张截图，零浏览器错误及server stderr；此前26项记录由此补充。最终截图目录catalog-ui-xcwKPN，全部6项源码摘要仍一致，未修改业务源码。
+
+## 2026-10-19：0.6.0冻结验证与公开交付
+
+源码冻结 `26b13d619dcba7076ddbfcadd7e1c5d937dfccbe` / `v0.6.0`，源码ZIP为483906字节，SHA-256 `7ea0543213fa121319dc5701309648184c9c27df048f187fefd91994cbe4a29c`。[0.6.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.0) 已公开为验证版（prerelease，ID `416933388`）。构建Actions `39204945366` 的131项CI通过，正式镜像索引 `sha256:90312a310a7d77d7e420c06285b193f247ca9ba285c2f448c9e368b0b16c019f` 已与成功原始日志独立核对。
+
+验证Actions `39205291463` / 运维提交 `27c5a482c44a5c10c012e1b588cdbcb624905b98` 四门禁通过：应用及PG双架构匿名拉取和正式Compose生命周期；绑定该次真实执行的PG17六项证据（不是第二次独立运行）；每份含同架构应用+PG的双TAR冻结容器；真实Caddy无SNI、只信本次隔离CA且严格校验证书的HTTPS首设、HTTP/HTTPS同账号和重建保留账号及CA。PG覆盖内部端口、只读秘密挂载、秘密字节/元数据、账号/附件/库存/实物编号重建持久化、普通领用权限和金额裁剪及受控清理；无SQLite迁移测试。ARM64容器使用QEMU。
+
+amd64 TAR为221388800字节，SHA-256 `31cf5429ec374cd0d836bef3287dda0b8d9444cecd71904a6d3ecb4a5e61bb17`；arm64为219361792字节，SHA-256 `5df6195e8a88bca0377400f058b22e19005c8c70506bcbf26a7c80bfad54b92a`。配套PG镜像索引为 `sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826`。两TAR在runner验证上传，本机未下载TAR或运行Docker；14附件及13条SHA256SUMS的官方摘要一致，12个非TAR附件经公开API无凭据完整下载通过。小证据artifact `12165950330` 为12411字节，SHA-256 `d9437e4af5510429d49b30b3077dc3090d52ee1c12f8d24e22215530ff201a4d`，导入6项通过；首次缺少 `--zip` 参数的失败记录保留，独立下载小证据ZIP后补参成功，未改源码。原始报告在 `artifacts/cache/0.6.0/`，公开核验为 `github-release-verification.json`。
+
+更正快照边界：上文6项摘要一致指UI完成时与当时工作区；冻结前为通过差异格式检查，仅清理 `src/schema.js` 第186行空白并通过语法检查，业务语义未改，但该文件字节摘要与UI报告不同，不能说全部6项与冻结快照逐字节一致。UI仍为28/28及10图，独立回环PG17.11已由根通过 `pg_ctl` fast成功关闭。根web工具读取公开Release的HTML标题/正文成功，不等于真实浏览器UI或附件点击验收；实际NAS、手机相机/证书、USB打印、BarTender及长期容量未实机验收。冻结后本轮只补4份记录文档，不重打归档、不移动标签；冻结源码已同步feature/develop，发布记录以独立文档提交维护。
