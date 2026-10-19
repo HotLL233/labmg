@@ -15,15 +15,18 @@ if (process.getuid?.() !== 0) throw new Error('Runtime initialization must run a
 
 for (const name of ['', '/data', '/uploads', '/logs', '/secrets', '/postgres']) {
   const directory = `/var/lib/labos${name}`;
+  let created = false;
   try {
     fs.mkdirSync(directory, { mode: 0o750 });
+    created = true;
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
   }
   const fd = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   try {
     const stat = fs.fstatSync(fd);
-    // PostgreSQL's entrypoint manages its data directory ownership and permissions.
+    // PG18 owns its nested PGDATA; only a new parent needs traversal permissions.
+    if (name === '/postgres' && created) fs.fchmodSync(fd, 0o755);
     if (name !== '/postgres') {
       fs.fchownSync(fd, uid, gid);
       fs.fchmodSync(fd, (stat.mode & 0o7777) | 0o700);
@@ -33,7 +36,7 @@ for (const name of ['', '/data', '/uploads', '/logs', '/secrets', '/postgres']) 
   }
 }
 const passwordFile = '/var/lib/labos/secrets/postgres-password';
-if (!fs.existsSync(passwordFile) && fs.existsSync('/var/lib/labos/postgres/PG_VERSION')) {
+if (!fs.existsSync(passwordFile) && fs.existsSync('/var/lib/labos/postgres/18/docker/PG_VERSION')) {
   throw new Error('PostgreSQL password file is missing; restore runtime/secrets from the deployment backup');
 }
 let secret;

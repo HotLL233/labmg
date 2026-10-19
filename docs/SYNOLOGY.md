@@ -1,5 +1,76 @@
 # 群晖 Docker 部署
 
+当前源码版本为 **0.6.2**，按用户确认采用全新 PostgreSQL 18，不处理旧库迁移。发布及镜像状态以 [版本说明](CHANGELOG.md)和 GitHub Release 为准。旧部署资料保留在本页历史部分，不用于将旧数据库直接改挂 PostgreSQL 18。
+
+## 两份完整 YML，任选一份
+
+| 方式 | 文件 | 使用条件 |
+| --- | --- | --- |
+| 在线拉取 | [docker-compose.yml](../deploy/docker-compose.yml) | 应用从 GHCR 拉取，数据库与代理从官方镜像仓库拉取 |
+| 本地镜像 | [docker-compose.local.yml](../deploy/docker-compose.local.yml) | 导入目标架构 TAR 内的全部三个镜像，所有服务禁止拉取 |
+
+两份文件都包含应用、PostgreSQL 18、一次性初始化和 HTTPS 代理四个服务，已内置 Caddy 配置。**不用再放 Caddyfile，不用合并 HTTPS YML，也不要求创建 .env。** 在线与本地版不要一起启动；在 Container Manager 项目中选择其中一份内容。如果界面固定要求文件名 docker-compose.yml，可将所选文件复制为此名称。
+
+## 首次部署
+
+1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。
+2. 编辑 YML，将唯一配置行 LABOS_HTTPS_HOST 内的 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10；不要填协议、端口、路径。建议为群晖保留固定 IP。默认 HTTP 3000、HTTPS 8443；端口已占用时调整对应映射。
+3. 在线版可直接构建项目并拉取；本地版先在群晖导入相应 amd64 或 arm64 TAR。每个 TAR 同时包含 labos:0.6.2、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。
+4. 启动项目。labos-init 正常退出为 0，PostgreSQL 初始化后应用启动；labos-https 提供 HTTPS。空数据库首次打开网页设置管理员账号和密码。
+5. 按[手机 HTTPS 与扫码](SCANNING_HTTPS.md)将本项目根证书安装到手机并信任，再通过 https://群晖实际IP:8443 使用实时相机。
+
+在 **NAS SSH 的项目目录**执行，在线版示例：
+
+~~~text
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d
+docker compose -f docker-compose.yml logs --tail=100 labos-init postgres labos labos-https
+~~~
+
+本地版示例（目标为 amd64，ARM64 换对应包名）：
+
+~~~text
+docker load -i labos-0.6.2-linux-amd64.tar
+docker compose -f docker-compose.local.yml config --quiet
+docker compose -f docker-compose.local.yml up -d --pull never
+~~~
+
+本地 YML 对全部四个服务设置 pull_policy: never；镜像缺失会明确失败，不会偷偷改为在线拉取。应用和初始化复用同一个 LabOS 镜像。在线版可使用 Docker 已缓存的同版本镜像。
+
+## 数据与证书位置
+
+~~~text
+项目目录/
+  docker-compose.yml                 # 或 docker-compose.local.yml，只用其中一份
+  runtime/
+    postgres/18/docker/               # PostgreSQL 18 数据
+    secrets/postgres-password         # 自动生成并持续保留的数据库口令
+    uploads/                         # 附件
+    data/                            # 兼容目录，不保存 SQLite 业务库
+    logs/
+  https/
+    data/caddy/pki/authorities/local/root.crt
+    config/
+~~~
+
+Docker 通过短语法挂载准备 runtime/ 与 https/ 父目录，应用初始化器创建 PostgreSQL 父目录及秘密文件，PostgreSQL 自行管理 18/docker/，HTTPS 代理自行准备 data/、config/ 并生成证书。无需另行创建这些子目录。PostgreSQL 18 的容器挂载点为 /var/lib/postgresql，PGDATA 为 /var/lib/postgresql/18/docker，不能套用本页旧版 PG17 的 /var/lib/postgresql/data 布局。
+
+根证书只导出 root.crt；其旁的私钥不能公开。手机只需对本项目根证书完成一次安装和信任。IP 或 CA 改变时须重新核对；仅跳过证书警告不算信任。HTTP 入口仍可拍照、选图和手输，但不能开启实时摄像头。
+
+## 后续更新与备份
+
+同一 PG18 项目的后续更新保留原项目、整份 runtime/、https/ 和 UID/GID。数据库口令与网页管理员密码分开；不要删除 secrets 来尝试重设网页密码。已有 PostgreSQL 18 数据而口令文件缺失时，初始化拒绝生成替代口令。物资 Excel 或 JSON 导出不能替代整个数据库及附件的备份。
+
+可先停应用，使用 PostgreSQL 18 的 pg_dump/pg_dumpall 做逻辑备份，并备份附件和证书；或停整个项目后保存完整目录。不要在数据库运行时直接复制物理数据目录当作一致备份。数据库主版本升级需要独立方案，本次按用户确认不提供旧版迁移，也不删除原来的任何数据目录。
+
+可选环境变量仍可覆盖端口、UID/GID 和数据路径；本地版应用镜像固定为 labos:0.6.2，避免残留 LABOS_IMAGE 将其切回远程仓库。没有自定义需求时直接编辑所选 YML 的 IP 即可。
+
+业务功能沿用物资信息、Excel、申报验收和逐件库存流程，见[物资 API](MATERIAL_API.md)及[标签打印](LABEL_PRINTING.md)。配置解析及自动化容器验证不能代替实际群晖、手机证书、物理相机和 USB 打印验收；实际结果以版本记录为准。
+
+## 历史：0.6.1 PostgreSQL 17 部署资料
+
+以下为 0.6.1 及当时依赖三个服务和可选 HTTPS overlay 的部署说明，保留历史；当前请使用上方两份完整 PG18 YML。原标签和发行附件仍保持原样。
+
 本文适用 **0.6.1**，使用 PostgreSQL。发布状态、下载与实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)及[版本说明](CHANGELOG.md)。用户已确认尚未正式使用，本轮按全新数据库部署，不迁移、不读取或删除旧 SQLite 文件。0.5.1及更早版本的镜像、附件与验证记录保留，旧 SQLite 操作资料在本页历史部分，不适用于切换到 0.6.1。
 
 ## 0.6.1 新部署

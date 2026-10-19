@@ -8,9 +8,11 @@ const { test } = require('node:test');
 
 const execute = promisify(execFile);
 const image = process.env.LABOS_DOCKER_IMAGE;
+const dockerMode = process.env.LABOS_DOCKER_MODE ?? 'online';
+assert.ok(['online', 'local'].includes(dockerMode), 'LABOS_DOCKER_MODE must be online or local');
 
 test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts, secrets, attachments, stock and unit labels after recreation', {
-  skip: image ? false : 'set LABOS_DOCKER_IMAGE and preload its matching postgres:17-bookworm image', timeout: 600000
+  skip: image ? false : 'set LABOS_DOCKER_IMAGE and preload matching postgres:18-bookworm and caddy:2.11.7-alpine images', timeout: 600000
 }, async () => {
   const root = path.resolve(__dirname, '..');
   const version = require('../package.json').version;
@@ -25,11 +27,12 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
   const runtime = path.join(directory, 'runtime');
   fs.writeFileSync(marker, project);
   fs.writeFileSync(envFile, '');
-  fs.copyFileSync(path.join(root, 'deploy/docker-compose.yml'), composeFile);
+  fs.copyFileSync(path.join(root, dockerMode === 'local' ? 'deploy/docker-compose.local.yml' : 'deploy/docker-compose.yml'), composeFile);
   const uid = 12345, gid = 23456;
   const environment = {
     ...process.env, LABOS_IMAGE: image, LABOS_DATA_DIR: '', LABOS_PORT: '127.0.0.1:0',
-    LABOS_UID: String(uid), LABOS_GID: String(gid), LABOS_ADMIN_USER: 'admin'
+    LABOS_UID: String(uid), LABOS_GID: String(gid), LABOS_ADMIN_USER: 'admin',
+    LABOS_HTTPS_HOST: '127.0.0.1', LABOS_HTTPS_PORT: '127.0.0.1:0'
   };
   delete environment.LABOS_ADMIN_PASSWORD;
   const docker = async (args, timeout = 60000) => (await execute('docker', args, {
@@ -49,7 +52,7 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     for (const id of (await projectContainers()).split(/\s+/).filter(Boolean)) {
       const container = await inspect(id);
       assert.equal(container.Config.Labels['com.docker.compose.project'], project);
-      assert.ok(['labos', 'labos-init', 'postgres'].includes(container.Config.Labels['com.docker.compose.service']), 'refusing to remove an unexpected service');
+      assert.ok(['labos', 'labos-init', 'postgres', 'labos-https'].includes(container.Config.Labels['com.docker.compose.service']), 'refusing to remove an unexpected service');
     }
     assert.equal(await projectVolumes(), '', 'bind deployment must not create a project volume');
   };
@@ -77,6 +80,14 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     assert.ok(metadata.Config.Healthcheck?.Test, 'image must declare a health check');
     environment.DOCKER_DEFAULT_PLATFORM = `${metadata.Os}/${metadata.Architecture}`;
     const configuration = JSON.parse(await compose(['config', '--format', 'json']));
+    if (dockerMode === 'local') {
+      assert.equal(image, `labos:${version}`, 'offline test image must match the fixed local Compose tag');
+      assert.equal(configuration.services.labos.image, image);
+      assert.equal(configuration.services['labos-init'].image, image);
+      for (const service of ['labos-init', 'labos', 'postgres', 'labos-https']) {
+        assert.equal(configuration.services[service].pull_policy, 'never', 'every local Compose service must forbid pulling');
+      }
+    }
     const mount = configuration.services.labos.volumes.find(item => item.target === '/var/lib/labos');
     assert.equal(mount.type, 'bind');
     assert.equal(path.resolve(mount.source), runtime, 'default runtime must be beside the test YML');
@@ -84,46 +95,63 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const shortBindings = [...composeSource.matchAll(/^\s+-\s+"(\$\{LABOS_DATA_DIR:-\.\/runtime\}[^"]*)"\s*$/gm)].map(match => match[1]);
     assert.deepEqual(shortBindings, [
       '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos',
-      '${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql/data',
+      '${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql',
       '${LABOS_DATA_DIR:-./runtime}/secrets:/run/labos-secrets:ro',
       '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos'
     ], 'runtime mounts must retain the legacy-compatible short bind syntax');
+    assert.match(composeSource, /^\s+- "\.\/https:\/var\/lib\/labos-https"\s*$/m);
     assert.doesNotMatch(composeSource, /^\s+(?:create_host_path|type):/m);
     // Compose normalization may omit create_host_path: true because it is the default.
     assert.notEqual(mount.bind?.create_host_path, false);
     assert.deepEqual(configuration.services['labos-init'].volumes.find(item => item.target === '/var/lib/labos'), mount);
     const databaseConfiguration = configuration.services.postgres;
-    assert.equal(databaseConfiguration.image, 'postgres:17-bookworm');
+    assert.equal(databaseConfiguration.image, 'postgres:18-bookworm');
     assert.equal(databaseConfiguration.ports, undefined, 'PostgreSQL must stay on the internal network');
     assert.equal(databaseConfiguration.environment.POSTGRES_PASSWORD_FILE, '/run/labos-secrets/postgres-password');
     assert.equal(databaseConfiguration.environment.POSTGRES_PASSWORD, undefined);
-    assert.equal(path.resolve(databaseConfiguration.volumes.find(item => item.target === '/var/lib/postgresql/data').source), path.join(runtime, 'postgres'));
+    assert.equal(databaseConfiguration.environment.PGDATA, '/var/lib/postgresql/18/docker');
+    assert.equal(path.resolve(databaseConfiguration.volumes.find(item => item.target === '/var/lib/postgresql').source), path.join(runtime, 'postgres'));
     assert.equal(databaseConfiguration.volumes.find(item => item.target === '/run/labos-secrets').read_only, true);
     assert.equal(configuration.services.labos.depends_on.postgres.condition, 'service_healthy');
     assert.equal(configuration.services.labos.environment.DATABASE_URL, undefined);
     assert.equal(configuration.services.labos.environment.PGHOST, 'postgres');
     const databaseImage = JSON.parse(await docker(['image', 'inspect', databaseConfiguration.image]))[0];
     assert.equal(databaseImage.Architecture, metadata.Architecture, 'preload the PostgreSQL image for the application architecture before an offline test');
+    const httpsConfiguration = configuration.services['labos-https'];
+    assert.equal(httpsConfiguration.image, 'caddy:2.11.7-alpine');
+    assert.equal(path.resolve(httpsConfiguration.volumes.find(item => item.target === '/var/lib/labos-https').source), path.join(directory, 'https'));
+    const httpsImage = JSON.parse(await docker(['image', 'inspect', httpsConfiguration.image]))[0];
+    assert.equal(httpsImage.Architecture, metadata.Architecture, 'preload the Caddy image for the application architecture before an offline test');
     assert.equal(await projectContainers(), '');
     assert.equal(await projectVolumes(), '');
     assert.equal(fs.existsSync(runtime), false, 'Compose must create the default runtime directory');
     await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
       '--label', `labos.test=${project}`, '--env', `LABOS_UID=${uid}`, '--env', `LABOS_GID=${gid}`, image, 'node', '-e', `
         const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
-        const postgres='/var/lib/labos/postgres',password='/var/lib/labos/secrets/postgres-password';
+        const postgres='/var/lib/labos/postgres',pgdata=postgres+'/18/docker',password='/var/lib/labos/secrets/postgres-password';
         const initialize=()=>{const result=spawnSync(process.execPath,['src/init-runtime.js'],{encoding:'utf8',timeout:10000});assert.ifError(result.error);return result};
         const metadata=directory=>{const stat=fs.lstatSync(directory);return {uid:stat.uid,gid:stat.gid,mode:stat.mode&0o777}};
         assert.equal(fs.existsSync(postgres),false,'preflight must start without a PostgreSQL directory or a host bind');
         const first=initialize();assert.equal(first.status,0,first.stderr);
         assert.ok(fs.lstatSync(postgres).isDirectory(),'initializer must create the PostgreSQL directory itself');
+        assert.deepEqual(metadata(postgres),{uid:0,gid:0,mode:0o755},'the new PostgreSQL parent must allow the database user to traverse it');
+        assert.equal(fs.existsSync(pgdata),false,'PostgreSQL must initialize its own versioned data directory');
         const secret=fs.readFileSync(password);
+        fs.mkdirSync(pgdata,{recursive:true});fs.writeFileSync(pgdata+'/PG_VERSION','18');
         fs.chownSync(postgres,34567,45678);fs.chmodSync(postgres,0o700);
-        const marker=postgres+'/init-preservation.txt';fs.writeFileSync(marker,'preserve PostgreSQL data');
-        const before=metadata(postgres),markerBytes=fs.readFileSync(marker);
+        fs.chownSync(pgdata,34567,45678);fs.chmodSync(pgdata,0o700);
+        const marker=pgdata+'/init-preservation.txt';fs.writeFileSync(marker,'preserve PostgreSQL data');
+        const before=metadata(postgres),dataBefore=metadata(pgdata),markerBytes=fs.readFileSync(marker);
         const second=initialize();assert.equal(second.status,0,second.stderr);
         assert.deepEqual(metadata(postgres),before,'reinitialization must preserve the PostgreSQL owner and permissions');
+        assert.deepEqual(metadata(pgdata),dataBefore,'reinitialization must preserve the PostgreSQL 18 data directory');
         assert.deepEqual(fs.readFileSync(marker),markerBytes,'reinitialization must preserve PostgreSQL files');
         assert.deepEqual(fs.readFileSync(password),secret,'reinitialization must preserve database password bytes');
+        fs.renameSync(password,password+'-kept');
+        const missingSecret=initialize();assert.ok(Number.isInteger(missingSecret.status)&&missingSecret.status!==0,'existing PostgreSQL 18 data must reject a missing password');
+        assert.equal(fs.existsSync(password),false,'initialization must not generate a replacement database password');
+        assert.deepEqual(fs.readFileSync(marker),markerBytes,'a missing password must not change database files');
+        fs.renameSync(password+'-kept',password);
         fs.renameSync(postgres,postgres+'-kept');
         const guarded='/tmp/postgres-init-guard';fs.mkdirSync(guarded);fs.writeFileSync(guarded+'/marker','guarded');
         fs.chownSync(guarded,45678,56789);fs.chmodSync(guarded,0o510);
@@ -170,10 +198,10 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
         assert.equal(entry.directory, true);
       }
       assert.ok(fs.statSync(runtime).isDirectory(), 'Compose must create the host runtime directory');
-      const databaseMount = database.Mounts.find(item => item.Destination === '/var/lib/postgresql/data');
+      const databaseMount = database.Mounts.find(item => item.Destination === '/var/lib/postgresql');
       assert.equal(databaseMount.Type, 'bind');
       if (process.platform !== 'win32') assert.equal(path.resolve(databaseMount.Source), path.join(runtime, 'postgres'));
-      assert.equal(await docker(['exec', databaseName, 'cat', '/var/lib/postgresql/data/PG_VERSION']), '17');
+      assert.equal(await docker(['exec', databaseName, 'cat', '/var/lib/postgresql/18/docker/PG_VERSION']), '18');
       assert.equal(await docker(['exec', name, 'node', '-p', "require('node:fs').existsSync('/var/lib/labos/data/labos.db')"]), 'false', 'the PostgreSQL runtime must not create a SQLite database');
       assert.equal(await projectVolumes(), '');
       const binding = await docker(['port', name, '3000/tcp']);
@@ -184,7 +212,7 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const first = await start();
     const originalSecret = JSON.parse(await secretFingerprint(first.name));
     assert.deepEqual({ mode: originalSecret.mode, uid: originalSecret.uid, gid: originalSecret.gid, size: originalSecret.size }, { mode: 0o600, uid, gid, size: 65 });
-    await docker(['exec', first.name, 'node', '-e', "(async()=>{const assert=require('node:assert/strict'),db=await require('./src/database').openDatabase();try{const row=await db.prepare('SELECT version() AS version').get();assert.match(row.version,/^PostgreSQL 17\\./)}finally{await db.close()}})().catch(()=>process.exitCode=1)"]);
+    await docker(['exec', first.name, 'node', '-e', "(async()=>{const assert=require('node:assert/strict'),db=await require('./src/database').openDatabase();try{const row=await db.prepare('SELECT version() AS version').get();assert.match(row.version,/^PostgreSQL 18\\./)}finally{await db.close()}})().catch(()=>process.exitCode=1)"]);
     await docker(['exec', first.name, 'node', '-e', "const fs=require('node:fs'),assert=require('node:assert/strict');assert.ok(fs.statSync('/app/docs/THIRD_PARTY.md').size>100);for(const name of ['MIT-zxing-wasm.txt','Apache-2.0-zxing-cpp.txt','Apache-2.0-wrapper.txt','BSD-3-Clause-zint.txt','LICENSE-stb.txt'])assert.ok(fs.statSync('/app/docs/licenses/zxing-wasm/'+name).size>100)"]);
     const initial = await (await request(first.base, '/api/auth/me')).json();
     assert.equal(initial.user, null);
@@ -423,19 +451,26 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
         assert.equal(await projectVolumes(), '');
       } catch (error) { cleanupErrors.push(error); }
     }
-    if (!cleanupErrors.length && fs.existsSync(runtime)) {
+    if (!cleanupErrors.length && (fs.existsSync(runtime) || fs.existsSync(path.join(directory, 'https')))) {
       try {
         await verifyProject();
-        assert.ok(!fs.lstatSync(runtime).isSymbolicLink(), 'refusing to clean a symlink runtime');
+        for (const target of [runtime, path.join(directory, 'https')]) {
+          if (fs.existsSync(target)) assert.ok(!fs.lstatSync(target).isSymbolicLink(), 'refusing to clean a symlink runtime');
+        }
         await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
           '--label', `labos.test=${project}`, '--mount', `type=bind,source=${directory},target=/test-fixture`, image, 'node', '-e', `
             const fs=require('node:fs'),assert=require('node:assert/strict');
             assert.equal(fs.readFileSync('/test-fixture/.labos-compose-test','utf8'),${JSON.stringify(project)});
-            const target='/test-fixture/runtime',stat=fs.lstatSync(target);
-            assert.ok(stat.isDirectory()&&!stat.isSymbolicLink(),'refusing to clean a non-directory runtime');
-            fs.rmSync(target,{recursive:true,force:true});
+            for(const name of ['runtime','https']) {
+              const target='/test-fixture/'+name;
+              if(!fs.existsSync(target))continue;
+              const stat=fs.lstatSync(target);
+              assert.ok(stat.isDirectory()&&!stat.isSymbolicLink(),'refusing to clean a non-directory runtime');
+              fs.rmSync(target,{recursive:true,force:true});
+            }
           `], 90000);
         assert.equal(fs.existsSync(runtime), false);
+        assert.equal(fs.existsSync(path.join(directory, 'https')), false);
       } catch (error) { cleanupErrors.push(error); }
     }
     if (!cleanupErrors.length) {

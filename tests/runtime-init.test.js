@@ -48,7 +48,7 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
     mkdirSync(name, options) {
       assert.ok(name === root || name.startsWith(root + '/'));
       if (entries.has(name)) throw failure('EEXIST');
-      entries.set(name, { kind: 'directory', mode: options.mode, uid: 0, gid: 0 });
+      entries.set(name, { kind: 'directory', mode: options.mode & ~0o077, uid: 0, gid: 0 });
     },
     existsSync(name) { return entries.has(name); },
     openSync(name, flags, mode) {
@@ -85,16 +85,22 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
   run();
   const initial = { ...entries.get(passwordFile) };
   const postgresDirectory = root + '/postgres';
+  const postgresDataDirectory = postgresDirectory + '/18/docker';
   assert.equal(entries.get(postgresDirectory)?.kind, 'directory', 'initializer must create the PostgreSQL bind source before the database starts');
+  assert.equal(entries.get(postgresDirectory).mode, 0o755, 'the new PostgreSQL parent must allow the database user to traverse it even with a restrictive umask');
+  assert.equal(entries.has(postgresDataDirectory), false, 'PostgreSQL must initialize its own versioned data directory');
   Object.assign(entries.get(postgresDirectory), { uid: 999, gid: 999, mode: 0o700 });
   const postgresBeforeRestart = { ...entries.get(postgresDirectory) };
+  const postgresDataBeforeRestart = { kind: 'directory', uid: 999, gid: 999, mode: 0o700 };
+  entries.set(postgresDataDirectory, { ...postgresDataBeforeRestart });
   assert.match(initial.content, /^[a-f0-9]{64}\n$/);
   assert.deepEqual({ mode: initial.mode, uid: initial.uid, gid: initial.gid }, { mode: 0o600, uid: 12345, gid: 23456 });
   run();
   assert.deepEqual(entries.get(passwordFile), initial, 'restart must keep the same password');
   assert.deepEqual(entries.get(postgresDirectory), postgresBeforeRestart, 'initialization must preserve PostgreSQL ownership and permissions');
+  assert.deepEqual(entries.get(postgresDataDirectory), postgresDataBeforeRestart, 'initialization must preserve the PostgreSQL 18 data directory');
   entries.delete(passwordFile);
-  entries.set(root + '/postgres/PG_VERSION', { kind: 'file', content: '17\n' });
+  entries.set(postgresDataDirectory + '/PG_VERSION', { kind: 'file', content: '18\n' });
   assert.throws(run, /password file is missing/);
   assert.equal(entries.has(passwordFile), false, 'an existing PostgreSQL database must never receive a generated replacement password');
   entries.set(passwordFile, { ...initial, content: 'corrupt-fixture' });

@@ -1,5 +1,41 @@
 # 手机实时扫码与群晖 HTTPS
 
+当前 **0.6.2** 的在线、本地两份完整 YML 都已经内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。使用全新 PostgreSQL 18 部署，实际发布状态以[版本说明](CHANGELOG.md)为准。
+
+## 为什么 HTTP 不能实时扫码
+
+手机通过 http://群晖IP:3000 访问时，不满足浏览器摄像头 API 的安全上下文要求。实时扫码需要可信 HTTPS、网站和系统的相机授权以及可用摄像头；更新应用镜像不会自动让手机信任证书。普通 HTTP 仍保留拍照、选图和手工输入，图片在手机本地解析。
+
+## 一个 YML 启用 HTTPS
+
+1. 在线选择 [docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择 [docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
+2. 在所选 YML 的 LABOS_HTTPS_HOST 行，将 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10。只填写地址本身，不带协议、端口或路径；默认 HTTPS 端口是 8443。未修改时 HTTPS 代理会明确报错，HTTP 应用仍可启动。
+3. 启动项目。配置已内联生成，HTTPS 代理自动创建 YML 旁 https/data/、https/config/；无需在 File Station 预建子目录。保留整份 https/，其中包含当前实例的 CA 及私钥。PostgreSQL 与附件仍在单独的 runtime/。
+4. 将下列公开根证书传到手机并安装、信任。只传 root.crt，不要导出 .key 或整份 https/data/。
+
+~~~text
+YML所在目录/https/data/caddy/pki/authorities/local/root.crt
+~~~
+
+可从自己的群晖 File Station 下载该文件并通过可信方式传到手机。部署完成后根证书才会生成；找不到时先查看 labos-https 日志和 IP 设置。
+
+- iPhone / iPad：安装描述文件后，到“设置 → 通用 → 关于本机 → 证书信任设置”，对该根证书开启“完全信任”。仅安装描述文件仍不够。
+- Android：在系统设置搜索“安装 CA 证书”，安装上述根证书；不要选择 Wi-Fi 或客户端证书。菜单随品牌和系统版本不同，设备管理策略可能需要管理员允许。
+
+5. 用 Safari / Chrome 等完整浏览器直接打开 https://群晖实际IP:8443，确保没有证书警告，允许网站及系统相机权限，再点击“开启后置摄像头”。浏览器地址必须与 YML 中设置的 IP/主机名相同；仅在警告页面点击继续访问不能代替信任。HTTP 与 HTTPS 来源不同，可能需要重新登录。
+
+一份 YML 可以自动准备服务和证书，手机的根证书信任及首次相机授权需要在设备上操作。后续保留原 https/ 时沿用原 CA；更换 IP 或重新生成 CA 后需重新核对证书信任。不要在旧 HTTP 页面的内嵌框架里打开系统。
+
+## 仍无法调用相机时
+
+按顺序确认 HTTPS 地址及端口、证书无警告、当前根证书已完全信任，再检查浏览器和系统相机权限、其他应用占用。若提示扫码组件加载失败，检查本站 /vendor/zxing-wasm/3.1.5/index.js 和 WASM 的加载情况。群晖防火墙需允许局域网访问所选 HTTPS 端口。
+
+源码、配置与自动化容器验证的结果见版本记录；尚未在用户手机安装 CA 或完成实际扫码，不把云端 HTTPS 通过写成物理相机验收。
+
+## 历史：0.6.1 及更早的可选 HTTPS overlay
+
+下文保留原先需要额外 Caddyfile 与叠加 YML 的操作记录。0.6.2 直接使用上方完整 YML，不叠加旧 docker-compose.https.yml，也不需要按旧步骤预建 HTTPS 子目录。
+
 当前 0.6.1使用 PostgreSQL，仍复用本页可选 HTTPS 入口；先按[群晖部署](SYNOLOGY.md)准备当前三服务新项目。0.5.1 的 SQLite 容器与 HTTPS 验证记录保留为历史，不能视为本版群晖或手机实机验收。
 
 只部署主 `docker-compose.yml` 时，默认入口是 HTTP 3000 端口，尚未启用 HTTPS 代理。手机实时扫码需完成下文“增加局域网 HTTPS”和“将根证书安装到手机”两部分，再使用 `https://群晖实际IP:8443` 访问；只更新应用镜像不会自动完成这项配置。

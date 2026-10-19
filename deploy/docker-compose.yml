@@ -1,10 +1,12 @@
-# LabOS 0.6.1：PostgreSQL、附件及自动生成的数据库口令固定保存在 runtime/。
-# 全新部署使用；不要将旧版 SQLite 运行目录当成已迁移的 PostgreSQL 数据。
+# 在线版：自动拉取 LabOS 0.6.2（GHCR）、PostgreSQL 18 和 Caddy 镜像。
+# 只需将下面 LABOS_HTTPS_HOST 的 CHANGE_ME 改为群晖局域网 IPv4 或主机名。
+# 无需另放 .env 或 Caddyfile；已有 .env 的数据路径及 UID/GID 覆盖仍有效。
+# 本次为全新 PostgreSQL 18 部署；后续更新保留 runtime/、https/，手机须信任根证书。
 version: '3.8'
 
 services:
   labos-init:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.6.1}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.6.2}"
     user: "0:0"
     restart: "no"
     command: ["node", "src/init-runtime.js"]
@@ -17,7 +19,7 @@ services:
       - "${LABOS_DATA_DIR:-./runtime}:/var/lib/labos"
 
   postgres:
-    image: postgres:17-bookworm
+    image: postgres:18-bookworm
     restart: unless-stopped
     depends_on:
       labos-init:
@@ -26,8 +28,9 @@ services:
       POSTGRES_USER: labos
       POSTGRES_DB: labos
       POSTGRES_PASSWORD_FILE: /run/labos-secrets/postgres-password
+      PGDATA: /var/lib/postgresql/18/docker
     volumes:
-      - "${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql/data"
+      - "${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql"
       - "${LABOS_DATA_DIR:-./runtime}/secrets:/run/labos-secrets:ro"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U labos -d labos"]
@@ -41,7 +44,7 @@ services:
         max-file: "3"
 
   labos:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.6.1}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.6.2}"
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:
       labos-init:
@@ -63,6 +66,49 @@ services:
       LABOS_DATABASE_PASSWORD_FILE: /var/lib/labos/secrets/postgres-password
     volumes:
       - "${LABOS_DATA_DIR:-./runtime}:/var/lib/labos"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  labos-https:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      labos:
+        condition: service_started
+    ports:
+      - "${LABOS_HTTPS_PORT:-8443}:443"
+    environment:
+      LABOS_HTTPS_HOST: "${LABOS_HTTPS_HOST:-CHANGE_ME}" # 改成群晖实际 IP，例如 192.168.1.10；不带协议、端口、路径。
+      XDG_DATA_HOME: /var/lib/labos-https/data
+      XDG_CONFIG_HOME: /var/lib/labos-https/config
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        case "$$LABOS_HTTPS_HOST" in
+          ""|CHANGE_ME|*://*|*/*|*:*|*[!A-Za-z0-9.-]*)
+            echo '请在 YML 中将 LABOS_HTTPS_HOST 改为群晖 IPv4 或主机名，不含协议、端口、路径。' >&2
+            exit 1
+            ;;
+        esac
+        mkdir -p /var/lib/labos-https/data /var/lib/labos-https/config
+        cat > /tmp/labos-Caddyfile <<'LABOS_CADDY'
+        {
+            admin off
+            auto_https disable_redirects
+            skip_install_trust
+            default_sni {$$LABOS_HTTPS_HOST}
+        }
+        https://{$$LABOS_HTTPS_HOST}:443 {
+            tls internal
+            reverse_proxy labos:3000
+        }
+        LABOS_CADDY
+        exec caddy run --config /tmp/labos-Caddyfile --adapter caddyfile
+    volumes:
+      - "./https:/var/lib/labos-https"
     logging:
       driver: json-file
       options:

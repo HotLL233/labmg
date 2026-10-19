@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.6.1（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
+本源码版本为 **0.6.2（开发中，未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮目标数据库为 PostgreSQL 18；0.6.0／0.6.1 的 PG17 验证与更早 SQLite 实现保留为历史，不替代本轮实际验证。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -20,22 +20,24 @@ config/
   .env.example         环境变量示例
 deploy/
   Dockerfile           Node 24 非 root 应用镜像
-  docker-compose.yml   应用、PostgreSQL 与一次性目录初始化
-  .env.example         Compose 变量示例
+  docker-compose.yml   在线完整配置：应用、PG18、初始化、内联 HTTPS
+  docker-compose.local.yml  本地镜像完整配置，四个服务禁止拉取
+  .env.example         可选 Compose 变量覆盖示例
   docker-compose.infrastructure.yml  旧 PostgreSQL、MinIO 示例
 docs/                  开发说明与变更记录
 tests/                 启动、权限、前端状态与版本打包回归
 var/                   本地附件和日志，不提交；数据库由连接地址决定
 runtime/               Compose YML 旁的 PostgreSQL、附件和秘密文件，不提交
+https/                 Compose YML 旁的 Caddy 证书及配置状态，不提交
 artifacts/             唯一构建产物与缓存目录，不提交
   releases/<version>/  ZIP 和 manifest.json，保留历史版本
   cache/<version>/     构建、测试和解压验证缓存
   legacy/              目录整理前的产物和数据迁移备份
 ```
 
-0.6.0 应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。正式 Compose 使用 `postgres:17-bookworm`，PostgreSQL 数据在 YML 旁 `runtime/postgres/`，自动生成的数据库连接口令在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`；保留完整目录与秘密文件。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
+0.6.2 应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
 
-用户已确认尚未正式使用，本轮按全新 PostgreSQL 库处理，不实施 SQLite 迁移，不读取或删除旧 SQLite 文件。历史文档中的“旧版仅换镜像升级”、SQLite 文件备份与卷迁移步骤只适用于当时版本，不适用于切换到 0.6.0。
+用户最新明确“不用管旧版本旧库”，本轮按全新 PG18 部署，不实施 PG17／SQLite 迁移或旧库兼容检测，不读取、删除或搬迁旧运行文件。历史文档中的 PG17、SQLite、仅换镜像升级与卷迁移行为只适用于当时版本，不作为本轮从旧库升级的承诺。
 
 ## 记忆、历程与版本说明
 
@@ -48,6 +50,14 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.6.2：PostgreSQL 18 与两份完整 YML（开发中）
+
+从 `805dbb7` 创建 `feature/v0.6.2-single-compose-postgresql18`，源码版本 0.6.2，缓存和合成检查放 `artifacts/cache/0.6.2/`，交付目标为 `artifacts/releases/0.6.2/`。用户要求 PostgreSQL 18，随后明确不用旧版本旧库，提供一份 GHCR 拉取配置与一份本地上传镜像配置；不实现 PG17 迁移，旧版本、标签与运行文件保留。
+
+两份 YML 都完整包含应用、PG18、一次性初始化与 Caddy `2.11.7-alpine`，只需填写 `LABOS_HTTPS_HOST` 的实际群晖 IP／主机名；不依赖额外 `.env`、Caddyfile 或 overlay。在线版使用 GHCR 默认应用标签，本地版固定 `labos:0.6.2`，四服务均 `pull_policy: never`。PG18 使用父目录挂载和 `18/docker` 数据目录；仅新建 PG 父目录设置 0755 以允许数据库用户进入，已有目录属主与权限保持不变，有 PG18 数据但丢失口令文件时拒绝生成新口令。Caddy 以 `./https` 单一根目录挂载并自行准备子目录；手机仍须安装并信任该实例根证书。
+
+源码与脚本已调整为每架构导出应用、PG18、Caddy 三镜像，正式构建尚待执行。本地初始化／Compose／HTTPS 配置／三镜像打包 Mock 合跑 5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过；真实 Docker 专项另行条件跳过。本轮真实 PG18 业务、容器生命周期、双架构镜像与公开发布结果待后续补充，不套用旧版通过记录；业务/API/UI 未改，未重跑旧版 UI，不代表目标群晖或手机验收。
 
 ## 0.6.1：群晖运行目录兼容补丁（已公开验证版）
 
@@ -213,7 +223,7 @@ npm test
 
 `npm test` 运行真实 PostgreSQL 隔离 HTTP/数据库回归、按真实脚本顺序加载的前端 VM 检查和版本化打包测试；测试按用例创建随机库并清理，源码副本及缓存统一位于 `artifacts/cache/<version>/`。`LABOS_TEST_DATABASE_URL` 必须指向专用测试实例，不得指向日常业务库；缺少配置时数据库回归报错，不静默改用 SQLite。VM 检查不代替真实浏览器验收。
 
-开发模式默认监听 3001 端口，附件和日志放在 `var/development/<package.version>/`，例如 `var/development/0.6.1/`。数据库完全由 `DATABASE_URL` 决定，运行目录和 Git 分支不会隔离 PostgreSQL，须为开发、测试和日常使用分别准备数据库；不会自动复制旧开发版本的数据。`npm start` 默认监听 3000 端口，附件和日志默认放在 `var/`。
+开发模式默认监听 3001 端口，附件和日志放在 `var/development/<package.version>/`，例如 `var/development/0.6.2/`。数据库完全由 `DATABASE_URL` 决定，运行目录和 Git 分支不会隔离 PostgreSQL，须为开发、测试和日常使用分别准备数据库；不会自动复制旧开发版本的数据。`npm start` 默认监听 3000 端口，附件和日志默认放在 `var/`。
 
 `LABOS_RUNTIME_DIR` 决定附件、日志等运行文件的根目录，`PORT` 决定端口；它们不替代数据库连接。需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如：
 
@@ -286,7 +296,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前 0.6.1 Compose 使用已公开验证版镜像 `ghcr.io/hotll233/labmg:0.6.1`，正式双架构匿名拉取已通过；发布证据见上文。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
+当前 0.6.2 在线 Compose 的应用目标镜像为 `ghcr.io/hotll233/labmg:0.6.2`，尚未冻结／发布，可拉取状态待实际发布核验。两份配置均含应用、PG18、初始化与 Caddy 四服务，`runtime/` 与 `https/` 固定在 YML 旁；在线版与本地版各自单独使用。0.6.1 的公开镜像及验证证据保留在上文，不作为 PG18 的验证。本轮只提供全新 PG18 部署，不实施旧库迁移。具体部署说明见 [群晖部署](SYNOLOGY.md)。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
@@ -316,20 +326,22 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（当前构建目标为 `labos:0.6.1`），使用本地标签。0.6.0 起每架构 TAR 同时包含应用及匹配架构的 `postgres:17-bookworm`，更正此前“应用 TAR 不包含 PostgreSQL”的过时说明；启用 HTTPS 时另需配套 Caddy 镜像。全部所需镜像已导入时跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+0.6.2 脚本目标为每架构 TAR 同时包含 `labos:0.6.2`、匹配架构的 `postgres:18-bookworm` 与 `caddy:2.11.7-alpine`，正式产物尚待构建验证。导入并核对同版本、同架构 TAR 后单独使用 `docker-compose.local.yml`，四服务均禁止拉取，无需通过 `.env` 改应用标签；默认在线 YML 与本地 YML 是两份完整配置，不叠加。0.6.0／0.6.1 的历史 TAR 只含应用+PG17，HTTPS 另需 Caddy；rc.2／rc.3 及 rc.4 继续按对应历史版本配置使用，不覆盖旧包。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
-应用镜像的运行目录固定为 `/var/lib/labos`，Compose 默认挂载 YML 同目录的 `runtime/`，也可显式设置独立的宿主机目录；通过 `LABOS_UID/GID` 指定应用运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，准备附件、日志及秘密目录、一次性生成数据库连接口令，不加载业务服务；PostgreSQL 容器自行初始化和管理 `postgres/` 目录。已有 PostgreSQL 数据却缺失秘密文件时拒绝启动，不重新生成不匹配的口令。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 时须自行准备可写存储和 PostgreSQL 连接；自动初始化属于 Compose 项目启动流程。
+应用镜像的运行目录固定为 `/var/lib/labos`，Compose 默认挂载 YML 同目录的 `runtime/`，也可显式设置独立的宿主机目录；通过 `LABOS_UID/GID` 指定应用运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，准备附件、日志、秘密目录及 PG 父目录、一次性生成数据库连接口令，不加载业务服务；PostgreSQL 容器自行初始化和管理 `postgres/18/docker/`。已有 PG18 数据却缺失秘密文件时拒绝启动，不重新生成不匹配的口令。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 时须自行准备可写存储和 PostgreSQL 连接；自动初始化属于 Compose 项目启动流程。
 
-`tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
+`tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 并预装同架构 PG18、Caddy 镜像时才运行真实容器检查；普通 `npm test` 会明确跳过该项。`LABOS_DOCKER_MODE` 仅允许 `online`／`local`，默认读取在线 YML；离线必须设为 `local`，实际读取本地 YML 并断言固定应用标签及四服务禁止拉取。例如在三镜像已导入后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.6.1'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.6.2'
+$env:LABOS_DOCKER_MODE = 'local'
 node --test tests/docker.test.js
+Remove-Item Env:LABOS_DOCKER_MODE
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
 
-该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、YML 副本及旁边的 `runtime/`，验证自动创建、数据库健康依赖、非 root、首次设置、登录和业务数据在容器重建后的持久化；不使用日常业务库或真实 `var/`。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的配置解析检查；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
+该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、选定 YML 的副本及旁边的 `runtime/`、`https/`，验证自动创建、数据库健康依赖、非 root、首次设置、登录和业务数据在容器重建后的持久化；不使用日常业务库或真实 `var/`。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的配置解析检查；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。
