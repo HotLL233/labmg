@@ -1,0 +1,9 @@
+{
+  "version": "0.7.0",
+  "commit": "ef9d0f6cf3629ddf02500e94ee11992bf8c934af",
+  "indexDigest": "sha256:a2900bc0fdd7f18d55146070592be7a318335735915def21a31f46a05b169ad9",
+  "baseParent": "42f5963ab656d426902c5751e59e5c2b4cf836f5",
+  "featureBranch": "feature/v0.7.0-excel-names-and-label-printing",
+  "status": "source-frozen",
+  "buildRunId": 39226182604
+}
