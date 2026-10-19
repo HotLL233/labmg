@@ -381,7 +381,7 @@ function preserved(actual, expected) {
     assert.equal(newBackup.data.material_barcodes.length, 1);
     assert.equal(newBackup.data.material_openings.length, 3); assert.equal(newBackup.data.material_opening_items.length, 2);
     const unitXlsx = await request(second.base, 'GET', '/api/materials/export.xlsx?type=stock', newMaterial);
-    assert.equal(unitXlsx.bytes.readUInt32LE(0), 0x05034b50);
+    assert.equal(unitXlsx.bytes.readUInt32LE(0), 0x04034b50);
     check('schema5-backup-includes-opening-documents-and-unit-identities', { units: 9, schemaVersion: 5, documents: 3, postedLines: 2 });
     const finalUnitRows = (await request(second.base, 'GET', `/api/materials/stock/units?catalogId=${unitCatalog.id}`, newMaterial)).value.items;
     await compose(['restart', 'labos'], 90000);
