@@ -233,9 +233,13 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-`deploy/docker-compose.yml` 和 0.4.0 配套 YML 默认使用 `ghcr.io/hotll233/labmg:0.4.0`；部署前先核对实际发布状态。首次安装默认不设置 `LABOS_DATA_DIR`，Docker 自动创建 `<项目名>_labos-runtime-0.4.0` 命名卷，应用和初始化服务共用该卷。已有 0.3.3 部署沿用原 YML/项目/挂载和 UID/GID，仅更新镜像，原卷名不变。`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+2026-10-19 用户要求原地升级并让数据可在 YML 同目录找到。仓库后续 `deploy/docker-compose.yml` 改为固定的 `./runtime` bind，两个服务通过 `create_host_path: true` 自动创建并共用该目录；`runtime/data` 保存 SQLite，`runtime/uploads` 保存附件，`runtime/logs` 为预留目录。镜像仍使用已发布的 `ghcr.io/hotll233/labmg:0.4.0`，本次仅修订部署模板，不重打镜像、不修改旧标签或 Release 附件。开发、测试及构建继续版本隔离，生产数据不随镜像版本更换目录。
 
-已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID，目录须已存在；默认新卷不含旧数据。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留卷，日常升级不要用 `down --volumes` / `down -v`。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持完成依赖条件须以实际部署工具为准。
+历史 0.4.0 及更早 Release 附件的默认命名卷仍保留原样。已有部署优先沿用原 YML/项目/挂载和 UID/GID，仅更新镜像；若换用新模板，必须先按[群晖部署](SYNOLOGY.md)在停服后将原数据完整迁入项目的 `runtime/`，或将 `LABOS_DATA_DIR` 指向原宿主机目录。创建空目录不等于迁移，不能直接改用空目录初始化。相对路径跟随 YML 的项目目录，搬动 YML 时也要搬数据或改用原绝对路径。
+
+`labos-init` 以 root 创建运行目录、设置属主及 owner 读写执行权限后退出；`labos` 等待其成功，再按 `LABOS_UID/GID` 非 root 运行。需要支持 bind 的 `create_host_path` 和 `depends_on.condition: service_completed_successfully` 的 Compose；不使用 Swarm `stack deploy`。
+
+已有宿主机数据须在同目录 `.env` 保留原 `LABOS_DATA_DIR` 绝对路径及 UID/GID；拼错路径可能创建空目录，部署前核对实际内容。初始化只处理根、`data/`、`uploads/`、`logs/` 四个目录，不递归改已有数据库和附件。普通 `docker compose down` 保留数据；日常升级不要用 `down --volumes` / `down -v`，历史命名卷仍可能被该选项删除。详细备份和迁移见 [群晖部署](SYNOLOGY.md)。主配置保留 Compose 3.8 形式，不设置 `pull_policy`；旧 Compose 是否支持上述配置须以实际部署工具为准。
 
 ### Docker 离线镜像包
 
@@ -249,7 +253,7 @@ npm run package:docker
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
-镜像的运行目录固定为 `/var/lib/labos`，由 Compose 默认挂载本版命名卷，也可指定已有宿主机目录；通过 `LABOS_UID/GID` 指定运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，不加载业务服务或创建数据库。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 使用自定义 UID 时仍须自行准备可写卷；自动初始化属于 Compose 项目启动流程。
+镜像的运行目录固定为 `/var/lib/labos`，仓库后续 Compose 默认挂载 YML 同目录的 `runtime/`，也可指定已有宿主机目录；通过 `LABOS_UID/GID` 指定运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，不加载业务服务或创建数据库。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 使用自定义 UID 时仍须自行准备可写卷；自动初始化属于 Compose 项目启动流程。
 
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
@@ -259,6 +263,6 @@ node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
 
-该检查使用独立 Compose 项目及命名卷，验证自动创建、初始化属主、非 root、首次设置、登录和记录/附件在容器重建后的持久化；验证产物集中在 `artifacts/cache/<version>/`，不使用 `var/` 真实数据库。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
+该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、YML 副本及旁边的 `runtime/`，验证自动创建、初始化属主、非 root、首次设置、登录和业务数据在容器重建后的持久化，不使用 `var/` 真实数据库。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的路径解析检查，覆盖换镜像、换项目名仍读取同一 YML 旁目录，以及保留自定义原目录；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。

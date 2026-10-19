@@ -39,15 +39,17 @@ npm start
 
 ## Docker 与群晖
 
-以下为 **0.4.0** 部署配置的使用约定。先在 Release 与 Actions 确认镜像和所需附件可用，再使用同版本的部署文件；历史版本继续使用各自的配套文件。
+**可以原地升级，账号、设置和历史数据应继续保留。** 已有部署先停服完整备份，继续用原 YML、项目、数据挂载及 UID/GID，只在原 `.env` 更新 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.4.0`，再执行 `docker compose pull` 和 `docker compose up -d`。不需要每次换 YML 或重新设置管理员；首次设置只会在当前连接的数据库没有用户时开放。
 
-首次安装在[发布页](https://github.com/HotLL233/labmg/releases)取得同版本 `docker-compose.yml`，在群晖 Container Manager 创建项目。默认由 Docker 自动创建按项目和版本隔离的 `labos-runtime-0.4.0` 数据卷，一次性初始化容器准备目录及权限，无需手工创建数据文件夹；应用继续以非 root 用户运行。YML 默认使用 `ghcr.io/hotll233/labmg:0.4.0`，计划交付 `linux/amd64` / `linux/arm64`，实际发布与匿名拉取结果以版本说明为准；启动后访问网页设置管理员密码。容器验证及目标 NAS 的验证边界见版本说明。
+仓库当前部署模板将数据默认放在 **YML 所在目录的 `runtime/`**，启动时自动创建 `runtime/data/`、`runtime/uploads/`、`runtime/logs/`。镜像更新沿用这个目录，不随业务版本另建数据位置；可在同目录 `.env` 用 `LABOS_DATA_DIR` 指定已有绝对路径。应用仍按非 root UID/GID 运行，一次性初始化服务只准备目录与权限。模板使用绑定目录自动创建功能，部署前需检查 Compose 支持情况。
 
-按需下载 `env.example` 并改名为同目录 `.env`。默认留空 `LABOS_DATA_DIR`；如复用已有宿主机数据，必须填原来实际存在的绝对路径并保留原 UID/GID，新版不会自动迁移数据。不带原数据配置启动会得到空的新版本数据卷。源码示例仍名为 `deploy/.env.example`。
+**历史 0.4.0 及更早 Release 附件保持原样**，其中 rc.5 起的旧 YML 默认采用版本命名卷，例如 `<项目名>_labos-runtime-0.4.0`；这次只修正仓库部署模板，不重新发布业务镜像或覆盖旧附件。换用新模板前，须把实际旧数据停服完整复制或恢复到项目 `runtime/`，核验后才切换，不能直接接一个空目录。具体步骤见[群晖部署](docs/SYNOLOGY.md#将旧命名卷迁移到-yml-同目录)。
 
-已有 **0.3.3 升级到 0.4.0** 时，先停服并完整备份原数据卷或运行目录及部署配置，在隔离副本验证；继续使用原 YML、项目名、数据挂载和 UID/GID，仅在同目录 `.env` 设置 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.4.0` 后重新拉取并重建。原 0.3.3 卷名保持不变，不改用新版默认空卷或删除旧卷。0.4.0 将新增单件数据；旧版本不能识别这些数据，回退必须恢复升级前完整数据副本，不能只切旧镜像。仅首次安装的新 YML 默认创建 0.4.0 新卷。
+升级后又出现“首次设置管理员”时，先停止写入，核对原容器 `/var/lib/labos` 的实际挂载源；接错目录或卷不等于旧数据已删除。保留旧卷与新目录，按[排查步骤](docs/SYNOLOGY.md#更新后又出现首次设置管理员)接回旧数据。账号、权限、系统设置、历史记录及附件均依赖同一运行挂载；保留容器名称或 YML 文件本身不能代替保留数据。
 
-保留按架构导入 TAR 的离线方式，导入同版本归档并核对清单后，在 `.env` 设置 `LABOS_IMAGE=labos:0.4.0`，跳过拉取直接启动项目。容器端口 `3000`，数据挂载到 `/var/lib/labos`；`labos-init` 成功退出是正常状态。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
+首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。镜像为 `ghcr.io/hotll233/labmg:0.4.0`，支持 amd64/arm64，交付与验证范围见[发布页](https://github.com/HotLL233/labmg/releases)和版本说明。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
+
+离线部署仍可导入同架构 TAR，在 `.env` 设置 `LABOS_IMAGE=labos:0.4.0`，跳过拉取后启动。升级和回退须保留完整数据备份；旧版本不能识别新版所有数据，回退不能只切旧镜像。普通 `docker compose down` 保留数据；旧命名卷配置不要用 `down -v`，绑定目录也不要手工删除。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
 
 ## 目录
 

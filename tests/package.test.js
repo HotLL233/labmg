@@ -23,7 +23,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   fs.mkdirSync(path.join(fixture, 'config'));
   fs.copyFileSync(path.join(root, 'config/.env.example'), path.join(fixture, 'config/.env.example'));
   for (const name of ['package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
-  for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'deploy/.env', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
+  for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'deploy/.env', 'deploy/runtime/private.json', 'deploy/runtime/uploads/private.txt', 'deploy/backups/private.tar.gz', 'src/runtime/private.txt', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
     const file = path.join(fixture, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, 'must stay local');
@@ -73,7 +73,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
     assert.ok(files.includes(required), required);
   }
-  assert.ok(files.every(file => !/(^|\/)(var|data|uploads|logs|artifacts|\.git|node_modules)(\/|$)/.test(file)), files.join('\n'));
+  assert.ok(files.every(file => !/(^|\/)(var|runtime|backups|data|uploads|logs|artifacts|\.git|node_modules)(\/|$)/.test(file)), files.join('\n'));
   assert.ok(files.every(file => !/\.(log|db(-wal|-shm)?)$/i.test(file)), files.join('\n'));
   assert.deepEqual(files.filter(file => path.basename(file).startsWith('.env')).sort(), ['config/.env.example', 'deploy/.env.example']);
   for (const source of manifest.sources) assert.equal(digest(path.join(extracted, source.path)), source.sha256, source.path);

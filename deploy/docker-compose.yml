@@ -1,5 +1,5 @@
-# 0.4.0 部署配置；镜像及附件可用性以 v0.4.0 Release 的实际发布记录为准。
-# 仅首次安装使用默认 0.4.0 新卷；已有部署先停服完整备份，保留原 YML/项目/挂载/UID-GID，仅更新 LABOS_IMAGE。
+# 部署模板修订：沿用已发布的 0.4.0 镜像，数据固定在本 YML 同目录的 runtime/，不随版本换目录。
+# 已有部署先停服完整备份；原卷不会自动迁入 runtime/，迁移步骤见 docs/SYNOLOGY.md。
 version: '3.8'
 
 services:
@@ -14,7 +14,11 @@ services:
     healthcheck:
       disable: true
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.4.0}:/var/lib/labos"
+      - type: bind
+        source: "${LABOS_DATA_DIR:-./runtime}"
+        target: /var/lib/labos
+        bind:
+          create_host_path: true
 
   labos:
     image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.4.0}"
@@ -32,12 +36,13 @@ services:
       LABOS_RUNTIME_DIR: /var/lib/labos
       LABOS_ADMIN_USER: "${LABOS_ADMIN_USER:-admin}"
     volumes:
-      - "${LABOS_DATA_DIR:-labos-runtime-0.4.0}:/var/lib/labos"
+      - type: bind
+        source: "${LABOS_DATA_DIR:-./runtime}"
+        target: /var/lib/labos
+        bind:
+          create_host_path: true
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  labos-runtime-0.4.0: {}

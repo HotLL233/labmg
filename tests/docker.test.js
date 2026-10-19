@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const execute = promisify(execFile);
 const image = process.env.LABOS_DOCKER_IMAGE;
 
-test('Compose initializes a new volume for a non-root user and preserves setup, records, attachments, material issues and unit labels', {
+test('Compose creates a runtime directory beside its YML for a non-root user and preserves setup, records, attachments, material issues and unit labels', {
   skip: image ? false : 'set LABOS_DOCKER_IMAGE to test a locally built image', timeout: 420000
 }, async () => {
   const root = path.resolve(__dirname, '..');
@@ -21,8 +21,11 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
   const project = `labos-docker-test-${runId}`;
   const marker = path.join(directory, '.labos-compose-test');
   const envFile = path.join(directory, 'compose.env');
+  const composeFile = path.join(directory, 'docker-compose.yml');
+  const runtime = path.join(directory, 'runtime');
   fs.writeFileSync(marker, project);
   fs.writeFileSync(envFile, '');
+  fs.copyFileSync(path.join(root, 'deploy/docker-compose.yml'), composeFile);
   const uid = 12345, gid = 23456;
   const environment = {
     ...process.env, LABOS_IMAGE: image, LABOS_DATA_DIR: '', LABOS_PORT: '127.0.0.1:0',
@@ -33,25 +36,22 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     cwd: root, env: environment, windowsHide: true, timeout, maxBuffer: 1024 * 1024
   })).stdout.trim();
   const compose = (args, timeout) => docker([
-    'compose', '--project-name', project, '--file', path.join(root, 'deploy/docker-compose.yml'), '--env-file', envFile, ...args
+    'compose', '--project-name', project, '--file', composeFile, '--env-file', envFile, ...args
   ], timeout);
   const inspect = async id => JSON.parse(await docker(['inspect', id]))[0];
   const projectContainers = () => docker(['ps', '--all', '--filter', `label=com.docker.compose.project=${project}`, '--format', '{{.ID}}']);
   const projectVolumes = () => docker(['volume', 'ls', '--filter', `label=com.docker.compose.project=${project}`, '--format', '{{.Name}}']);
-  let started = false, volumeName, volumeKey;
+  let started = false;
   const verifyProject = async () => {
+    assert.equal(path.dirname(path.resolve(directory)), path.resolve(cache));
+    assert.ok(path.basename(directory).startsWith('docker-test-'));
     assert.equal(fs.readFileSync(marker, 'utf8'), project, 'refusing to clean an unmarked test project');
     for (const id of (await projectContainers()).split(/\s+/).filter(Boolean)) {
       const container = await inspect(id);
       assert.equal(container.Config.Labels['com.docker.compose.project'], project);
       assert.ok(['labos', 'labos-init'].includes(container.Config.Labels['com.docker.compose.service']), 'refusing to remove an unexpected service');
     }
-    for (const name of (await projectVolumes()).split(/\s+/).filter(Boolean)) {
-      assert.equal(name, volumeName, 'refusing to remove an unexpected volume');
-      const volume = JSON.parse(await docker(['volume', 'inspect', name]))[0];
-      assert.equal(volume.Labels['com.docker.compose.project'], project);
-      assert.equal(volume.Labels['com.docker.compose.volume'], volumeKey);
-    }
+    assert.equal(await projectVolumes(), '', 'bind deployment must not create a project volume');
   };
   const credentials = { username: 'docker-test-admin', password: 'docker-test-password' };
   const setupOptions = {
@@ -78,14 +78,15 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     environment.DOCKER_DEFAULT_PLATFORM = `${metadata.Os}/${metadata.Architecture}`;
     const configuration = JSON.parse(await compose(['config', '--format', 'json']));
     const mount = configuration.services.labos.volumes.find(item => item.target === '/var/lib/labos');
-    assert.equal(mount.type, 'volume');
-    volumeKey = mount.source;
-    assert.equal(volumeKey, `labos-runtime-${version}`);
-    volumeName = configuration.volumes[volumeKey].name;
-    assert.equal(volumeName, `${project}_${volumeKey}`, 'runtime volume must be isolated by project and version');
+    assert.equal(mount.type, 'bind');
+    assert.equal(path.resolve(mount.source), runtime, 'default runtime must be beside the test YML');
+    assert.equal((fs.readFileSync(composeFile, 'utf8').match(/^\s+create_host_path:\s*true\s*$/gm) || []).length, 2);
+    // Compose normalization may omit create_host_path: true because it is the default.
+    assert.notEqual(mount.bind?.create_host_path, false);
+    assert.deepEqual(configuration.services['labos-init'].volumes.find(item => item.target === '/var/lib/labos'), mount);
     assert.equal(await projectContainers(), '');
     assert.equal(await projectVolumes(), '');
-    assert.ok(!(await docker(['volume', 'ls', '--filter', `name=${volumeName}`, '--format', '{{.Name}}'])).split(/\s+/).includes(volumeName), 'runtime volume must not exist before deployment');
+    assert.equal(fs.existsSync(runtime), false, 'Compose must create the default runtime directory');
     const start = async () => {
       started = true;
       await compose(['up', '--detach', '--pull', 'never', '--wait', '--wait-timeout', '120'], 180000);
@@ -98,8 +99,16 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
       assert.equal(initializer.State.ExitCode, 0, 'initializer must finish successfully before the app starts');
       assert.equal(initializer.Config.Healthcheck.Test[0], 'NONE');
       assert.equal(application.State.Health?.Status, 'healthy');
-      assert.equal(application.Mounts.find(item => item.Destination === '/var/lib/labos').Name, volumeName);
-      assert.equal(initializer.Mounts.find(item => item.Destination === '/var/lib/labos').Name, volumeName);
+      const applicationMount = application.Mounts.find(item => item.Destination === '/var/lib/labos');
+      const initializerMount = initializer.Mounts.find(item => item.Destination === '/var/lib/labos');
+      for (const binding of [applicationMount, initializerMount]) {
+        assert.equal(binding.Type, 'bind');
+        assert.equal(binding.RW, true);
+        assert.ok(binding.Source);
+      }
+      assert.equal(initializerMount.Source, applicationMount.Source);
+      // Docker Desktop can report a Linux VM path instead of the original Windows path.
+      if (process.platform !== 'win32') assert.equal(path.resolve(applicationMount.Source), runtime);
       assert.deepEqual(JSON.parse(await docker(['exec', name, 'node', '-p', 'JSON.stringify({uid:process.getuid(),gid:process.getgid()})'])), { uid, gid });
       const directories = JSON.parse(await docker(['exec', name, 'node', '-e', "const fs=require('node:fs');console.log(JSON.stringify(['','data','uploads','logs'].map(part=>{const name='/var/lib/labos'+(part?'/'+part:''),stat=fs.statSync(name);return {name,uid:stat.uid,gid:stat.gid,mode:stat.mode&0o700,directory:stat.isDirectory()}})))"]));
       for (const entry of directories) {
@@ -108,8 +117,8 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
         assert.equal(entry.mode, 0o700, `${entry.name} owner must have read/write/search access`);
         assert.equal(entry.directory, true);
       }
-      const volume = JSON.parse(await docker(['volume', 'inspect', volumeName]))[0];
-      assert.equal(volume.Labels['com.docker.compose.project'], project, 'deployment must automatically create its own volume');
+      assert.ok(fs.statSync(runtime).isDirectory(), 'Compose must create the host runtime directory');
+      assert.equal(await projectVolumes(), '');
       const binding = await docker(['port', name, '3000/tcp']);
       assert.match(binding, /^127\.0\.0\.1:\d+$/);
       return { name, initName, base: `http://${binding}` };
@@ -279,7 +288,8 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     await verifyProject();
     await compose(['down', '--timeout', '15'], 90000);
     assert.equal(await projectContainers(), '');
-    assert.equal(await projectVolumes(), volumeName, 'container recreation must retain the runtime volume');
+    assert.ok(fs.statSync(runtime).isDirectory(), 'container recreation must retain the runtime directory');
+    assert.equal(await projectVolumes(), '');
     const second = await start();
     assert.notEqual(second.name, first.name);
     assert.notEqual(second.initName, first.initName, 'initializer must also run against the existing volume');
@@ -328,7 +338,7 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     await compose(['stop', '--timeout', '15', 'labos'], 90000);
     await verifyProject();
     await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
-      '--label', `labos.test=${project}`, '--mount', `type=volume,source=${volumeName},target=/var/lib/labos`,
+      '--label', `labos.test=${project}`, '--mount', `type=bind,source=${runtime},target=/var/lib/labos`,
       '--env', `LABOS_UID=${uid}`, '--env', `LABOS_GID=${gid}`, image, 'node', '-e', `
         const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
         fs.renameSync('/var/lib/labos/data','/var/lib/labos/data-kept');
@@ -345,9 +355,24 @@ test('Compose initializes a new volume for a non-root user and preserves setup, 
     if (started) {
       try {
         await verifyProject();
-        await compose(['down', '--volumes', '--timeout', '15'], 90000);
+        await compose(['down', '--timeout', '15'], 90000);
         assert.equal(await projectContainers(), '');
         assert.equal(await projectVolumes(), '');
+      } catch (error) { cleanupErrors.push(error); }
+    }
+    if (!cleanupErrors.length && fs.existsSync(runtime)) {
+      try {
+        await verifyProject();
+        assert.ok(!fs.lstatSync(runtime).isSymbolicLink(), 'refusing to clean a symlink runtime');
+        await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
+          '--label', `labos.test=${project}`, '--mount', `type=bind,source=${directory},target=/test-fixture`, image, 'node', '-e', `
+            const fs=require('node:fs'),assert=require('node:assert/strict');
+            assert.equal(fs.readFileSync('/test-fixture/.labos-compose-test','utf8'),${JSON.stringify(project)});
+            const target='/test-fixture/runtime',stat=fs.lstatSync(target);
+            assert.ok(stat.isDirectory()&&!stat.isSymbolicLink(),'refusing to clean a non-directory runtime');
+            fs.rmSync(target,{recursive:true,force:true});
+          `], 90000);
+        assert.equal(fs.existsSync(runtime), false);
       } catch (error) { cleanupErrors.push(error); }
     }
     if (!cleanupErrors.length) {

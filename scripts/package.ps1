@@ -27,7 +27,7 @@ try {
     }
     $sources = @($inputs | ForEach-Object {
         $relative = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
-        if ($relative -match '(^|/)(var|data|uploads|logs|artifacts|\.git|node_modules)(/|$)' -or
+        if ($relative -match '(^|/)(var|runtime|backups|data|uploads|logs|artifacts|\.git|node_modules)(/|$)' -or
             $_.Name -match '\.(log|db(-wal|-shm)?)$' -or
             ($_.Name -like '.env*' -and @('config/.env.example', 'deploy/.env.example') -notcontains $relative)) { return }
         $item = $_

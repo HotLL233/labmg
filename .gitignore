@@ -1,4 +1,8 @@
 /var/
+/runtime/
+/deploy/runtime/
+/backups/
+/deploy/backups/
 /artifacts/
 /node_modules/
 .env
