@@ -112,6 +112,7 @@ try {
     } elseif ($entry.FullName -ceq 'start-labos.cmd') {
       $content = (@('@echo off', 'cd /d "%~dp0"',
         'if not exist "node_modules\write-excel-file\package.json" goto install',
+        'if not exist "node_modules\read-excel-file\package.json" goto install',
         'if exist "node_modules\zxing-wasm\dist\full\zxing_full.wasm" goto start',
         ':install',
         '  call npm ci --omit=dev --ignore-scripts --no-audit --no-fund --cache artifacts\cache\0.5.0\npm',
