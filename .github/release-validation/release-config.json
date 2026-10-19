@@ -1,0 +1,7 @@
+{
+  "version": "0.5.1",
+  "commit": "60f96393e3307bab55da3250c11ab777a9e46f04",
+  "baseParent": "372069ce0f1f334ab1041ba449e71c56d9232c7f",
+  "featureBranch": "feature/v0.5.1-https-ip",
+  "status": "source-frozen"
+}
