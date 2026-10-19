@@ -2,6 +2,8 @@
 
 本源码版本：**0.6.2**，全新 PostgreSQL 18 部署，提供在线拉取和本地导入镜像两份完整 YML，均内置手机扫码 HTTPS。发布状态、下载和实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)与[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
 
+[0.6.2 验证版已公开](https://github.com/HotLL233/labmg/releases/tag/v0.6.2)，附两份完整 YML、amd64／arm64 三镜像 TAR 及校验清单。131 项业务测试、在线与本地容器部署、严格证书校验的 HTTPS 验证通过；ARM64 使用 QEMU，实际群晖及手机仍须现场确认。
+
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
 ## 本机运行与开发

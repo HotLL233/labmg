@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.6.2（开发中，未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮目标数据库为 PostgreSQL 18；0.6.0／0.6.1 的 PG17 验证与更早 SQLite 实现保留为历史，不替代本轮实际验证。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
+本源码版本为 **0.6.2（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本版数据库为 PostgreSQL 18；0.6.0／0.6.1 的 PG17 验证与更早 SQLite 实现保留为历史，不替代本轮实际验证。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -51,13 +51,21 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.6.2：PostgreSQL 18 与两份完整 YML（开发中）
+## 0.6.2：PostgreSQL 18 与两份完整 YML（已公开验证版）
 
 从 `805dbb7` 创建 `feature/v0.6.2-single-compose-postgresql18`，源码版本 0.6.2，缓存和合成检查放 `artifacts/cache/0.6.2/`，交付目标为 `artifacts/releases/0.6.2/`。用户要求 PostgreSQL 18，随后明确不用旧版本旧库，提供一份 GHCR 拉取配置与一份本地上传镜像配置；不实现 PG17 迁移，旧版本、标签与运行文件保留。
 
 两份 YML 都完整包含应用、PG18、一次性初始化与 Caddy `2.11.7-alpine`，只需填写 `LABOS_HTTPS_HOST` 的实际群晖 IP／主机名；不依赖额外 `.env`、Caddyfile 或 overlay。在线版使用 GHCR 默认应用标签，本地版固定 `labos:0.6.2`，四服务均 `pull_policy: never`。PG18 使用父目录挂载和 `18/docker` 数据目录；仅新建 PG 父目录设置 0755 以允许数据库用户进入，已有目录属主与权限保持不变，有 PG18 数据但丢失口令文件时拒绝生成新口令。Caddy 以 `./https` 单一根目录挂载并自行准备子目录；手机仍须安装并信任该实例根证书。
 
-源码与脚本已调整为每架构导出应用、PG18、Caddy 三镜像，正式构建尚待执行。本地初始化／Compose／HTTPS 配置／三镜像打包 Mock 合跑 5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过；真实 Docker 专项另行条件跳过。本轮真实 PG18 业务、容器生命周期、双架构镜像与公开发布结果待后续补充，不套用旧版通过记录；业务/API/UI 未改，未重跑旧版 UI，不代表目标群晖或手机验收。
+源码阶段：源码与脚本已调整为每架构导出应用、PG18、Caddy 三镜像，当时正式构建尚待执行。本地初始化／Compose／HTTPS 配置／三镜像打包 Mock 合跑 5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过；真实 Docker 专项另行条件跳过。该阶段的真实 PG18 业务、容器和公开交付待验证状态由以下结果补充，不套用旧版通过记录。
+
+[0.6.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.2) 已公开为 prerelease（ID `416999039`），冻结 `989554e60aea0be96c943909fadde8f9bb0bd7d7` / `v0.6.2`。构建 Actions `39213871240` 的 131 项 CI 全通过、0 失败、0 跳过，正式应用索引 `sha256:68075ddf6c38605d85d95aae7f10e2c4eb58da99278b1839062f7719b604b376` 已独立对照原始日志。源码 ZIP 为 507051 字节，SHA-256 `5aaa8f9251fbe2b263e9108d38a4015d9c8cf3b40f4c3513d0da3094f9729ebc`。
+
+验证 Actions `39214254247` / 运维提交 `8bd811234e1f59aeb2ccc2c6e2088615886ee794` 四门禁通过：三镜像双架构匿名拉取与冻结在线 Compose；绑定该次真实执行的 PG18 六项持久化证据，非第二次独立运行；实际使用 `docker-compose.local.yml` 的双 TAR 容器检查，每架构均含应用、PG18 与 Caddy，四服务禁止拉取，ARM64 为 QEMU；真实 Caddy 无 SNI 且严格校验本实例 CA 的 HTTPS 首设、同账号、重建后账号与 CA 保留，两个无效 host 配置均拒绝。
+
+独立诊断复核进一步确认在线 amd64、离线 amd64／arm64 三份原始 TAP 均有真实 root 初始化预检标记，各 1 项通过、0 失败、0 跳过，PG captured 日志摘要与在线原 TAP 一致；这是同一运行的日志复核，非新增容器执行。
+
+12 件附件与 11 条 SHA256SUMS 一致，10 个非 TAR 附件经官方公开 API 匿名完整下载通过。小证据 artifact `12169331267` 的 13685 字节及 SHA-256 核对后，导入六项通过；完整摘要见[开发历程](HISTORY.md)。双 TAR 在 runner 验证上传，本机未运行 Docker 或完整下载 TAR；本轮业务/API/UI 未改，未重跑 0.6.0 UI，未访问真实 `var/`。API 下载不等于浏览器 UI 检查，实际群晖、手机证书与相机、USB 打印、BarTender 和长期容量未验收。发布后只补文档，不重打附件或移动标签，旧版历史保留。
 
 ## 0.6.1：群晖运行目录兼容补丁（已公开验证版）
 
@@ -326,7 +334,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-0.6.2 脚本目标为每架构 TAR 同时包含 `labos:0.6.2`、匹配架构的 `postgres:18-bookworm` 与 `caddy:2.11.7-alpine`，正式产物尚待构建验证。导入并核对同版本、同架构 TAR 后单独使用 `docker-compose.local.yml`，四服务均禁止拉取，无需通过 `.env` 改应用标签；默认在线 YML 与本地 YML 是两份完整配置，不叠加。0.6.0／0.6.1 的历史 TAR 只含应用+PG17，HTTPS 另需 Caddy；rc.2／rc.3 及 rc.4 继续按对应历史版本配置使用，不覆盖旧包。
+0.6.2 已交付每架构 TAR，均包含 `labos:0.6.2`、匹配架构的 `postgres:18-bookworm` 与 `caddy:2.11.7-alpine`；两架构的冻结本地 YML 容器检查通过，ARM64 为 QEMU，非目标群晖实机验收。导入并核对同版本、同架构 TAR 后单独使用 `docker-compose.local.yml`，四服务均禁止拉取，无需通过 `.env` 改应用标签；默认在线 YML 与本地 YML 是两份完整配置，不叠加。0.6.0／0.6.1 的历史 TAR 只含应用+PG17，HTTPS 另需 Caddy；rc.2／rc.3 及 rc.4 继续按对应历史版本配置使用，不覆盖旧包。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 

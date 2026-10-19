@@ -371,3 +371,17 @@ PG18 改挂父目录 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/
 最初本地运行初始化与容器专项共 3 项，2 通过、1 个 Docker 条件跳过、0 失败；随后完整运行初始化／Compose／HTTPS 配置／三镜像打包 Mock，5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过。真实 Docker 专项仍未执行；真实 PG18 业务回归、实际容器生命周期、双架构镜像／TAR 及公开发布尚待执行与记录，不复用 0.6.1 的实际通过结果。本轮未重跑旧版 UI，未操作真实 `var/`、群晖、手机、USB 打印或 BarTender；后续结果按实际追加，不修改既有版本发布历史。
 
 冻结前独立复核发现 PG18 的新层级权限问题：沿用 root:root、0750 父目录会阻止数据库用户进入，而官方入口只管理嵌套 PGDATA。先增加回归确认旧逻辑失败，再仅对新建父目录设置 0755；已有目录属主与权限保持不变。VM 模拟 umask 077，真实容器预检也新增新建父目录 0755 断言。修正后上述本地五项再次全过、33 个 JS 语法检查通过；实际容器仍待后续云端执行。发布缓存脚本另完成三镜像合成 TAR、缺失／篡改拒绝及附件集合自检，不能替代真实镜像与容器验证。
+
+## 2026-10-19：0.6.2 冻结验证与公开交付
+
+补充前一开发事件的待验证结果：[0.6.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.2) 已公开为验证版（prerelease，ID `416999039`），源码冻结 `989554e60aea0be96c943909fadde8f9bb0bd7d7` / `v0.6.2`，注解标签对象为 `1168d9bd6878bf4325f127bf090c5941cad93ab5`。源码 ZIP 为 507051 字节，SHA-256 `5aaa8f9251fbe2b263e9108d38a4015d9c8cf3b40f4c3513d0da3094f9729ebc`。构建 Actions `39213871240` 的真实 CI 131/131 通过、0 失败、0 跳过；正式应用索引 `sha256:68075ddf6c38605d85d95aae7f10e2c4eb58da99278b1839062f7719b604b376` 经独立复核与原始成功构建日志一致。
+
+验证 Actions `39214254247` / 运维提交 `8bd811234e1f59aeb2ccc2c6e2088615886ee794` 四门禁通过：应用、PG18、Caddy 三镜像双架构匿名拉取及冻结在线 Compose 生命周期；绑定前一门禁同次真实执行的 PG18 六项持久化证据，并非另一次独立运行；两架构 TAR 从已匿名核验的正式索引导出，均包含应用+PG18+Caddy，验证从 TAR 重新载入匹配镜像，实际使用冻结 `docker-compose.local.yml` 并核对四服务 `pull_policy: never`，容器生命周期检查通过，ARM64 为 QEMU；真实 Caddy 无 SNI 请求、仅信本实例 CA 且严格校验证书的 HTTPS 首设、HTTP/HTTPS 同账号、重建后账号与 CA 保留，两个无效 host 配置均拒绝。未实施 PG17／SQLite 迁移，也未使用用户真实业务数据；上述为本次运行结果，不复用 0.6.1 的容器证据。
+
+amd64 TAR 为 247920640 字节，SHA-256 `77694734e026115dae7020a36df30fd9b9f74ba5ec2485acbb9f916ba332172d`；arm64 TAR 为 244634624 字节，SHA-256 `1b88476f6f11fbcef7e501fc17428537f832f20b9794ff325730bb4d8b89ea9f`。配套 PostgreSQL 18 镜像索引为 `sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c`，Caddy 镜像索引为 `sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f`。来源与三镜像摘要见 `artifacts/cache/0.6.2/ghcr-offline-export.json`；两 TAR 由 runner 验证上传，本机无 Docker，未完整下载 TAR。
+
+12 件附件的官方元数据与 11 条 SHA256SUMS 一致，10 个非 TAR 附件经官方公开 API 无凭据完整下载通过，报告为 `artifacts/cache/0.6.2/github-release-verification.json`。小证据 artifact `12169331267` 为 13685 字节，SHA-256 `0c5910fa3990895a08a4d356d2d856136b4b0426141e305f4eeb72268ac9a7e2`，核对后六项导入通过，原始小证据和报告在 `artifacts/cache/0.6.2/remote-validation/`。
+
+随后独立下载诊断 artifact `12169560458`（27784 字节，SHA-256 `2baccf4766909b5784a0491a42be05c106496b956f2638a0732d377d1a219e55`），核对在线 amd64、离线 amd64、离线 arm64 三份原始 TAP：均有真实 root 初始化预检通过标记，各 1 项通过、0 失败、0 跳过。PG captured TAP 为 584 字节，SHA-256 `fd1c82a29eb10a6bc78d03175d17523df604d7e23591f5c028e70bd05ec4b56e`，与在线原日志一致。报告为 `artifacts/cache/0.6.2/remote-validation/diagnostics/marker-evidence.json`；本次仅下载复核同一成功运行，没有重跑容器或群晖测试。
+
+将本版未发布内容归入统一版本说明的 0.6.2／2026-10-19 条目，保留初期开发与待验证事件，以本次实际结果补充。发布后仅以独立文档提交补记，不移动 `v0.6.2` 或重打 ZIP/TAR；冻结附件仍保留原快照。业务/API/UI 未改，未重跑 0.6.0 的 UI，也未访问真实 `var/`。API 下载不是浏览器 UI 或附件点击验收，实际群晖、手机证书及相机、USB 打印、BarTender 和长期容量仍未验收；0.6.1、0.6.0 与所有更早版本历史继续保留。

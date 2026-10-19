@@ -31,15 +31,23 @@
 - 2026-10-17 用户要求物资管理下新增申报、验收、库存三个入口：全员在新建申报表中增加物资，物资管理员提交后整单禁止编辑，保留历史及 Excel 导出；验收录入数量金额、标记并入库，库存有期初且同类合并。要求先给可行方案和 HTML UI 示例，未要求直接完成生产业务或发布新版镜像。初稿提交后全员只读的规则由下条同日新指令替代，保留本条作为需求历史。
 - 同日用户补充：管理员可创建物资分类，其他人员添加时可选分类和归属；异步确认归属指“区域”。提交后改为**仅物资管理员可进行修改编辑**，替代此前所有角色永久禁止编辑的要求。
 
-## 0.6.2：PostgreSQL 18 与两份完整部署 YML（开发中，2026-10-19）
+## 0.6.2：PostgreSQL 18 与两份完整部署 YML（已公开验证版，2026-10-19）
 
 用户要求 PostgreSQL 18，随后明确“**不用管旧版本旧库，这次写两个 yml 文件，一个去 github 拉取镜像，一个用本地上传的镜像**”。本轮按全新 PG18 部署，不实施 PG17／SQLite 迁移、兼容检测或自动搬迁；这替代本轮最初因用户已部署 0.6.0 而拟保留 PG17 升级路径的考虑。旧版本、标签、归档及原运行文件保留，不读取或删除真实旧库。
 
-从 `805dbb7` 创建 `feature/v0.6.2-single-compose-postgresql18`，源码版本 0.6.2，尚未冻结或发布；缓存与合成检查放 `artifacts/cache/0.6.2/`，交付目标为 `artifacts/releases/0.6.2/`。`deploy/docker-compose.yml` 以 GHCR 为应用默认来源，`deploy/docker-compose.local.yml` 固定使用 `labos:0.6.2` 且四个服务均禁止拉取。每份 YML 都完整包含应用、PG18、一次性初始化和内联配置的 Caddy，配置实际群晖 IP／主机名后不需另放 `.env`、Caddyfile 或叠加第二份 YML；手机仍须信任本实例根证书。
+从 `805dbb7` 创建 `feature/v0.6.2-single-compose-postgresql18`，源码版本 0.6.2；本节最初开发记录时尚未冻结或发布，后续实际结果补充如下。缓存与合成检查放 `artifacts/cache/0.6.2/`，交付目录为 `artifacts/releases/0.6.2/`。`deploy/docker-compose.yml` 以 GHCR 为应用默认来源，`deploy/docker-compose.local.yml` 固定使用 `labos:0.6.2` 且四个服务均禁止拉取。每份 YML 都完整包含应用、PG18、一次性初始化和内联配置的 Caddy，配置实际群晖 IP／主机名后不需另放 `.env`、Caddyfile 或叠加第二份 YML；手机仍须信任本实例根证书。
 
 PG 镜像为 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，宿主机数据位于 YML 旁 `runtime/postgres/18/docker`。应用继续共用 `runtime/` 的附件及秘密文件。终审发现沿用 0750 新建 PG 父目录会阻止降权后的数据库用户进入；本轮修正为只将新建父目录设为 0755，保留已有目录属主和权限，数据库子目录由 PostgreSQL 管理；已有 PG18 数据而秘密文件缺失时拒绝重造口令。Caddy `2.11.7-alpine` 以 `./https` 单一根目录挂载并自行创建内部目录，保留原根证书路径 `https/data/caddy/pki/authorities/local/root.crt`；只分发公开证书，不分发私钥。
 
-三镜像打包脚本已调整为每架构包含应用、PG18 与 Caddy，正式两架构 TAR 与公开镜像尚待构建验证。容器回归新增 `LABOS_DOCKER_MODE=online/local`：离线模式实际复制本地 YML，并核对固定应用标签及四服务 `pull_policy: never`，不以在线 YML 注入标签代替。本地初始化、Compose、HTTPS 配置与三镜像打包 Mock 合跑 5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过；真实 Docker 专项因未设置 `LABOS_DOCKER_IMAGE` 而条件跳过。实际 PG18 业务回归、真实容器生命周期、两架构镜像及公开发布结果待后续记录，不沿用 0.6.1 的云端通过状态，也未重跑 0.6.0 UI 或操作用户群晖、手机、USB 打印与真实 `var/`。
+源码阶段：三镜像打包脚本已调整为每架构包含应用、PG18 与 Caddy，当时正式两架构 TAR 与公开镜像尚待构建验证。容器回归新增 `LABOS_DOCKER_MODE=online/local`：离线模式实际复制本地 YML，并核对固定应用标签及四服务 `pull_policy: never`，不以在线 YML 注入标签代替。本地初始化、Compose、HTTPS 配置与三镜像打包 Mock 合跑 5/5 通过、0 失败、0 跳过，33 个 JS 语法检查通过；真实 Docker 专项因未设置 `LABOS_DOCKER_IMAGE` 而条件跳过。该阶段真实 PG18 业务、容器、两架构镜像与公开发布待验证的状态由下列结果补充，不沿用 0.6.1 的云端通过状态。
+
+[0.6.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.2) 已公开为验证版（prerelease，ID `416999039`），源码冻结 `989554e60aea0be96c943909fadde8f9bb0bd7d7` / `v0.6.2`，注解标签对象为 `1168d9bd6878bf4325f127bf090c5941cad93ab5`。源码 ZIP 为 507051 字节，SHA-256 `5aaa8f9251fbe2b263e9108d38a4015d9c8cf3b40f4c3513d0da3094f9729ebc`。构建 Actions `39213871240` 的真实 CI 131/131 通过、0 失败、0 跳过；正式应用索引 `sha256:68075ddf6c38605d85d95aae7f10e2c4eb58da99278b1839062f7719b604b376` 已独立对照原始构建日志。
+
+验证 Actions `39214254247` / 运维提交 `8bd811234e1f59aeb2ccc2c6e2088615886ee794` 四门禁通过：三镜像双架构匿名拉取及冻结在线 Compose 生命周期；绑定第一门禁同次真实执行的 PG18 六项持久化证据，不算第二次独立运行；每架构均含应用、PG18、Caddy 的双 TAR 冻结容器检查，实际使用本地 YML 并核对四服务禁止拉取，ARM64 为 QEMU；真实 Caddy 无 SNI、严格校验本实例 CA 的 HTTPS 首设／同账号／重建后账号与 CA 保留，并拒绝两个无效 host 配置。本次没有 PG17／SQLite 迁移或用户真实业务数据测试。
+
+随后独立下载诊断 artifact `12169560458`，核对在线 amd64、离线 amd64／arm64 三份原始 TAP：均有真实 root 初始化预检通过标记，各 1 项通过、0 失败、0 跳过；PG captured TAP 摘要与在线原日志一致。本次只是复核同一成功运行，没有重跑容器，报告为 `artifacts/cache/0.6.2/remote-validation/diagnostics/marker-evidence.json`。
+
+12 件附件及 11 条 SHA256SUMS 一致，10 个非 TAR 附件经官方公开 API 无凭据完整下载通过；两 TAR 在 runner 验证上传，本机未运行 Docker 或完整下载 TAR。小证据 artifact `12169331267` 为 13685 字节，SHA-256 `0c5910fa3990895a08a4d356d2d856136b4b0426141e305f4eeb72268ac9a7e2`，导入六项通过。双 TAR 尺寸及摘要见[开发历程](HISTORY.md)，公开核验为 `artifacts/cache/0.6.2/github-release-verification.json`。本轮未重跑 0.6.0 UI，未操作真实 `var/`；API 下载不等于浏览器 UI 或附件点击验收，实际群晖、手机证书及相机、USB 打印、BarTender 和长期容量仍未验收。发布后仅补文档，不移动标签或重打冻结附件，所有旧版历史保留。
 
 ## 0.6.1：群晖运行目录兼容补丁（已公开验证版，2026-10-19）
 
@@ -245,7 +253,7 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 | 在线部署版 | `0.2.0-rc.3`，源码提交 `46f2a3c`，公开镜像 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，匿名双架构拉取与正式 Compose 验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 已发布 |
 | 首次设置密码版 | `0.2.0-rc.4`，冻结提交 `8ed6ea4`，公开镜像及正式 YML 首设/登录验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.4) 已发布并核验 10 附件；已有账号保持原样 |
 | 自动部署存储版 | `0.2.0-rc.5`，冻结提交 `b067c8c`，默认自动创建命名卷及目录权限；正式双架构 TAR、公开镜像匿名拉取和配套 YML 验收通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.5) 已公开并核验 10 附件 |
-| 当前工作流 | `feature/v0.6.2-single-compose-postgresql18` 开发全新 PG18 与在线／本地两份完整 YML，版本 0.6.2 未冻结／未发布；本地初始化专项及语法通过，真实 PG18 容器与发布待验。0.6.1 仍为已公开验证版，冻结 `f0c1686` / `v0.6.1`，其历史 CI、云端与附件核验保留。0.6.0 及更早发布、0.5.0未公开草稿、main、旧标签及归档保留 |
+| 当前工作流 | `feature/v0.6.2-single-compose-postgresql18` 的 0.6.2 已公开为验证版，冻结 `989554e` / `v0.6.2`；131 项 CI、PG18 四门禁与三镜像双 TAR 通过，12 附件及 10 个非 TAR 匿名下载核验完成。发布后独立补文档，不移动标签或重打归档。0.6.1／0.6.0 及更早发布、0.5.0 未公开草稿、main、旧标签及归档保留 |
 | 默认分支 | `develop`，2026-10-16 设置并经 API 核验，以提供当前开发文档及手动发布入口；`main` 提交仍为 `2672321` |
 | Node.js | 要求 `>=22.13`，建议 24；此前本机检查为 Node `24.18.0`、npm `11.16.0` |
 
@@ -444,5 +452,7 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 | 2026-10-19 | 0.5.0 完成期初／补录单、位置、领用入口、标签模板及 BarTender CSV。冻结源码并构建镜像后，真实云端检查通过原0.4.0挂载升级18项和双TAR容器，但Caddy IP无SNI握手失败；保留未公开草稿与原归档，开启实际0.5.1补丁修复，不移动旧标签。 |
 
 | 2026-10-19 | 0.5.1冻结60f9639/v0.5.1，构建39192642471及最终四门禁39193510875全通过，含原0.4.0配置升级18项及真实无SNI严格可信HTTPS。公开验证版Release416860635交付14附件，12小件匿名完整下载与全部摘要通过；两TAR在runner验证上传、ARM64为QEMU。冻结后只补文档，保留0.5.0未公开草稿、main及旧标签；真实NAS/手机/USB打印未验收。 |
+
+| 2026-10-19 | 0.6.2 冻结 `989554e` / `v0.6.2`，构建 `39213871240` 的 131 项 CI 与验证 `39214254247` 四门禁通过。全新 PG18、两份完整 YML、每架构应用+PG18+Caddy 三镜像交付；离线实际使用本地 YML，四服务禁止拉取，ARM64 为 QEMU。公开验证版 Release `416999039` 的 12 附件／11 条校验与 10 个非 TAR 匿名完整下载通过；PG 证据绑定同次原执行，不算重跑。冻结后只补记录，实际群晖、手机及 USB 打印未验收。 |
 
 后续在此追加新事件摘要，并同步上方当前状态与关联文档。具体提交记录以 Git 为准，不在文件中预写本次尚未生成的提交散列。
