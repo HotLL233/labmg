@@ -1,0 +1,9 @@
+{
+  "version": "0.6.1",
+  "commit": "f0c1686b83cbc954e74cebe4b72ebdcaec192e6a",
+  "indexDigest": "sha256:f1dce90f09ab78254f269de3bd4ce05fbfe75257d9d4c5469cbaeca4bcfc9026",
+  "baseParent": "7f11dc4b5100e063a4a0ffd10545adbdca44d897",
+  "featureBranch": "feature/v0.6.1-synology-runtime",
+  "status": "source-frozen",
+  "buildRunId": 39209842823
+}

@@ -1,0 +1,12 @@
+{
+  "version": "0.6.1",
+  "commit": "f0c1686b83cbc954e74cebe4b72ebdcaec192e6a",
+  "runId": 39209842823,
+  "runUrl": "https://github.com/HotLL233/labmg/actions/runs/39209842823",
+  "jobId": 117920559943,
+  "indexDigest": "sha256:f1dce90f09ab78254f269de3bd4ce05fbfe75257d9d4c5469cbaeca4bcfc9026",
+  "source": "successful Actions job original log: exporting manifest list",
+  "logFile": "actions-39209842823-job-117920559943.log",
+  "logSha256": "8b9c187da6f310605645408efb51ee57e2da4b69e49f24e7eae75783d0f37a1c",
+  "checkedAtUtc": "2026-10-19T06:28:06.455Z"
+}
