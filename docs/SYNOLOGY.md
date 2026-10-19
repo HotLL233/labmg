@@ -1,10 +1,10 @@
 # 群晖 Docker 部署
 
-本文适用 **0.6.0**，使用 PostgreSQL。发布状态、下载与实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)及[版本说明](CHANGELOG.md)。用户已确认尚未正式使用，本轮按全新数据库部署，不迁移、不读取或删除旧 SQLite 文件。0.5.1及更早版本的镜像、附件与验证记录保留，旧 SQLite 操作资料在本页历史部分，不适用于切换到 0.6.0。
+本文适用 **0.6.1**，使用 PostgreSQL。发布状态、下载与实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)及[版本说明](CHANGELOG.md)。用户已确认尚未正式使用，本轮按全新数据库部署，不迁移、不读取或删除旧 SQLite 文件。0.5.1及更早版本的镜像、附件与验证记录保留，旧 SQLite 操作资料在本页历史部分，不适用于切换到 0.6.1。
 
-## 0.6.0 新部署
+## 0.6.1 新部署
 
-使用本版配套的 [docker-compose.yml](../deploy/docker-compose.yml) 和[环境示例](../deploy/.env.example)，在群晖 Container Manager 新建独立项目目录。在线镜像为 `ghcr.io/hotll233/labmg:0.6.0`，发布状态以 Release 为准；源码本地构建或离线导入后设置 `LABOS_IMAGE=labos:0.6.0`。不要将 0.6.0 文件覆盖进旧 SQLite 项目后只换镜像。
+使用本版配套的 [docker-compose.yml](../deploy/docker-compose.yml) 和[环境示例](../deploy/.env.example)，在群晖 Container Manager 新建独立项目目录。在线镜像为 `ghcr.io/hotll233/labmg:0.6.1`，发布状态以 Release 为准；源码本地构建或离线导入后设置 `LABOS_IMAGE=labos:0.6.1`。不要将 0.6.1 文件覆盖进旧 SQLite 项目后只换镜像。
 
 YML 包含三个服务：
 
@@ -16,7 +16,7 @@ YML 包含三个服务：
 
 `labos-init` 退出状态为 0 是正常完成，不是闲置应用镜像。三个服务中初始化和应用复用同一个 LabOS 镜像，PostgreSQL 使用自己的镜像。应用自动建表；空库首次打开网页设置管理员账号和密码，没有默认登录密码。数据库已有用户时首次设置入口关闭。网页管理员密码与自动生成的 PostgreSQL 连接口令分别管理。
 
-推荐使用支持 `depends_on.condition: service_completed_successfully`、`service_healthy` 和 `bind.create_host_path` 的 Compose。先校验配置；配置解析通过不等于目标 NAS 的容器、权限和性能已经验收。
+推荐使用支持 `depends_on.condition: service_completed_successfully` 和 `service_healthy` 的 Compose。本版运行目录使用兼容传统 Compose 的短语法 bind；初始化器显式创建 `postgres/`，只校验其目录身份，不把数据库目录改为应用账号属主。先校验配置；配置解析通过不等于目标 NAS 的容器、权限和性能已经验收。
 
 在 **NAS SSH 的项目目录**逐条执行，上一条成功后再继续（以下是 NAS 命令，不是在 Windows 启动本地服务）：
 
@@ -30,7 +30,15 @@ docker compose logs --tail=100 labos-init postgres labos
 
 发布前自行构建或完整离线导入所需镜像时，跳过 `pull`。服务正常后访问 `http://群晖IP:3000`，首次设置账号，再为业务负责人添加 MATERIAL 角色和相应权限。仅有 ADMIN 角色不能提交申报、办理验收或领用发放。
 
-## 0.6.0 数据目录与后续更新
+## 0.6.0 的 PostgreSQL 目录不存在报错
+
+若出现 `Bind mount failed: /volume1/docker/labos/runtime/postgres does not exist`，表示数据库服务尚未启动。0.6.0 初始化器漏建该目录，部分群晖环境未通过长语法自动补建；此前 Linux runner 的通过结果不等于目标群晖验收。
+
+使用本版配套 `docker-compose.yml` 与 0.6.1 应用镜像，在原项目目录重新构建项目；保留完整 `runtime/`、`.env`、项目名及 UID/GID。如果 `.env` 中已设置 `LABOS_IMAGE`，同步改为 `ghcr.io/hotll233/labmg:0.6.1`，离线使用 `labos:0.6.1`。不删除已有数据库、秘密文件或附件，不需要重新设置已有账号。
+
+临时继续运行0.6.0时，可在File Station的原项目 `runtime/` 内新建空文件夹 `postgres`，再重新启动；这只补目录，不能解决其他权限或数据库错误。不要递归更改数据库目录属主或使用开放权限来掩盖错误。实际目标群晖结果仍需重新部署确认。
+
+## 0.6.1 数据目录与后续更新
 
 默认自动准备 YML 同目录的固定 `runtime/`：
 
@@ -46,13 +54,13 @@ docker compose logs --tail=100 labos-init postgres labos
     data/                     # 兼容目录，不再保存 SQLite 业务库
 ```
 
-无需事先手工创建这些文件夹。`LABOS_DATA_DIR` 可指定其他绝对路径；一旦投入使用，后续更新须保持原路径。相对路径随 YML 项目目录变化，移动项目时一并移动完整 `runtime/`，或保留指向原数据目录的绝对路径。开发、测试不得连接或挂载这份业务存储。
+Docker 通过短语法 bind 准备宿主目录，初始化器再实际准备应用目录及 `postgres/`，不依赖长语法 `create_host_path` 的厂商实现。`LABOS_DATA_DIR` 可指定其他绝对路径；一旦投入使用，后续更新须保持原路径。相对路径随 YML 项目目录变化，移动项目时一并移动完整 `runtime/`，或保留指向原数据目录的绝对路径。开发、测试不得连接或挂载这份业务存储。
 
 数据库连接口令只生成一次；已有 PostgreSQL 数据但秘密文件缺失时初始化拒绝启动，避免生成与数据库不一致的口令。不要只保留 `postgres/` 后删除 `secrets/`，也不要复制另一项目的秘密文件来替换。PostgreSQL 镜像管理自己的数据目录属主；`LABOS_UID/GID` 是应用及附件的运行身份，不能据此给数据库目录递归改属主。
 
 后续 **PostgreSQL 版本**更新前，先备份并核对配套版本说明；保留原项目、YML、数据目录、秘密文件和 UID/GID，只按说明更新应用镜像。数据库主版本升级需独立流程，不能直接把 `postgres:17-bookworm` 改成另一主版本。普通重建应用容器不会主动清空数据库；出现首次设置页时先停止录入并检查实际连接、挂载和秘密文件，不要通过重新建账号掩盖接入空库的问题。
 
-## 0.6.0 备份与恢复
+## 0.6.1 备份与恢复
 
 物资页面的 JSON 备份是业务备份，包含受控的物资记录和附件；它不包含整个系统、数据库账号和完整 PostgreSQL 实例，不能替代部署级备份。物资信息／库存 Excel 也不能替代历史流水和权限备份。
 
@@ -65,7 +73,7 @@ docker compose logs --tail=100 labos-init postgres labos
 
 不要在 PostgreSQL 运行时直接复制 `runtime/postgres/` 当作一致备份。未完成独立恢复核对前不要覆盖或删除原项目。回退应用版本也需要符合该版本数据库合同；保留旧镜像本身不等于数据库可以回退。本轮不提供 SQLite → PostgreSQL 迁移，也不自动合并新旧数据库。
 
-## 0.6.0 本地构建与离线镜像
+## 0.6.1 本地构建与离线镜像
 
 在当前源码根目录用 PowerShell 7 执行：
 
@@ -75,13 +83,13 @@ docker build --platform linux/amd64 --build-arg "VERSION=$labosVersion" -f deplo
 if ($LASTEXITCODE -ne 0) { throw '构建失败' }
 ```
 
-ARM64 使用 `linux/arm64`；跨架构构建需要相应 Buildx／模拟支持。也可执行 `npm run package:docker`，按实际版本生成包含应用与数据库镜像的 TAR 和清单，缓存位于 `artifacts/cache/0.6.0/`，交付目标位于 `artifacts/releases/0.6.0/`；这些路径不代表已生成或发布。
+ARM64 使用 `linux/arm64`；跨架构构建需要相应 Buildx／模拟支持。也可执行 `npm run package:docker`，按实际版本生成包含应用与数据库镜像的 TAR 和清单，缓存位于 `artifacts/cache/0.6.1/`，交付目标位于 `artifacts/releases/0.6.1/`；这些路径不代表已生成或发布。
 
-0.6.0 的每架构 TAR **同时包含 LabOS 应用和对应架构 PostgreSQL 镜像**，清单的 `databaseImage` 记录数据库镜像身份。选择目标机器的 amd64 或 arm64 包，执行 `docker load -i 对应文件.tar`，然后在 `.env` 设置 `LABOS_IMAGE=labos:0.6.0`，用 `docker compose up -d --pull never` 部署，无需再次拉取这两个镜像。启用附带 HTTPS 时仍需另外准备指定的 Caddy 镜像。首次启动创建数据库和管理员，与导入镜像分别进行。
+0.6.1 的每架构 TAR **同时包含 LabOS 应用和对应架构 PostgreSQL 镜像**，清单的 `databaseImage` 记录数据库镜像身份。选择目标机器的 amd64 或 arm64 包，执行 `docker load -i 对应文件.tar`，然后在 `.env` 设置 `LABOS_IMAGE=labos:0.6.1`，用 `docker compose up -d --pull never` 部署，无需再次拉取这两个镜像。启用附带 HTTPS 时仍需另外准备指定的 Caddy 镜像。首次启动创建数据库和管理员，与导入镜像分别进行。
 
 不建议只从 GUI 建一个应用容器：它不会获得配套 PostgreSQL、目录初始化、秘密文件和健康依赖。单独部署时必须自行提供这些条件。应用镜像不包含本机数据库、附件或真实密码。
 
-## 0.6.0 物资、扫码与标签
+## 0.6.1 物资、扫码与标签
 
 “物资主档”在页面称为“物资信息库”，只保存物资编码、名称、规格、单位、分类及管理方式；库存按物资、仓库、区域和流水计算。申报时优先展示所选范围有库存的物资，其他范围有库存其次，零库存仍复用原信息；不因同名而自动合并不同规格或单位。没有匹配项时可先填报提交，验收前由有权限的管理员建档或关联，已提交单仍须 MATERIAL 和修订原因。
 
@@ -89,7 +97,7 @@ ARM64 使用 `linux/arm64`；跨架构构建需要相应 Buildx／模拟支持�
 
 手机实时摄像头仍需受信任的 HTTPS。可在当前新项目增加配套的 `docker-compose.https.yml` 和 `Caddyfile`，保留 `runtime/` 与 `https/`，按[扫码 HTTPS](SCANNING_HTTPS.md)设置地址并在手机信任 CA。普通 HTTP 群晖 IP 继续支持拍照／选图和手输，不能由前端绕过浏览器限制。
 
-DL-886A（NEW）通过 Windows 既有 USB 驱动及 BarTender 打印；仍推荐系统导出逐件 CSV 供打印软件读取，见[标签打印](LABEL_PRINTING.md)。本版不开放 PostgreSQL 端口给打印软件，也不新增后台自动打印服务。目标群晖、手机相机与物理标签打印须单独实机验收；0.5.1 的容器和 HTTPS 结果不能直接沿用到 0.6.0。
+DL-886A（NEW）通过 Windows 既有 USB 驱动及 BarTender 打印；仍推荐系统导出逐件 CSV 供打印软件读取，见[标签打印](LABEL_PRINTING.md)。本版不开放 PostgreSQL 端口给打印软件，也不新增后台自动打印服务。目标群晖、手机相机与物理标签打印须单独实机验收；0.5.1 的容器和 HTTPS 结果不能直接沿用到 0.6.1。
 
 ## 历史：0.5.1 及更早 SQLite 部署资料
 

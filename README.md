@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.6.0**，改用 PostgreSQL，补充申报库存匹配与物资信息 Excel 导入。发布状态、下载和实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)与[版本说明](docs/CHANGELOG.md)。0.5.1及更早SQLite版本的镜像、部署文件与历史记录保留。
+本源码版本：**0.6.1**，修复群晖部署时 PostgreSQL 目录未自动准备的问题，沿用 0.6.0 的 PostgreSQL、申报库存匹配和物资 Excel 功能。发布状态、下载和实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)与[版本说明](docs/CHANGELOG.md)。0.5.1及更早SQLite版本的镜像、部署文件与历史记录保留。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户确认尚未正式使用，本轮按全新 PostgreSQL 部署处理，不提供旧 SQLite 数据迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
@@ -17,7 +17,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.6.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.6.1/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -28,7 +28,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.6.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.6.1/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -44,7 +44,7 @@ npm test
 
 ## Docker 与群晖
 
-0.6.0 使用 [deploy/docker-compose.yml](deploy/docker-compose.yml) 和[环境示例](deploy/.env.example)，包含三个服务：一次性目录初始化 `labos-init`、数据库 `postgres` 和应用 `labos`。在线部署使用 `ghcr.io/hotll233/labmg:0.6.0`；源码本地构建或离线导入后可设置 `LABOS_IMAGE=labos:0.6.0`。发布状态与镜像验证结果以 Release 为准。
+0.6.1 使用 [deploy/docker-compose.yml](deploy/docker-compose.yml) 和[环境示例](deploy/.env.example)，包含三个服务：一次性目录初始化 `labos-init`、数据库 `postgres` 和应用 `labos`。在线部署使用 `ghcr.io/hotll233/labmg:0.6.1`；源码本地构建或离线导入后可设置 `LABOS_IMAGE=labos:0.6.1`。发布状态与镜像验证结果以 Release 为准。
 
 全新项目默认将数据放在 **YML 同目录的 `runtime/`**，由部署自动准备。`runtime/postgres/` 保存 PostgreSQL 数据，`runtime/uploads/` 保存附件，`runtime/secrets/postgres-password` 保存自动生成的数据库口令，`runtime/logs/` 为日志预留目录。管理员登录密码仍由首次网页设置，和数据库连接口令分开。
 
@@ -78,6 +78,6 @@ npm test
 
 ## 已发布历史
 
-[0.5.1](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 于 2026-10-19 公开为验证版，冻结提交 `60f9639` / `v0.5.1`。[镜像构建](https://github.com/HotLL233/labmg/actions/runs/39192642471)及[最终验证](https://github.com/HotLL233/labmg/actions/runs/39193510875)成功，涵盖双架构匿名拉取与正式 Compose、0.4.0 原配置同挂载 amd64 升级 18/18、双 TAR 检查和严格验证证书的无 SNI HTTPS 生命周期；ARM64 使用 QEMU。14 件附件摘要一致，12 个非 TAR 附件经官方 API 匿名完整下载；TAR 在云端验证上传，本机未全量下载。这些是 0.5.1 的 SQLite 交付结果，不是 0.6.0 验收。
+[0.5.1](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 于 2026-10-19 公开为验证版，冻结提交 `60f9639` / `v0.5.1`。[镜像构建](https://github.com/HotLL233/labmg/actions/runs/39192642471)及[最终验证](https://github.com/HotLL233/labmg/actions/runs/39193510875)成功，涵盖双架构匿名拉取与正式 Compose、0.4.0 原配置同挂载 amd64 升级 18/18、双 TAR 检查和严格验证证书的无 SNI HTTPS 生命周期；ARM64 使用 QEMU。14 件附件摘要一致，12 个非 TAR 附件经官方 API 匿名完整下载；TAR 在云端验证上传，本机未全量下载。这些是 0.5.1 的 SQLite 交付结果，不是 0.6.1 验收。
 
 0.5.0 因真实 IP 无 SNI 的 HTTPS 握手问题保留为未公开冻结候选，由 0.5.1 补丁替代，其标签、ZIP 与草稿 Release 不改。已公开的 0.4.0 及更早版本、原部署说明与验证边界继续保留在版本记录和[群晖文档的历史部分](docs/SYNOLOGY.md)。

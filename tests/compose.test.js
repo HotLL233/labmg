@@ -18,7 +18,9 @@ test('Compose keeps runtime beside the YML across image and project changes and 
   const composeFile = path.join(directory, 'docker-compose.yml');
   const envFile = path.join(directory, 'compose.env');
   fs.copyFileSync(path.join(root, 'deploy/docker-compose.yml'), composeFile);
-  assert.equal((fs.readFileSync(composeFile, 'utf8').match(/create_host_path: true/g) || []).length, 4);
+  const source = fs.readFileSync(composeFile, 'utf8');
+  assert.equal((source.match(/^\s+- "\$\{LABOS_DATA_DIR:-\.\/runtime\}[^"\r\n]*"\s*$/gm) || []).length, 4, 'runtime binds must retain the legacy-compatible short syntax');
+  assert.doesNotMatch(source, /create_host_path:/);
   fs.writeFileSync(envFile, '');
   t.after(() => {
     assert.equal(path.dirname(directory), cache);

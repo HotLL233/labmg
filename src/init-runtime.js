@@ -13,7 +13,7 @@ const uid = readId('LABOS_UID');
 const gid = readId('LABOS_GID');
 if (process.getuid?.() !== 0) throw new Error('Runtime initialization must run as root in the init container');
 
-for (const name of ['', '/data', '/uploads', '/logs', '/secrets']) {
+for (const name of ['', '/data', '/uploads', '/logs', '/secrets', '/postgres']) {
   const directory = `/var/lib/labos${name}`;
   try {
     fs.mkdirSync(directory, { mode: 0o750 });
@@ -23,8 +23,11 @@ for (const name of ['', '/data', '/uploads', '/logs', '/secrets']) {
   const fd = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   try {
     const stat = fs.fstatSync(fd);
-    fs.fchownSync(fd, uid, gid);
-    fs.fchmodSync(fd, (stat.mode & 0o7777) | 0o700);
+    // PostgreSQL's entrypoint manages its data directory ownership and permissions.
+    if (name !== '/postgres') {
+      fs.fchownSync(fd, uid, gid);
+      fs.fchmodSync(fd, (stat.mode & 0o7777) | 0o700);
+    }
   } finally {
     fs.closeSync(fd);
   }

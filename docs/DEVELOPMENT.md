@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.6.0**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
+本源码版本为 **0.6.1（开发中，未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -48,6 +48,12 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.6.1：群晖运行目录兼容补丁（开发中）
+
+从 `7f11dc4b5100e063a4a0ffd10545adbdca44d897` 创建 `feature/v0.6.1-synology-runtime`。用户实机报错 `runtime/postgres` bind source 不存在，补充了 0.6.0 云端 Linux Compose 门禁的覆盖边界。初始化器主动创建该目录并拒绝符号链接，不改 PostgreSQL 数据目录属主及权限，重复启动保留既有口令；Compose 的四处 bind 使用传统短语法，原路径和只读秘密挂载保留。后续重建继续沿用原 `runtime/`，不为补丁新建业务数据目录。
+
+本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过；真实 root 容器初始化预检已补充，实际云端容器及群晖待验证。本轮未改业务/API/UI，未重跑旧版 28 项 UI。缓存、合成检查及交付分别放 `artifacts/cache/0.6.1/`、`artifacts/releases/0.6.1/`；尚未冻结或发布，不改写 0.6.0 标签与附件。
 
 ## 0.6.0：PostgreSQL 与物资信息库
 
@@ -203,7 +209,7 @@ npm test
 
 `npm test` 运行真实 PostgreSQL 隔离 HTTP/数据库回归、按真实脚本顺序加载的前端 VM 检查和版本化打包测试；测试按用例创建随机库并清理，源码副本及缓存统一位于 `artifacts/cache/<version>/`。`LABOS_TEST_DATABASE_URL` 必须指向专用测试实例，不得指向日常业务库；缺少配置时数据库回归报错，不静默改用 SQLite。VM 检查不代替真实浏览器验收。
 
-开发模式默认监听 3001 端口，附件和日志放在 `var/development/<package.version>/`，例如 `var/development/0.6.0/`。数据库完全由 `DATABASE_URL` 决定，运行目录和 Git 分支不会隔离 PostgreSQL，须为开发、测试和日常使用分别准备数据库；不会自动复制旧开发版本的数据。`npm start` 默认监听 3000 端口，附件和日志默认放在 `var/`。
+开发模式默认监听 3001 端口，附件和日志放在 `var/development/<package.version>/`，例如 `var/development/0.6.1/`。数据库完全由 `DATABASE_URL` 决定，运行目录和 Git 分支不会隔离 PostgreSQL，须为开发、测试和日常使用分别准备数据库；不会自动复制旧开发版本的数据。`npm start` 默认监听 3000 端口，附件和日志默认放在 `var/`。
 
 `LABOS_RUNTIME_DIR` 决定附件、日志等运行文件的根目录，`PORT` 决定端口；它们不替代数据库连接。需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如：
 
@@ -276,7 +282,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-0.6.0 Compose 使用版本镜像 `ghcr.io/hotll233/labmg:0.6.0`，发布状态见GitHub Release。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
+当前 0.6.1 Compose 的目标版本镜像为 `ghcr.io/hotll233/labmg:0.6.1`，尚未冻结或发布，可拉取状态以实际 GitHub Release 和发布核验为准；0.6.0 的发布证据保留在上文。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
@@ -306,7 +312,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.6.0 构建目标为 `labos:0.6.0`），使用本地标签。应用 TAR 不包含 PostgreSQL 镜像；完整离线部署还需提前导入匹配目标架构的 `postgres:17-bookworm`，启用 HTTPS 时另需配套 Caddy 镜像。全部所需镜像已导入时跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（当前构建目标为 `labos:0.6.1`），使用本地标签。0.6.0 起每架构 TAR 同时包含应用及匹配架构的 `postgres:17-bookworm`，更正此前“应用 TAR 不包含 PostgreSQL”的过时说明；启用 HTTPS 时另需配套 Caddy 镜像。全部所需镜像已导入时跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 

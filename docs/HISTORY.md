@@ -335,3 +335,11 @@ README、开发说明和群晖文档补充原 YML 仅换镜像升级、首设异
 amd64 TAR为221388800字节，SHA-256 `31cf5429ec374cd0d836bef3287dda0b8d9444cecd71904a6d3ecb4a5e61bb17`；arm64为219361792字节，SHA-256 `5df6195e8a88bca0377400f058b22e19005c8c70506bcbf26a7c80bfad54b92a`。配套PG镜像索引为 `sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826`。两TAR在runner验证上传，本机未下载TAR或运行Docker；14附件及13条SHA256SUMS的官方摘要一致，12个非TAR附件经公开API无凭据完整下载通过。小证据artifact `12165950330` 为12411字节，SHA-256 `d9437e4af5510429d49b30b3077dc3090d52ee1c12f8d24e22215530ff201a4d`，导入6项通过；首次缺少 `--zip` 参数的失败记录保留，独立下载小证据ZIP后补参成功，未改源码。原始报告在 `artifacts/cache/0.6.0/`，公开核验为 `github-release-verification.json`。
 
 更正快照边界：上文6项摘要一致指UI完成时与当时工作区；冻结前为通过差异格式检查，仅清理 `src/schema.js` 第186行空白并通过语法检查，业务语义未改，但该文件字节摘要与UI报告不同，不能说全部6项与冻结快照逐字节一致。UI仍为28/28及10图，独立回环PG17.11已由根通过 `pg_ctl` fast成功关闭。根web工具读取公开Release的HTML标题/正文成功，不等于真实浏览器UI或附件点击验收；实际NAS、手机相机/证书、USB打印、BarTender及长期容量未实机验收。冻结后本轮只补4份记录文档，不重打归档、不移动标签；冻结源码已同步feature/develop，发布记录以独立文档提交维护。
+
+## 2026-10-19：0.6.1 群晖运行目录补丁开发
+
+用户在真实群晖部署 0.6.0 时提供 `runtime/postgres` bind source 不存在的错误。0.6.0 云端 Linux 的 Compose 与持久化门禁曾通过，但没有覆盖该群晖的目录创建行为；保留原发布证据，并记录此实机故障作为覆盖边界。从发布记录提交 `7f11dc4b5100e063a4a0ffd10545adbdca44d897` 创建 `feature/v0.6.1-synology-runtime`，源码版本改为 0.6.1，当前未冻结、未发布。
+
+初始化器显式创建 `postgres/`，目录用 `O_DIRECTORY | O_NOFOLLOW` 打开并拒绝符号链接；PostgreSQL 数据目录不执行应用 UID/GID 的 chown/chmod，交由 PG entrypoint 管理。Compose 四处 bind 改为传统短语法，保留原数据路径与秘密目录只读挂载；重复启动保留已有 PG 目录权限和口令。应用、数据库与附件继续沿用同一 `runtime/`，不按补丁版本另建业务数据。
+
+新增目录回归先在旧源码上失败，修复后本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过。真实 root 容器预检已增加目录创建、重跑保留 PG 属主／0700／marker／口令字节及拒绝符号链接检查，实际云端 Linux Docker 和目标群晖执行待验证；本机 Docker 不可用，不能将本地检查写成容器或群晖验收。本轮业务/API/UI 未变，未重跑 0.6.0 的 28 项 Edge UI。缓存及交付目标为 `artifacts/cache/0.6.1/`、`artifacts/releases/0.6.1/`，历史标签和归档不改写。

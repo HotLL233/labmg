@@ -80,7 +80,15 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const mount = configuration.services.labos.volumes.find(item => item.target === '/var/lib/labos');
     assert.equal(mount.type, 'bind');
     assert.equal(path.resolve(mount.source), runtime, 'default runtime must be beside the test YML');
-    assert.equal((fs.readFileSync(composeFile, 'utf8').match(/^\s+create_host_path:\s*true\s*$/gm) || []).length, 4);
+    const composeSource = fs.readFileSync(composeFile, 'utf8');
+    const shortBindings = [...composeSource.matchAll(/^\s+-\s+"(\$\{LABOS_DATA_DIR:-\.\/runtime\}[^"]*)"\s*$/gm)].map(match => match[1]);
+    assert.deepEqual(shortBindings, [
+      '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos',
+      '${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql/data',
+      '${LABOS_DATA_DIR:-./runtime}/secrets:/run/labos-secrets:ro',
+      '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos'
+    ], 'runtime mounts must retain the legacy-compatible short bind syntax');
+    assert.doesNotMatch(composeSource, /^\s+(?:create_host_path|type):/m);
     // Compose normalization may omit create_host_path: true because it is the default.
     assert.notEqual(mount.bind?.create_host_path, false);
     assert.deepEqual(configuration.services['labos-init'].volumes.find(item => item.target === '/var/lib/labos'), mount);
@@ -99,6 +107,35 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     assert.equal(await projectContainers(), '');
     assert.equal(await projectVolumes(), '');
     assert.equal(fs.existsSync(runtime), false, 'Compose must create the default runtime directory');
+    await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
+      '--label', `labos.test=${project}`, '--env', `LABOS_UID=${uid}`, '--env', `LABOS_GID=${gid}`, image, 'node', '-e', `
+        const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
+        const postgres='/var/lib/labos/postgres',password='/var/lib/labos/secrets/postgres-password';
+        const initialize=()=>{const result=spawnSync(process.execPath,['src/init-runtime.js'],{encoding:'utf8',timeout:10000});assert.ifError(result.error);return result};
+        const metadata=directory=>{const stat=fs.lstatSync(directory);return {uid:stat.uid,gid:stat.gid,mode:stat.mode&0o777}};
+        assert.equal(fs.existsSync(postgres),false,'preflight must start without a PostgreSQL directory or a host bind');
+        const first=initialize();assert.equal(first.status,0,first.stderr);
+        assert.ok(fs.lstatSync(postgres).isDirectory(),'initializer must create the PostgreSQL directory itself');
+        const secret=fs.readFileSync(password);
+        fs.chownSync(postgres,34567,45678);fs.chmodSync(postgres,0o700);
+        const marker=postgres+'/init-preservation.txt';fs.writeFileSync(marker,'preserve PostgreSQL data');
+        const before=metadata(postgres),markerBytes=fs.readFileSync(marker);
+        const second=initialize();assert.equal(second.status,0,second.stderr);
+        assert.deepEqual(metadata(postgres),before,'reinitialization must preserve the PostgreSQL owner and permissions');
+        assert.deepEqual(fs.readFileSync(marker),markerBytes,'reinitialization must preserve PostgreSQL files');
+        assert.deepEqual(fs.readFileSync(password),secret,'reinitialization must preserve database password bytes');
+        fs.renameSync(postgres,postgres+'-kept');
+        const guarded='/tmp/postgres-init-guard';fs.mkdirSync(guarded);fs.writeFileSync(guarded+'/marker','guarded');
+        fs.chownSync(guarded,45678,56789);fs.chmodSync(guarded,0o510);
+        const guardedBefore=metadata(guarded),guardedBytes=fs.readFileSync(guarded+'/marker');
+        fs.symlinkSync(guarded,postgres,'dir');
+        const rejected=initialize();assert.ok(Number.isInteger(rejected.status)&&rejected.status!==0,'initializer must reject a PostgreSQL symlink');
+        assert.ok(fs.lstatSync(postgres).isSymbolicLink(),'a rejected PostgreSQL symlink must not be replaced');
+        assert.deepEqual(metadata(guarded),guardedBefore,'a rejected symlink target must retain ownership and permissions');
+        assert.deepEqual(fs.readFileSync(guarded+'/marker'),guardedBytes,'a rejected symlink target must retain its files');
+        assert.deepEqual(fs.readFileSync(password),secret,'a rejected PostgreSQL directory must not replace the database password');
+      `], 90000);
+    console.log('Runtime initializer preflight passed: PostgreSQL directory creation, ownership preservation and symlink rejection');
     const start = async () => {
       started = true;
       await compose(['up', '--detach', '--pull', 'never', '--wait', '--wait-timeout', '180'], 240000);

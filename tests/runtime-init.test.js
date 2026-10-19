@@ -84,10 +84,15 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
   });
   run();
   const initial = { ...entries.get(passwordFile) };
+  const postgresDirectory = root + '/postgres';
+  assert.equal(entries.get(postgresDirectory)?.kind, 'directory', 'initializer must create the PostgreSQL bind source before the database starts');
+  Object.assign(entries.get(postgresDirectory), { uid: 999, gid: 999, mode: 0o700 });
+  const postgresBeforeRestart = { ...entries.get(postgresDirectory) };
   assert.match(initial.content, /^[a-f0-9]{64}\n$/);
   assert.deepEqual({ mode: initial.mode, uid: initial.uid, gid: initial.gid }, { mode: 0o600, uid: 12345, gid: 23456 });
   run();
   assert.deepEqual(entries.get(passwordFile), initial, 'restart must keep the same password');
+  assert.deepEqual(entries.get(postgresDirectory), postgresBeforeRestart, 'initialization must preserve PostgreSQL ownership and permissions');
   entries.delete(passwordFile);
   entries.set(root + '/postgres/PG_VERSION', { kind: 'file', content: '17\n' });
   assert.throws(run, /password file is missing/);
@@ -98,5 +103,9 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
   entries.set(passwordFile, { kind: 'symlink', target: '/synthetic-guard' });
   assert.throws(run, /ELOOP/);
   assert.equal(entries.get(passwordFile).target, '/synthetic-guard');
+  entries.set(passwordFile, initial);
+  entries.set(postgresDirectory, { kind: 'symlink', target: '/synthetic-postgres-guard' });
+  assert.throws(run, /ELOOP/, 'the PostgreSQL bind source must not be a symlink');
+  assert.equal(entries.get(postgresDirectory).target, '/synthetic-postgres-guard');
   assert.equal(descriptors.size, 0, 'all opened descriptors must close on success and failure');
 });
