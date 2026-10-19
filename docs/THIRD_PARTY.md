@@ -1,11 +1,17 @@
 # 第三方组件与许可
 
-本清单对应 0.3.3 的 `package-lock.json`。版本及下载完整性以锁文件为准；安装包内的第三方文件保持原样，本项目没有复制上游业务代码。完整许可正文保留在 [licenses/](licenses/)，源码包包含该目录，Docker 镜像也应包含本文件与该目录。第三方组件的许可不等于对本项目作相同许可授权。
+本清单对应 0.5.0 的 `package-lock.json`。版本及下载完整性以锁文件为准；安装包内的第三方文件保持原样，本项目没有复制上游业务代码。完整许可正文保留在 [licenses/](licenses/)，源码包包含该目录，Docker 镜像也应包含本文件与该目录。第三方组件的许可不等于对本项目作相同许可授权。
 
 ## npm 依赖
 
 | 组件 | 固定版本 | 用途 | 许可与完整正文 |
 | --- | --- | --- | --- |
+| read-excel-file | 9.3.12 | 服务端期初 XLSX 导入（universal 入口） | [MIT](licenses/npm/read-excel-file-9.3.12-MIT.txt) |
+| saxen | 11.2.0 | XML 解析，导入传递依赖 | [MIT](licenses/npm/saxen-11.2.0-MIT.txt) |
+| unzipper-esm | 0.13.3 | read-excel-file 的传递依赖，当前 universal 入口不加载 | [MIT](licenses/npm/unzipper-esm-0.13.3-MIT.txt) |
+| graceful-fs | 4.2.11 | 传递依赖 | [ISC](licenses/npm/graceful-fs-4.2.11-ISC.txt) |
+| node-int64 | 0.4.0 | 传递依赖 | [MIT](licenses/npm/node-int64-0.4.0-MIT.txt) |
+| worker-f | 0.1.20 | read-excel-file 传递依赖，当前 universal 入口不加载 | 包元数据标 MIT，许可正文缺失，见下文 |
 | [write-excel-file](https://www.npmjs.com/package/write-excel-file/v/4.1.1) | 4.1.1 | 服务端 XLSX 导出 | [MIT](licenses/npm/write-excel-file-4.1.1-MIT.txt) |
 | [fflate](https://www.npmjs.com/package/fflate/v/0.8.3) | 0.8.3 | XLSX ZIP 压缩 | [MIT](licenses/npm/fflate-0.8.3-MIT.txt) |
 | [zxing-wasm](https://www.npmjs.com/package/zxing-wasm/v/3.1.5) | 3.1.5 | 浏览器本地条码解码及 QR／Code128 标签生成 | 包装代码 [MIT](licenses/zxing-wasm/MIT-zxing-wasm.txt)，内含其他许可见下表 |
@@ -13,7 +19,9 @@
 | [type-fest](https://www.npmjs.com/package/type-fest/v/5.10.0) | 5.10.0 | zxing-wasm 类型依赖，不作为浏览器脚本加载 | MIT 或 CC0-1.0；保留 [MIT](licenses/npm/type-fest-5.10.0-MIT.txt) 及 [CC0](licenses/npm/type-fest-5.10.0-CC0.txt) 原文 |
 | [tagged-tag](https://www.npmjs.com/package/tagged-tag/v/1.0.0) | 1.0.0 | type-fest 类型依赖，不作为浏览器脚本加载 | [MIT](licenses/npm/tagged-tag-1.0.0-MIT.txt) |
 
-以上正文逐字节复制自对应已安装锁定包的许可文件，保留原版权声明。zxing-wasm npm 包仅附包装层 `LICENSE`；其 README 还明确列出 ZXing-C++、C++ 桥接代码与 Zint 的不同许可，不能仅凭包元数据中的 MIT 忽略内含组件。
+worker-f 0.1.20 的锁定 npm 发布包未附 LICENSE；作者 GitHub 镜像根树亦未找到 LICENSE，npm gitHead 在该镜像不可用，GitLab 原仓本轮连接超时。这里只记录 package.json 的 MIT 声明，不补造版权或许可正文。其余新增许可均从锁定安装包原样复制。
+
+以上随附正文逐字节复制自对应已安装锁定包的许可文件，保留原版权声明。zxing-wasm npm 包仅附包装层 `LICENSE`；其 README 还明确列出 ZXing-C++、C++ 桥接代码与 Zint 的不同许可，不能仅凭包元数据中的 MIT 忽略内含组件。
 
 ## zxing-wasm 内含组件
 
@@ -35,3 +43,7 @@ zxing-wasm 的[官方许可清单](https://github.com/Sec-ant/zxing-wasm/blob/v3
 同一个解码库覆盖 QR、Code128、Code39、EAN13、EAN8、UPC-A、UPC-E 和 DataMatrix，避免依赖浏览器覆盖不一致的原生 `BarcodeDetector`。文件最大 20 MiB；图片长边缩至不超过 2,000 像素，实时帧不超过 1,280 像素，细小、反光或模糊条码可能需要靠近、重新拍摄或裁剪。现代 iOS Safari、Android Chrome 的实际相机权限、对焦和识别效果仍需实机验证；上游编译最低版本及桌面测试不能代替实机支持结论。
 
 识别结果保留解码器返回的原始文本，不把编码转成数字、不删前导零、不改大小写。EAN/UPC 物理等价条码在混合识别时可能返回 13 位 EAN13 表示，例如 UPC-A `012345678905` 的图像可能返回 `0012345678905`。绑定时以扫码所得文本为准；手输/API 按精确文本匹配，不猜测别名或跨物资自动匹配。
+
+## 可选 HTTPS 容器
+
+可选部署使用官方 Caddy 2.11.7 Alpine 镜像（amd64 / arm64），未拷贝其代码或二进制进本应用镜像／离线 TAR。Caddy 项目采用 Apache-2.0，容器和基础系统还含各自组件；具体许可与来源以官方镜像和 [Caddy 源仓库](https://github.com/caddyserver/caddy/tree/v2.11.7)为准。首次部署需另外拉取该可选镜像。

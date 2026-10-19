@@ -108,6 +108,8 @@ function assertNoMoney(value) {
 function legacyBackup(value, schemaVersion) {
   const result = structuredClone(value);
   result.schemaVersion = schemaVersion;
+  delete result.data.material_openings;
+  delete result.data.material_opening_items;
   delete result.data.material_stock_units;
   for (const row of result.data.material_catalog) delete row.tracking_mode;
   result.data.material_state = result.data.material_state.filter(row => ['opening_closed', 'restored_once'].includes(row.key));
@@ -139,6 +141,12 @@ function workbookXml(bytes) {
   assert.ok(entries.has('xl/workbook.xml'));
   assert.ok([...entries.keys()].some(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)));
   return entries;
+}
+
+async function openingExcel(rows) {
+  const { OPENING_HEADERS } = require('../src/material-xlsx');
+  const cell = value => value && typeof value === 'object' ? value : typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
+  return require('write-excel-file/node').default([{ sheet: '期初明细', data: [OPENING_HEADERS.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
 }
 
 test('materials dictionaries require administrator roles while all authenticated roles can declare and own their draft rows', { timeout: 45000 }, async t => {
@@ -790,7 +798,7 @@ test('materials upgrade expands the stock CHECK atomically while retaining rows,
   } finally { db.close(); }
 });
 
-test('schema 4 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
+test('schema 5 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
   const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'BACKUP-ISSUE', expiryDate: '2030-05-06' };
   await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '4', amount: '1.01', requestIdempotencyKey: key() }, 201);
@@ -807,7 +815,7 @@ test('schema 4 backups restore issue sources, locations and user mapping; damage
   const cancelled = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
   await f.request('POST', `/api/materials/issues/${cancelled.id}/cancel`, ordinary, { version: 1, reason: '备份取消', requestIdempotencyKey: key() }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
+  assert.equal(backup.schemaVersion, 5); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
   const target = await fixture(t);
   await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
@@ -959,12 +967,12 @@ test('scanned material acceptance lookup filters exact catalog, region and wareh
   assert.equal((await f.request('GET', query, ordinary)).data.total, 3, 'default lookup still includes completed history');
 });
 
-test('schema 4 barcode backup maps creators and rejects damaged mappings while strict schema 2 imports normalize only the new tables', { timeout: 45000 }, async t => {
+test('schema 5 barcode backup maps creators and rejects damaged mappings while strict schema 2 imports normalize only the new tables', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed();
   const previous = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 2);
   const saved = (await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, s.material, { code: '0000Backup', reason: '备份映射' }, 201)).data.barcode;
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_barcodes.length, 1);
+  assert.equal(backup.schemaVersion, 5); assert.equal(backup.data.material_barcodes.length, 1);
   const target = await fixture(t); await target.account('TESTER'); const targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
   for (const change of [
@@ -1151,7 +1159,7 @@ test('unit label collisions roll back sequence, stock and idempotency together',
   assert.equal(maximum.units.length, 1000); assert.equal(maximum.units[999].sequence, 1001);
 });
 
-test('schema 4 restores exact unit codes, lifecycle, rule and user mappings, rejects damaged unit ledgers atomically, and accepts strict schema 3', { timeout: 45000 }, async t => {
+test('schema 5 restores exact unit codes, lifecycle, rule and user mappings, rejects damaged unit ledgers atomically, and accepts strict schema 3', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
   await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, f.admin, { code: 'SKU-ONLY', reason: '包装码与单件分开' }, 201);
   const previous = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 3);
@@ -1164,7 +1172,7 @@ test('schema 4 restores exact unit codes, lifecycle, rule and user mappings, rej
   await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action, 201);
   await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...identity, quantity: '1', amount: '0.34', direction: 'decrease', reason: '盘亏', requestIdempotencyKey: key(), unitIds: [opening.units[1].id] }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 4); assert.equal(backup.data.material_stock_units.length, 3);
+  assert.equal(backup.schemaVersion, 5); assert.equal(backup.data.material_stock_units.length, 3);
   const target = await fixture(t); await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
   for (const change of [
@@ -1203,6 +1211,239 @@ test('schema 4 restores exact unit codes, lifecycle, rule and user mappings, rej
   assert.equal((await oldTarget.request('GET', '/api/materials/catalog', oldMaterial)).data.items[0].trackingMode, 'quantity');
   assert.equal((await oldTarget.request('GET', '/api/materials/stock/units', oldMaterial)).data.total, 0);
   assert.equal((await oldTarget.request('GET', '/api/materials/unit-label-rule', oldMaterial)).data.nextSequence, 1);
+});
+
+test('receipt location is saved atomically with stock and versions and cannot bypass the location grant', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  let order = await f.submit(await f.order(s.material, f.item(s, { quantity: '4' })));
+  const firstBody = f.receiptBody(order, { quantity: '1', amount: '5', location: '试剂柜 A / 01', locationVersion: 0 });
+  const first = (await f.request('POST', '/api/materials/receipts', s.material, firstBody, 201)).data;
+  order = first.request;
+  assert.equal(first.receipt.snapshot.location, '试剂柜 A / 01');
+  let batch = (await f.request('GET', '/api/materials/stock/batches', s.material)).data.items[0];
+  assert.equal(batch.location, '试剂柜 A / 01'); assert.equal(batch.locationVersion, 1); assert.equal(batch.qtyM, 1000);
+  assert.equal((await f.request('POST', '/api/materials/receipts', s.material, firstBody)).data.receipt.id, first.receipt.id);
+  const stale = f.receiptBody(order, { location: '柜 B', locationVersion: 0 });
+  await f.request('POST', '/api/materials/receipts', s.material, stale, 409);
+  assert.deepEqual(await f.get(order.id), order);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: ['materials.read', 'materials.acceptance.write', 'materials.amount.read'] });
+  await f.request('POST', '/api/materials/receipts', s.material, { ...stale, locationVersion: 1 }, 403);
+  const afterPermissionChange = await f.get(order.id);
+  assert.equal(afterPermissionChange.version, order.version); assert.equal(afterPermissionChange.items[0].acceptedQtyM, order.items[0].acceptedQtyM);
+  const unchanged = (await f.request('POST', '/api/materials/receipts', s.material,
+    f.receiptBody(order, { location: batch.location, locationVersion: 1 }), 201)).data;
+  assert.equal(unchanged.receipt.snapshot.location, batch.location);
+  order = unchanged.request;
+  const omitted = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order), 201)).data;
+  assert.equal(omitted.receipt.snapshot.location, batch.location);
+  batch = (await f.request('GET', '/api/materials/stock/batches', s.material)).data.items[0];
+  assert.equal(batch.qtyM, 3000); assert.equal(batch.locationVersion, 1);
+});
+
+test('opening documents keep drafts separate, post once, generate whole-item labels and supplement a closed ledger without reopening it', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const master = await f.catalog(s.category.id, { code: 'UNIT-OPENING', trackingMode: 'unit' });
+  const header = { title: '期初清点', date: '2026-10-19', description: '合成库存' };
+  for (const actor of [f.admin, ordinary]) await f.request('POST', '/api/materials/openings', actor, header, 403);
+  let document = (await f.request('POST', '/api/materials/openings', s.material, header, 201)).data;
+  assert.equal(document.kind, 'opening'); assert.equal(document.status, 'draft');
+  const row = { catalogId: master.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '2', amount: '10', location: '期初柜', locationVersion: 0 };
+  await f.request('POST', `/api/materials/openings/${document.id}/items`, ordinary, { version: document.version, ...row }, 403);
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/items`, s.material, { version: document.version, ...row }, 201)).data;
+  assert.equal(document.items[0].qtyM, 2000); assert.equal(document.items[0].location, '期初柜');
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 0);
+  await f.request('POST', `/api/materials/openings/${document.id}/items`, s.material, { version: 1, ...row }, 409);
+  const action = { version: document.version, requestIdempotencyKey: key() };
+  const posted = await Promise.all([1, 2].map(() => f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, action, [200, 201])));
+  assert.deepEqual(posted.map(result => result.status).sort(), [200, 201]);
+  document = posted[0].data.opening;
+  assert.equal(document.status, 'posted'); assert.equal(document.unitCount, 2); assert.equal(document.items[0].unitCount, 2);
+  const units = (await f.request('GET', `/api/materials/stock/units?openingId=${document.id}`, ordinary)).data;
+  assert.equal(units.total, 2); assert.equal(units.items[0].location, '期初柜');
+  await f.request('PATCH', `/api/materials/openings/${document.id}`, s.material, { ...header, version: document.version }, 409);
+  await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, { ...action, requestIdempotencyKey: key() }, 409);
+  const oldDraft = (await f.request('POST', '/api/materials/openings', s.material, header, 201)).data;
+  await f.request('POST', '/api/materials/stock/opening/close', s.material, { reason: '关闭期初' });
+  await f.request('PATCH', `/api/materials/openings/${oldDraft.id}`, s.material, { ...header, version: oldDraft.version }, 409);
+  await f.request('POST', '/api/materials/openings', s.material, header, 400);
+  const rolePermissions = ['materials.read', 'materials.stock.initialize', 'materials.stock.adjust', 'materials.stock.location', 'materials.amount.read', 'materials.export'];
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: rolePermissions.filter(permission => permission !== 'materials.stock.adjust') });
+  await f.request('POST', '/api/materials/openings', s.material, { ...header, reason: '遗漏一瓶' }, 403);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: rolePermissions });
+  let supplement = (await f.request('POST', '/api/materials/openings', s.material, { ...header, reason: '遗漏一瓶' }, 201)).data;
+  assert.equal(supplement.kind, 'supplement');
+  supplement = (await f.request('POST', `/api/materials/openings/${supplement.id}/items`, s.material,
+    { version: supplement.version, ...row, quantity: '1', locationVersion: 1 }, 201)).data;
+  supplement = (await f.request('POST', `/api/materials/openings/${supplement.id}/post`, s.material,
+    { version: supplement.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  assert.equal(supplement.unitCount, 1); assert.equal((await f.request('GET', '/api/materials/meta', s.material)).data.openingClosed, true);
+  const movements = (await f.request('GET', '/api/materials/stock/movements', s.material)).data.items;
+  assert.equal(movements.length, 2); assert.equal(movements[0].type, 'adjustment'); assert.match(movements[0].reason, /遗漏一瓶/);
+  assert.equal((await f.request('GET', '/api/materials/stock/movements?type=opening', ordinary)).data.total, 1);
+  assert.equal((await f.request('GET', '/api/materials/openings', ordinary)).data.total, 3);
+  const stock = (await f.request('GET', '/api/materials/stock', s.material)).data.items[0];
+  assert.equal(stock.qtyM, 3000); assert.equal(stock.amountCents, 2000);
+});
+
+test('opening XLSX import validates every row before adding a draft, rejects unsafe workbooks and round-trips the exported data', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const master = await f.catalog(s.category.id, { code: '0000123', name: '=Literal name', trackingMode: 'unit' });
+  const header = { title: 'Excel 清点', date: '2026-10-19' };
+  let document = (await f.request('POST', '/api/materials/openings', s.material, header, 201)).data;
+  const template = await f.request('GET', '/api/materials/openings/template.xlsx', s.material);
+  assert.match([...workbookXml(template.bytes).values()].join('\n'), /物资编码/);
+  const rows = [[master.code, s.region.name, 'MAIN', 2, 10.25, 'B1', '2028-01-01', '=柜 A', ''],
+    [s.catalog.code, s.otherRegion.name, 'REAGENT', '1.5', '0', '', '', '', '历史赠品']];
+  const importBody = bytes => ({ version: document.version, name: '盘点.xlsx', content: bytes.toString('base64') });
+  const invalidRows = await openingExcel([rows[0], ['UNKNOWN', ...rows[1].slice(1)]]);
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(invalidRows), 400);
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${document.id}`, s.material)).data, document);
+  const bytes = await openingExcel(rows);
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { ...importBody(bytes), name: 'legacy.xls' }, 400);
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { ...importBody(bytes), content: 'invalid-base64' }, 400);
+  const formula = await openingExcel([[master.code, s.region.name, 'MAIN', { type: 'Formula', value: '1+1' }, 10, '', '', '', '']]);
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(formula), 400);
+  const { zipSync, unzipSync, strToU8 } = require('fflate');
+  const malicious = unzipSync(bytes);
+  malicious['xl/worksheets/sheet1.xml'] = strToU8(new TextDecoder().decode(malicious['xl/worksheets/sheet1.xml']).replace(/<worksheet\b/, '<!DOCTYPE x [<!ENTITY y "bad">]><worksheet'));
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(Buffer.from(zipSync(malicious))), 400);
+  const external = unzipSync(bytes); external['xl/externalLinks/externalLink1.xml'] = strToU8('<externalLink/>');
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(Buffer.from(zipSync(external))), 400);
+  const sparse = unzipSync(bytes);
+  sparse['xl/worksheets/sheet1.xml'] = strToU8(new TextDecoder().decode(sparse['xl/worksheets/sheet1.xml']).replace('<row r="2"', '<row r="1048576"'));
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(Buffer.from(zipSync(sparse))), 400);
+  const huge = Buffer.from(bytes); let central = huge.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  huge.writeUInt32LE(20 * 1024 * 1024, central + 24);
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(huge), 400);
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, importBody(bytes), 201)).data;
+  assert.equal(document.items.length, 2); assert.equal(document.items[0].code, '0000123'); assert.equal(document.items[0].location, '=柜 A');
+  assert.equal(document.items[0].amountCents, 1025); assert.equal(document.items[1].qtyM, 1500);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
+  const exported = await f.request('GET', `/api/materials/openings/${document.id}/export.xlsx`, s.material);
+  const target = (await f.request('POST', '/api/materials/openings', s.material, { ...header, title: '重新导入' }, 201)).data;
+  const copied = (await f.request('POST', `/api/materials/openings/${target.id}/import`, s.material,
+    { version: target.version, name: 'export.xlsx', content: exported.bytes.toString('base64') }, 201)).data;
+  assert.deepEqual(copied.items.map(({ id, ...row }) => row), document.items.map(({ id, ...row }) => row));
+  const limited = await f.customAccount('OPENING_READER', ['materials.read', 'materials.export']);
+  assertNoMoney((await f.request('GET', `/api/materials/openings/${document.id}`, limited)).data);
+  const redacted = await f.request('GET', `/api/materials/openings/${document.id}/export.xlsx`, limited);
+  assert.doesNotMatch([...workbookXml(redacted.bytes).values()].join('\n'), /总金额|10\.25/);
+  const posted = (await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material,
+    { version: document.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  assert.equal(posted.unitCount, 2); assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 2);
+});
+
+test('opening posting rolls back locations, stock, generated codes and retry tokens when a later line fails, and guards position races', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const master = await f.catalog(s.category.id, { code: 'ATOMIC-UNIT', trackingMode: 'unit' });
+  const rule = (await f.request('GET', '/api/materials/unit-label-rule', s.material)).data;
+  await f.request('PUT', '/api/materials/unit-label-rule', s.material, { version: rule.rule.version, template: 'ROLL-{SEQ}', padding: 2, reason: '合成测试' });
+  await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, s.material, { code: 'ROLL-02', reason: '制造后续单件冲突' }, 201);
+  let document = (await f.request('POST', '/api/materials/openings', s.material, { title: '全单事务' }, 201)).data;
+  const row = { catalogId: master.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '1', amount: '1', location: '回滚位置', locationVersion: 0 };
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/items`, s.material, { version: document.version, ...row }, 201)).data;
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/items`, s.material, { version: document.version, ...row, batch: 'SECOND' }, 201)).data;
+  const action = { version: document.version, requestIdempotencyKey: key() };
+  await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, action, 409);
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${document.id}`, s.material)).data, document);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  for (const table of ['material_stock_locations', 'material_stock_movements', 'material_stock_units', 'material_idempotency']) assert.equal(backup.data[table].length, 0, table);
+  assert.equal((await f.request('GET', '/api/materials/unit-label-rule', s.material)).data.nextSequence, 1);
+  await f.request('PUT', '/api/materials/unit-label-rule', s.material, { version: 2, template: 'SUCCESS-{SEQ}', padding: 2, reason: '消除冲突' });
+  const posted = (await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, action, 201)).data.opening;
+  assert.equal(posted.unitCount, 2);
+  let stale = (await f.request('POST', '/api/materials/openings', s.material, { title: '位置版本冲突' }, 201)).data;
+  stale = (await f.request('POST', `/api/materials/openings/${stale.id}/items`, s.material, { version: stale.version, ...row, locationVersion: 1 }, 201)).data;
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...row, batch: '', expiryDate: '', version: 1, location: '移动后的柜', reason: '位置竞争' });
+  await f.request('POST', `/api/materials/openings/${stale.id}/post`, s.material, { version: stale.version, requestIdempotencyKey: key() }, 409);
+  assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 2);
+  const max = (await f.request('POST', '/api/materials/openings', s.material, { title: '生成上限' }, 201)).data;
+  let large = (await f.request('POST', `/api/materials/openings/${max.id}/items`, s.material, { version: max.version, ...row, batch: 'MAX-A', quantity: '600' }, 201)).data;
+  large = (await f.request('POST', `/api/materials/openings/${max.id}/items`, s.material, { version: large.version, ...row, batch: 'MAX-B', quantity: '600' }, 201)).data;
+  await f.request('POST', `/api/materials/openings/${large.id}/post`, s.material, { version: large.version, requestIdempotencyKey: key() }, 400);
+});
+
+test('opening import rechecks login and current grants after asynchronous parsing before writing or returning amounts', async t => {
+  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
+  db.exec("CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT); INSERT INTO users VALUES(1,'synthetic','Synthetic');");
+  const authorized = { id: 1, role: 'MATERIAL', permissions: ['materials.read', 'materials.stock.initialize', 'materials.amount.read', 'materials.stock.location'] };
+  let reads = 0, fresh = authorized, payload, response;
+  const materials = createMaterials({ db, body: async () => payload, send: (_res, status, data) => { response = { status, data }; },
+    fail: (status, message) => Object.assign(new Error(message), { status }), log() {}, hasPermission: (user, permission) => user.permissions.includes(permission),
+    tokenUser: () => ++reads === 1 ? authorized : fresh, uploads: path.join(root, 'artifacts/cache', require('../package.json').version, 'unused-import-test') });
+  db.exec(`INSERT INTO material_categories(id,name,created_by) VALUES(1,'分类',1);
+    INSERT INTO material_regions(id,name,created_by) VALUES(1,'区域',1);
+    INSERT INTO material_catalog(id,code,name,spec,unit,category_id,created_by) VALUES(1,'RACE-IMPORT','物资','规格','瓶',1,1);
+    INSERT INTO material_openings(id,no,title,date,kind,created_by,created_at) VALUES(1,'QC-20261019-1234567890','草稿','2026-10-19','opening',1,'2026-10-19T00:00:00.000Z');`);
+  const bytes = await openingExcel([['RACE-IMPORT', '区域', 'MAIN', 1, 3.25, '', '', '异步柜', '']]);
+  payload = { version: 1, name: 'race.xlsx', content: bytes.toString('base64') };
+  for (const [current, expected] of [
+    [null, 401],
+    [{ ...authorized, permissions: authorized.permissions.filter(permission => permission !== 'materials.stock.initialize') }, 403],
+    [{ ...authorized, permissions: authorized.permissions.filter(permission => permission !== 'materials.amount.read') }, 403],
+    [{ ...authorized, permissions: authorized.permissions.filter(permission => permission !== 'materials.stock.location') }, 403]
+  ]) {
+    reads = 0; fresh = current;
+    await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import'));
+    assert.equal(reads, 2); assert.equal(response.status, expected);
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM material_opening_items').get().total, 0);
+    assert.equal(db.prepare('SELECT version FROM material_openings WHERE id=1').get().version, 1);
+  }
+  reads = 0; fresh = authorized;
+  await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import'));
+  assert.equal(response.status, 201); assert.equal(response.data.items[0].amountCents, 325);
+});
+
+test('schema 5 restores opening and supplement documents, exact labels and drafts while strictly accepting schema 4 without invented documents', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  await f.catalog(s.category.id, { code: 'RESTORE-UNIT', trackingMode: 'unit' });
+  const master = (await f.request('GET', '/api/materials/catalog?trackingMode=unit', s.material)).data.items.find(row => row.code === 'RESTORE-UNIT');
+  let document = (await f.request('POST', '/api/materials/openings', s.material, { title: '恢复期初' }, 201)).data;
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/items`, s.material,
+    { version: document.version, catalogId: master.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '2', amount: '3', location: '保留柜', locationVersion: 0 }, 201)).data;
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, { version: document.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  await f.request('POST', '/api/materials/stock/opening/close', s.material, { reason: '结束期初' });
+  const draft = (await f.request('POST', '/api/materials/openings', s.material, { title: '补录草稿', reason: '等待核对' }, 201)).data;
+  let supplement = (await f.request('POST', '/api/materials/openings', s.material, { title: '已补录', reason: '补齐漏登' }, 201)).data;
+  supplement = (await f.request('POST', `/api/materials/openings/${supplement.id}/items`, s.material,
+    { version: supplement.version, catalogId: master.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '1', amount: '1', location: '保留柜', locationVersion: 1 }, 201)).data;
+  supplement = (await f.request('POST', `/api/materials/openings/${supplement.id}/post`, s.material,
+    { version: supplement.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.equal(backup.schemaVersion, 5); assert.equal(backup.data.material_openings.length, 3);
+  const target = await fixture(t); await target.account('TESTER'); const material = await target.account('MATERIAL');
+  for (const change of [
+    data => { data.material_opening_items[0].qty_m += 1000; },
+    data => { data.material_openings[0].status = 'draft'; data.material_openings[0].posted_by = null; data.material_openings[0].posted_at = null; },
+    data => { data.material_opening_items[0].movement_id = null; },
+    data => { data.material_opening_items[0].location = '损坏位置'; },
+    data => { data.material_openings[1].reason = ''; },
+    data => { data.material_stock_movements[0].source_key = 'opening-doc:9999:9999'; }
+  ]) {
+    const damaged = structuredClone(backup); change(damaged.data);
+    await target.request('POST', '/api/materials/restore', target.admin, damaged, 400);
+    assert.equal((await target.request('GET', '/api/materials/openings', material)).data.total, 0);
+  }
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  const restored = (await target.request('GET', `/api/materials/openings/${document.id}`, material)).data;
+  assert.equal(restored.createdBy, material.id); assert.equal(restored.postedBy, material.id); assert.equal(restored.unitCount, 2);
+  assert.equal(restored.items[0].location, '保留柜'); assert.equal(restored.items[0].movementId, document.items[0].movementId);
+  assert.equal((await target.request('GET', `/api/materials/openings/${draft.id}`, material)).data.status, 'draft');
+  const restoredSupplement = (await target.request('GET', `/api/materials/openings/${supplement.id}`, material)).data;
+  assert.equal(restoredSupplement.kind, 'supplement'); assert.equal(restoredSupplement.status, 'posted'); assert.equal(restoredSupplement.postedBy, material.id);
+  assert.equal((await target.request('GET', `/api/materials/stock/units?openingId=${supplement.id}`, material)).data.total, 1);
+  const legacy = await fixture(t), legacySeed = await legacy.seed();
+  await legacy.request('POST', '/api/materials/stock/opening', legacySeed.material,
+    { catalogId: legacySeed.catalog.id, regionId: legacySeed.region.id, warehouse: 'MAIN', quantity: '3', amount: '3', requestIdempotencyKey: key() }, 201);
+  const old = (await legacy.request('GET', '/api/materials/backup', legacy.admin)).data;
+  old.schemaVersion = 4; delete old.data.material_openings; delete old.data.material_opening_items;
+  const oldTarget = await fixture(t), oldMaterial = await oldTarget.account('MATERIAL');
+  const mixed = structuredClone(old); mixed.data.material_openings = [];
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, mixed, 400);
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, old);
+  assert.equal((await oldTarget.request('GET', '/api/materials/openings', oldMaterial)).data.total, 0);
+  assert.equal((await oldTarget.request('GET', '/api/materials/stock/movements?type=opening', oldMaterial)).data.total, 1);
 });
 
 test('legacy SQLite catalogs migrate to quantity mode without inventing unit stock', () => {

@@ -1,0 +1,35 @@
+# Optional overlay: use with the existing docker-compose.yml and its original project/data paths.
+version: "3.8"
+services:
+  labos-https:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      labos:
+        condition: service_started
+    ports:
+      - "${LABOS_HTTPS_PORT:-8443}:443"
+    environment:
+      LABOS_HTTPS_HOST: "${LABOS_HTTPS_HOST:?Set LABOS_HTTPS_HOST to the NAS LAN IP or hostname without scheme or port}"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./https/data
+        target: /data
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ./https/config
+        target: /config
+        bind:
+          create_host_path: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

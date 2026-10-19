@@ -49,6 +49,9 @@ class Element {
   get textContent() { return this._text + this.children.map(node => node.textContent).join(''); }
   set textContent(value) { this._text = String(value); this.children = []; }
   appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  append(child) { return this.appendChild(child); }
+  remove() { if(this.parent)this.parent.children.splice(this.parent.children.indexOf(this),1); }
+  contains(node) { return node===this||this.children.some(child=>child.contains(node)); }
   addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
   setAttribute(name, value) { this.attrs[name] = value; }
   removeAttribute(name) { delete this.attrs[name]; }
@@ -132,10 +135,10 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
   const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
-    materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [], materialLists: {}, materialResponse: null,
+    materialOpeningClosed: false, materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [], materialLists: {}, materialResponse: null,
     materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
-  const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value) });
+  const response = (value, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(value), blob: async () => new Blob([JSON.stringify(value)]) });
   const fetch = async (input, options = {}) => {
     const url = new URL(input, 'http://localhost'), method = options.method || 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
@@ -164,11 +167,11 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/dashboard') return response({ totals: {}, finance: { income: 0, expense: 0 }, warnings: 0 });
     if (url.pathname === '/api/permissions') return response(state.permissionData || { catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
     if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: state.auth.user.role }]);
-    if (url.pathname === '/api/materials/meta') return response({ capabilities: state.materialCapabilities, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false });
+    if (url.pathname === '/api/materials/meta') return response({ capabilities: state.materialCapabilities, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: state.materialOpeningClosed });
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
-    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues'].includes(url.pathname)) {
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings'].includes(url.pathname)) {
       const entries = state.materialLists[url.pathname.slice('/api/materials'.length)] || [];
       return response({ items: entries, total: entries.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
     }
@@ -327,7 +330,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material-labels.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -589,7 +592,7 @@ test('new material can be submitted before catalog matching, with accounting blo
 
 async function materialApp(manager = true) {
   const app = await browser({ id: 1, role: manager ? 'MATERIAL' : 'USER', permissions: [] });
-  app.state.materialCapabilities = { createRequest: true, createIssue: true, viewAmount: manager, manageCatalog: manager, receive: manager, manageLocation: manager, issueStock: manager, adjustStock: manager, submitRequest: manager };
+  app.state.materialCapabilities = { createRequest: true, createIssue: true, viewAmount: manager, manageCatalog: manager, receive: manager, manageLocation: manager, issueStock: manager, adjustStock: manager, submitRequest: manager, initialize: manager, export: manager };
   const row = { catalogId: 5, code: 'MAT-5', name: '合成物资', spec: '测试规格', unit: '件', categoryId: 1, categoryName: '合成分类', regionId: 2, regionName: '合成区域', warehouse: 'MAIN', batch: '', expiryDate: '', location: '', locationVersion: 1, qtyM: 10000, amountCents: 1000, lastMovementAt: '2026-10-17T01:02:03Z' };
   Object.assign(app.state.materialLists, { '/categories': [{ id: 1, name: row.categoryName }], '/regions': [{ id: 2, name: row.regionName }], '/catalog': [{ ...row, id: row.catalogId }], '/stock': [row], '/stock/batches': [row] });
   const item = { ...row, id: 11, requestId: 101, qtyM: 10000, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 10000, receiptStatus: 'pending', version: 1, canEdit: true };
@@ -800,7 +803,7 @@ test('internal batch scans narrow acceptance by warehouse and region and only pr
   await click('[data-mw=scan-receive]'); await click('[data-mw=scan-receive-item]');
   assert.equal(app.$('#mw-fields [name=batch]').value, 'LOT"<&'); assert.equal(app.$('#mw-fields [name=expiryDate]').value, '2028-05-06');
   assert.match(app.$('#mw-intro').textContent, /以本次实际到货为准/);
-  fill({ batch: '核对后的到货批次', expiryDate: '2028-06-01', quantity: '1', amount: '1' }); await submit();
+  fill({ batch: '核对后的到货批次', expiryDate: '2028-06-01', quantity: '1', amount: '1' }); await click('[data-mw=position-read]'); await submit();
   assert.equal(receipt.batch, '核对后的到货批次'); assert.equal(receipt.expiryDate, '2028-06-01');
   await click('[data-mw=scan-receive]'); item.remainingQtyM = 0; await click('[data-mw=scan-receive-item]');
   assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /已无待验数量/);
@@ -929,27 +932,13 @@ test('catalog barcode binding preserves scanned strings and rejected input, repl
   assert.equal(ordinary.app.requests.some(entry => entry.url.pathname.endsWith('/barcodes')), false);
 });
 
-test('QR labels open synchronously in an isolated printable window, escape material text and wait for the image before enabling print', async () => {
-  const { app, row, click } = await materialApp(); row.name = '<img src=x onerror=alert(1)>'; row.qrPayload = stockQr(row);
-  const opened = [], events = [], revoked = []; let release;
-  app.context.open = () => {
-    events.push('open'); const document = new Element('document'); document.open = () => {}; document.write = html => { document.innerHTML = html; }; document.close = () => {};
-    document.getElementById = id => document.querySelector('#' + id);
-    const popup = { document, closed: false, prints: 0, close() { this.closed = true; }, print() { this.prints++; }, addEventListener() {} }; opened.push(popup); return popup;
-  };
-  app.context.URL = class extends URL { static createObjectURL() { return 'blob:synthetic-label'; } static revokeObjectURL(value) { revoked.push(value); } };
-  const scanner = materialScanner(app, async () => null, () => { events.push('qr'); return new Promise(resolve => { release = resolve; }); });
-  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]');
-  const printing = click('[data-mw=print-label]'); assert.deepEqual(events, ['open', 'qr']);
-  assert.equal(opened[0].opener, null); assert.equal(opened[0].document.getElementById('label-print').disabled, true);
-  release(new Blob(['synthetic QR'], { type: 'image/png' })); await printing;
-  const popup = opened[0], image = popup.document.getElementById('stock-qr'); assert.equal(scanner.qr[0], row.qrPayload);
-  assert.equal(popup.document.querySelectorAll('img').length, 1); assert.equal(popup.document.querySelector('script'), null);
-  assert.match(popup.document.textContent, /扫码后查询实时库存/); assert.doesNotMatch(popup.document.textContent, /¥10\.00/);
-  assert.equal(popup.document.getElementById('label-print').disabled, true); image.onload(); popup.document.getElementById('label-print').click();
-  assert.equal(popup.prints, 1); assert.deepEqual(revoked, ['blob:synthetic-label']);
-  const stale = click('[data-mw=print-label]'); await click({ dataset: { mw: 'page', page: 'requests' } }); release(new Blob(['late'])); await stale;
-  assert.equal(opened[1].closed, true);
+test('batch labels delegate exact identity to the shared template module and keep a page validity guard', async () => {
+  const { app, row, click } = await materialApp();row.qrPayload=stockQr(row);const calls=[];
+  app.context.MaterialLabels={configure(){calls.push('configure');},printBatch(batch,options){calls.push({batch,options});}};
+  await click('[data-mw=label-template]');assert.equal(calls[0],'configure');
+  await click({dataset:{mw:'page',page:'inventory'}});await click('[data-mw=batches]');await click('[data-mw=print-label]');
+  assert.equal(calls[1].batch.qrPayload,row.qrPayload);assert.equal(calls[1].batch.warehouse,'MAIN');assert.equal(calls[1].options.isActive(),true);
+  await click({dataset:{mw:'page',page:'requests'}});assert.equal(calls[1].options.isActive(),false);
 });
 
 const singleUnit = (row, values = {}) => ({ ...row, id: 71, code: 'UNIT-000071', catalogCode: row.code, qrPayload: 'UNIT-000071', status: 'in_stock', ...values });
@@ -1084,35 +1073,58 @@ test('negative individual-stock adjustments require exactly the chosen distinct 
   assert.deepEqual(adjustment.unitCodes, ['UNIT-000071', 'UNIT-000072']); assert.equal(adjustment.direction, 'decrease'); assert.equal(adjustment.quantity, '2'); assert.ok(adjustment.requestIdempotencyKey);
 });
 
-test('individual labels generate Code128 and QR in an isolated window and wait for both images before printing or discard late results', { timeout: 5000 }, async () => {
-  const { app, row, click } = await materialApp(); row.trackingMode = 'unit';
-  const unit = singleUnit(row, { name: '<img src=x onerror=alert(1)>', location: '柜 <A>' }); app.state.materialLists['/stock/units'] = [unit];
-  const opened = [], events = [], revoked = []; let resolveQr, resolveBarcode, serial = 0;
-  app.context.open = () => {
-    events.push('open'); const document = new Element('document'); document.open = () => {}; document.write = html => { document.innerHTML = html; }; document.close = () => {};
-    document.getElementById = id => document.querySelector('#' + id);
-    const popup = { document, closed: false, prints: 0, listeners: {}, close() { this.closed = true; this.listeners.pagehide?.(); }, print() { this.prints++; }, addEventListener(type, listener) { this.listeners[type] = listener; } }; opened.push(popup); return popup;
+test('unit labels and BarTender export reuse exact scoped rows and cancel after navigation',async()=>{
+  const {app,row,click}=await materialApp();row.trackingMode='unit';const unit=singleUnit(row);app.state.materialLists['/stock/units']=[unit];const calls=[];
+  app.context.MaterialLabels={printUnits(rows,options){calls.push({kind:'print',rows,options});},async exportData(provider,options){calls.push({kind:'export',rows:await provider(),options});},configure(){}};
+  await click({dataset:{mw:'page',page:'inventory'}});await click('[data-mw=batches]');await click('[data-mw=batch-units]');
+  await click('[data-mw=unit-print]');assert.equal(calls[0].rows[0].code,unit.code);assert.equal(calls[0].options.isActive(),true);
+  await click('[data-mw=unit-export]');assert.equal(calls[1].rows[0].code,unit.code);
+  const query=app.requests.filter(r=>r.url.pathname==='/api/materials/stock/units').at(-1).url.searchParams;assert.equal(query.get('batch'),'');assert.equal(query.get('expiryDate'),'');assert.equal(query.get('catalogId'),'5');
+  await click({dataset:{mw:'page',page:'requests'}});assert.equal(calls[0].options.isActive(),false);assert.equal(calls[1].options.isActive(),false);
+});
+
+test('acceptance exposes storage location, guards the selected batch version and preserves input after a conflict',async()=>{
+  const {app,row,item,request,click,fill,submit}=await materialApp();request.status='submitted';row.location='试剂柜 A';row.locationVersion=3;let receipt,writes=0;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/receipts'&&method==='POST'){writes++;if(writes===1)return {body:{error:'位置版本已变化'},status:409};receipt=body;return {body:{request}};}};
+  await click({dataset:{mw:'page',page:'acceptance'}});app.state.materialAcceptance=[item];await click({dataset:{mw:'refresh'}});await click('[data-mw=receive]');
+  assert.equal(app.$('#mw-fields [name=location]').value,'试剂柜 A');fill({quantity:'1',amount:'2.50',location:'试剂柜 B'});await submit();
+  assert.equal(app.$('#mw-fields [name=location]').value,'试剂柜 B');assert.equal(app.$('#mw-dialog [data-mw=reload-form]').hidden,false);
+  row.location='他人更新的柜';row.locationVersion=4;await click('[data-mw=reload-form]');await submit();
+  assert.equal(receipt.location,'试剂柜 B');assert.equal(receipt.locationVersion,4);assert.equal(receipt.batch,'');assert.equal(receipt.expiryDate,'');
+  await click('[data-mw=receive]');fill({quantity:'1',amount:'2',batch:'新到货批次',location:'柜 C'});await submit();assert.match(app.$('#mw-error').textContent,/读取本批当前位置/);assert.equal(writes,2);
+  await click('[data-mw=position-read]');await submit();assert.equal(receipt.batch,'新到货批次');assert.equal(receipt.locationVersion,0);
+});
+
+test('stock row application selects a precise real batch before creating a request',async()=>{
+  const {app,row,click}=await materialApp(false);app.state.materialLists['/stock/batches']=[{...row,batch:'批次甲',location:'柜 A'},{...row,batch:'批次乙',location:'柜 B'}];
+  await click({dataset:{mw:'page',page:'inventory'}});assert.ok(app.$('[data-mw=stock-issue]'));await click('[data-mw=stock-issue]');assert.equal(app.$('#mw-dialog').open,false);assert.equal(app.$('#mw-view-body').querySelectorAll('[data-mw=issue-create]').length,2);
+  const actions=app.$('#mw-view-body').querySelectorAll('[data-mw=issue-create]');await click(actions[1]);assert.match(app.$('#mw-intro').textContent,/批次乙/);assert.match(app.$('#mw-intro').textContent,/柜 B/);
+});
+
+test('opening documents save multiple lines, import and export Excel, confirm posting once and retain generated labels',async()=>{
+  const {app,row,click,fill,submit}=await materialApp();const doc={id:81,no:'QC-81',kind:'opening',title:'期初草稿',date:'2026-10-19',description:'',version:1,status:'draft',creatorName:'tester',items:[],itemCount:0,unitCount:0};const posts=[];let created,imported;
+  app.context.FileReader=class{readAsDataURL(){this.result='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,c3ludGhldGlj';this.onload();}};
+  app.state.materialResponse=({url,method,body})=>{
+    if(url.pathname==='/api/materials/openings'&&method==='POST'){created=body;Object.assign(doc,body);return {body:doc,status:201};}
+    if(url.pathname==='/api/materials/openings'&&method==='GET')return {body:{items:[doc],total:1,page:1,pageSize:50}};
+    if(url.pathname==='/api/materials/openings/81'&&method==='GET')return {body:doc};
+    if(url.pathname==='/api/materials/openings/81/items'&&method==='POST'){assert.equal(body.version,doc.version);assert.equal(body.locationVersion,1);doc.items.push({...row,...body,id:91+doc.items.length,version:1,qtyM:Number(body.quantity)*1000,amountCents:Number(body.amount)*100,trackingMode:'unit'});doc.itemCount=doc.items.length;doc.version++;return {body:doc,status:201};}
+    if(url.pathname==='/api/materials/openings/81/import'){imported=body;assert.equal(body.version,doc.version);doc.items.push({...doc.items[0],id:93});doc.itemCount=doc.items.length;doc.version++;return {body:doc,status:201};}
+    if(url.pathname==='/api/materials/openings/81/post'){posts.push(body);if(posts.length===1)throw Error('simulated response loss');doc.status='posted';doc.unitCount=doc.items.length;doc.version++;return {body:{opening:doc,openingClosed:false},status:201};}
   };
-  app.context.URL = class extends URL { static createObjectURL() { return 'blob:unit-' + ++serial; } static revokeObjectURL(value) { revoked.push(value); } };
-  const scanner = materialScanner(app, async () => null,
-    () => { events.push('qr'); return new Promise(resolve => { resolveQr = resolve; }); },
-    () => { events.push('barcode'); return new Promise(resolve => { resolveBarcode = resolve; }); });
-  await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=batches]'); await click('[data-mw=batch-units]');
-  const printing = click('[data-mw=unit-print]'); assert.deepEqual(events, ['open', 'barcode', 'qr']);
-  const popup = opened[0], button = popup.document.getElementById('unit-label-print'); assert.equal(popup.opener, null); assert.equal(button.disabled, true);
-  resolveQr(new Blob(['QR'])); resolveBarcode(new Blob(['Code128'])); await new Promise(setImmediate);
-  assert.deepEqual(scanner.barcode, [unit.code]); assert.deepEqual(scanner.qr, [unit.qrPayload]);
-  const images = popup.document.querySelectorAll('img'); assert.equal(images.length, 2); assert.equal(popup.document.querySelector('script'), null);
-  assert.equal(images.filter(image => image.attrs.alt === '单件条形码').length, 1); assert.equal(images.filter(image => image.attrs.alt === '单件二维码').length, 1);
-  assert.match(popup.document.textContent, /UNIT-000071/); assert.doesNotMatch(popup.document.textContent, /¥10\.00/);
-  assert.equal(button.disabled, true); images[0].onload(); await new Promise(setImmediate); assert.equal(button.disabled, true);
-  images[1].onload(); await printing; assert.equal(button.disabled, false); button.click(); assert.equal(popup.prints, 1);
-  popup.listeners.pagehide(); assert.deepEqual(revoked, ['blob:unit-1', 'blob:unit-2']);
-  const late = click('[data-mw=unit-print]'); await click({ dataset: { mw: 'page', page: 'requests' } });
-  resolveQr(new Blob(['late QR'])); resolveBarcode(new Blob(['late barcode'])); await new Promise(setImmediate);
-  const discardedBeforeImageLoad = opened[1].closed;
-  if (!discardedBeforeImageLoad) for (const image of opened[1].document.querySelectorAll('img')) image.onload?.();
-  await late;
-  assert.equal(discardedBeforeImageLoad, true, 'a late result must close before inserting or loading images');
-  assert.equal(serial, 2, 'stale generation must not create image URLs');
+  await click({dataset:{mw:'page',page:'openings'}});assert.ok(app.$('[data-mw=new-opening]'));await click('[data-mw=new-opening]');fill({title:'合成期初单',date:'2026-10-19'});await submit();assert.equal(created.title,'合成期初单');
+  for(let i=0;i<2;i++){await click('[data-mw=opening-add-item]');fill({catalogId:'5',code:row.code,name:row.name,spec:row.spec,unit:row.unit,categoryId:'1',regionId:'2',warehouse:'MAIN',quantity:'1',amount:'2.50',location:'柜 A'});await click('[data-mw=position-read]');await submit();}
+  assert.equal(doc.items.length,2);await click('[data-mw=opening-template]');await click('[data-mw=opening-export]');assert.ok(app.requests.some(r=>r.url.pathname.endsWith('/openings/template.xlsx')));assert.ok(app.requests.some(r=>r.url.pathname.endsWith('/openings/81/export.xlsx')));
+  await click('[data-mw=opening-import]');assert.equal(app.$('#mw-fields [name=file]').attrs.accept,'.xlsx');fill({file:{name:'synthetic.xlsx',size:9,type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});await submit();assert.equal(imported.content,'c3ludGhldGlj');assert.equal(doc.items.length,3);
+  await click('[data-mw=opening-post]');assert.match(app.$('#mw-intro').textContent,/生成 3 个/);await submit();assert.match(app.$('#mw-error').textContent,/按原内容重试/);await submit();assert.deepEqual(posts[0],posts[1]);assert.ok(posts[0].requestIdempotencyKey);
+  assert.equal(app.$('[data-mw=opening-post]'),null);assert.ok(app.$('[data-mw=opening-units]'));await click('[data-mw=opening-units]');const lookup=app.requests.filter(r=>r.url.pathname==='/api/materials/stock/units').at(-1);assert.equal(lookup.url.searchParams.get('openingId'),'81');
+});
+
+test('closed openings stay visible and read-only while stock supplements require a reason and adjustment permission',async()=>{
+  const {app,click,fill,submit}=await materialApp();app.state.materialOpeningClosed=true;const doc={id:82,no:'QC-82',kind:'opening',title:'闭账前草稿',date:'2026-10-19',version:1,status:'draft',items:[]};let created;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/openings/82')return {body:doc};if(url.pathname==='/api/materials/openings'&&method==='POST'){created=body;return {body:{...doc,...body,id:83,no:'BL-83',kind:'supplement'}};}if(url.pathname==='/api/materials/openings/83')return {body:{...doc,...created,id:83,no:'BL-83',kind:'supplement'}};};
+  await click({dataset:{mw:'refresh'}});assert.ok(app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));await click({dataset:{mw:'page',page:'openings'}});assert.match(app.$('[data-mw=new-opening]').textContent,/存量补录/);assert.ok(app.$('[data-mw=opening-legacy]'));
+  await click({dataset:{mw:'opening-detail',id:'82'}});assert.equal(app.$('[data-mw=opening-add-item]'),null);assert.ok(app.$('[data-mw=opening-export]'));assert.match(app.$('#page').textContent,/原期初单据保持只读/);
+  await click('[data-mw=opening-back]');await click('[data-mw=new-opening]');fill({title:'已有账本补录',date:'2026-10-19'});await submit();assert.equal(created,undefined);assert.match(app.$('#mw-error').textContent,/补录原因/);fill({reason:'盘点发现遗漏登记的存量'});await submit();assert.equal(created.reason,'盘点发现遗漏登记的存量');assert.match(app.$('#page').textContent,/补录原因/);
+  const ordinary=await materialApp(false);ordinary.app.state.materialOpeningClosed=true;await ordinary.click({dataset:{mw:'refresh'}});await ordinary.click({dataset:{mw:'page',page:'openings'}});assert.ok(ordinary.app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));assert.equal(ordinary.app.$('[data-mw=new-opening]'),null);
 });

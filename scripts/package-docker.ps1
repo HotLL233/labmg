@@ -52,6 +52,10 @@ try {
         'deploy/docker-compose.yml' = 'docker-compose.yml'
         'deploy/.env.example' = '.env.example'
         'docs/SYNOLOGY.md' = 'SYNOLOGY.md'
+        'deploy/docker-compose.https.yml' = 'docker-compose.https.yml'
+        'deploy/Caddyfile' = 'Caddyfile'
+        'docs/SCANNING_HTTPS.md' = 'SCANNING_HTTPS.md'
+        'docs/LABEL_PRINTING.md' = 'LABEL_PRINTING.md'
     }
     foreach ($source in $deploymentFiles.Keys) {
         $destination = Get-ArtifactPath (Join-Path $release $deploymentFiles[$source]) $release

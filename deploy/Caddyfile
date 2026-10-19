@@ -1,0 +1,10 @@
+{
+    admin off
+    auto_https disable_redirects
+    skip_install_trust
+}
+
+https://{$LABOS_HTTPS_HOST}:443 {
+    tls internal
+    reverse_proxy labos:3000
+}

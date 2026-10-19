@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { readOpeningWorkbook, OPENING_HEADERS } = require('./material-xlsx');
 
 const WAREHOUSES = [
   { code: 'MAIN', name: '默认仓库' },
@@ -16,10 +17,12 @@ const STOCK_QR_PREFIX = 'LABOS-STOCK:1:';
 const TABLES = [
   'material_categories', 'material_regions', 'material_catalog', 'material_barcodes', 'material_requests',
   'material_request_items', 'material_request_revisions', 'material_receipts',
-  'material_stock_locations', 'material_issues', 'material_stock_movements', 'material_stock_units',
+  'material_stock_locations', 'material_issues', 'material_openings', 'material_stock_movements',
+  'material_opening_items', 'material_stock_units',
   'material_attachments', 'material_state', 'material_idempotency'
 ];
-const V3_TABLES = TABLES.filter(table => table !== 'material_stock_units');
+const V4_TABLES = TABLES.filter(table => !['material_openings', 'material_opening_items'].includes(table));
+const V3_TABLES = V4_TABLES.filter(table => table !== 'material_stock_units');
 const V2_TABLES = V3_TABLES.filter(table => table !== 'material_barcodes');
 const V1_TABLES = V2_TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
@@ -111,6 +114,24 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       batch TEXT NOT NULL DEFAULT '', expiry_date TEXT NOT NULL DEFAULT '', date TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '', actor_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS material_openings(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, no TEXT NOT NULL UNIQUE, title TEXT NOT NULL, date TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL CHECK(kind IN ('opening','supplement')),
+      reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','posted')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0), created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL, posted_by INTEGER REFERENCES users(id), posted_at TEXT,
+      CHECK((status='draft' AND posted_by IS NULL AND posted_at IS NULL) OR
+        (status='posted' AND posted_by IS NOT NULL AND posted_at IS NOT NULL))
+    );
+    CREATE TABLE IF NOT EXISTS material_opening_items(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, opening_id INTEGER NOT NULL REFERENCES material_openings(id),
+      catalog_id INTEGER NOT NULL REFERENCES material_catalog(id), region_id INTEGER NOT NULL REFERENCES material_regions(id),
+      warehouse TEXT NOT NULL, qty_m INTEGER NOT NULL CHECK(qty_m>0), amount_cents INTEGER NOT NULL CHECK(amount_cents>=0),
+      batch TEXT NOT NULL DEFAULT '', expiry_date TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '',
+      location_version INTEGER NOT NULL CHECK(location_version>=0), zero_amount_reason TEXT NOT NULL DEFAULT '',
+      snapshot TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+      movement_id INTEGER UNIQUE REFERENCES material_stock_movements(id)
+    );
     CREATE TABLE IF NOT EXISTS material_attachments(
       id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER REFERENCES material_requests(id),
       receipt_id INTEGER REFERENCES material_receipts(id), name TEXT NOT NULL, mime_type TEXT NOT NULL,
@@ -131,6 +152,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     CREATE INDEX IF NOT EXISTS material_stock_key ON material_stock_movements(catalog_id,warehouse,region_id);
     CREATE INDEX IF NOT EXISTS material_attachment_request ON material_attachments(request_id,receipt_id);
     CREATE INDEX IF NOT EXISTS material_issue_owner ON material_issues(created_by,status,id);
+    CREATE INDEX IF NOT EXISTS material_opening_item_parent ON material_opening_items(opening_id,id);
   `);
 
   // SQLite cannot alter a CHECK constraint. No table points to movements, so foreign keys stay enabled.
@@ -606,6 +628,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const receipt = checkedReceipt(url.searchParams.get('receiptId'));
       filters.push('s.receipt_id=?'); args.push(receipt.type === 'reversal' ? receipt.original_receipt_id : receipt.id);
     }
+    if (url.searchParams.has('openingId')) {
+      const document = opening(url.searchParams.get('openingId'));
+      filters.push('EXISTS(SELECT 1 FROM material_opening_items oi WHERE oi.opening_id=? AND oi.movement_id=s.id)');
+      args.push(document.id);
+    }
     if (url.searchParams.has('issueId')) {
       const issue = checkedIssue(url.searchParams.get('issueId'), user); filters.push('e.source_key=?'); args.push(`issue:${issue.id}`);
     }
@@ -628,6 +655,104 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return { id: row.id, catalogId: row.catalog_id, regionId: row.region_id, warehouse: row.warehouse,
       batch: row.batch, expiryDate: row.expiry_date, location: row.location, version: row.version,
       reason: row.reason, actorId: row.actor_id, actorName: actorName(row.actor_id), updatedAt: row.updated_at };
+  }
+  function intakeLocation(identity, input, user, reason, save = true) {
+    const current = stockLocation(identity);
+    if (!Object.hasOwn(input, 'location')) return current?.location || '';
+    const value = text(input.location, '存放位置', 200, true);
+    if (!Number.isSafeInteger(input.locationVersion) || input.locationVersion < 0) error(400, '请提供读取时的位置整数版本');
+    if (input.locationVersion !== (current?.version || 0)) conflict('库存位置已变化，请重新读取批次位置后保存');
+    if (value === (current?.location || '')) return value;
+    requireManager(user, 'materials.stock.location');
+    if (save) {
+      run(`INSERT INTO material_stock_locations(catalog_id,region_id,warehouse,batch,expiry_date,location,version,reason,actor_id,updated_at)
+        VALUES(?,?,?,?,?,?,1,?,?,?) ON CONFLICT(catalog_id,warehouse,region_id,batch,expiry_date)
+        DO UPDATE SET location=excluded.location,version=material_stock_locations.version+1,reason=excluded.reason,actor_id=excluded.actor_id,updated_at=excluded.updated_at`,
+      ...identityArgs(identity), value, reason, user.id, now());
+      log(user, 'LOCATION', 'material_stock_locations', stockLocation(identity).id, reason);
+    }
+    return value;
+  }
+  function opening(id) {
+    const row = one('SELECT * FROM material_openings WHERE id=?', integer(id));
+    if (!row) error(404, '期初或补录单不存在');
+    return row;
+  }
+  function requireOpeningRead(user) {
+    if (!permit(user, 'materials.read') && !material(user, 'materials.stock.initialize') && !material(user, 'materials.stock.adjust')) error(403, '没有期初或补录单读取权限');
+  }
+  function openingWritable(document, input, user) {
+    requireMaterial(user, document.kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize');
+    if (document.status !== 'draft') conflict('已入库单据不能修改');
+    if (document.kind === 'opening' && openingClosed()) conflict('期初登记已经关闭，请新建有原因的库存补录单');
+    if (input.version !== document.version) conflict('单据已变化，请重新读取后保存');
+  }
+  function openingItemInput(input, user, old = {}) {
+    const identity = stockIdentity({ catalogId: input.catalogId ?? old.catalog_id, regionId: input.regionId ?? old.region_id,
+      warehouse: input.warehouse ?? old.warehouse, batch: input.batch ?? old.batch ?? '', expiryDate: input.expiryDate ?? old.expiry_date ?? '' });
+    const master = catalog(identity.catalog_id), region = dictionary('material_regions', identity.region_id, '区域');
+    const category = dictionary('material_categories', master.category_id, '分类');
+    const quantity = input.quantity === undefined && old.qty_m !== undefined ? old.qty_m : decimal(input.quantity, 3, '期初数量');
+    const amount = input.amount === undefined && old.amount_cents !== undefined ? old.amount_cents : decimal(input.amount, 2, '总金额', true);
+    unitQuantity(master, quantity, '期初数量', 1000);
+    const zeroReason = text(input.zeroAmountReason ?? old.zero_amount_reason ?? '', '零金额原因', 1000, amount > 0);
+    const sameBatch = old.catalog_id && identityArgs(identity).every((part, index) => part === identityArgs(old)[index]);
+    const current = stockLocation(identity);
+    const position = { location: input.location ?? (sameBatch ? old.location : current?.location || ''),
+      locationVersion: input.locationVersion ?? (sameBatch ? old.location_version : current?.version || 0) };
+    position.location = intakeLocation(identity, position, user, '期初或补录草稿位置', false);
+    return { ...identity, qty_m: quantity, amount_cents: amount, location: position.location, location_version: position.locationVersion,
+      zero_amount_reason: zeroReason, snapshot: { catalogId: master.id, code: master.code, name: master.name, spec: master.spec,
+        unit: master.unit, trackingMode: master.tracking_mode, categoryId: category.id, categoryName: category.name,
+        regionId: region.id, regionName: region.name, warehouse: identity.warehouse, location: position.location } };
+  }
+  function openingView(id, details = true) {
+    const document = opening(id);
+    const lines = all('SELECT * FROM material_opening_items WHERE opening_id=? ORDER BY id', document.id);
+    const items = lines.map(row => ({ ...JSON.parse(row.snapshot), id: row.id, version: row.version,
+      qtyM: row.qty_m, amountCents: row.amount_cents, batch: row.batch, expiryDate: row.expiry_date,
+      location: row.location, locationVersion: row.location_version, zeroAmountReason: row.zero_amount_reason,
+      movementId: row.movement_id, unitCount: row.movement_id ? one('SELECT COUNT(*) AS total FROM material_stock_units WHERE source_movement_id=?', row.movement_id).total : 0 }));
+    return { id: document.id, no: document.no, title: document.title, date: document.date, description: document.description,
+      kind: document.kind, reason: document.reason, status: document.status, version: document.version,
+      createdBy: document.created_by, creatorName: actorName(document.created_by), createdAt: document.created_at,
+      postedBy: document.posted_by, posterName: actorName(document.posted_by), postedAt: document.posted_at,
+      itemCount: items.length, unitCount: items.reduce((sum, row) => sum + row.unitCount, 0), ...(details ? { items } : {}) };
+  }
+  function saveOpeningItem(documentId, data, itemId) {
+    const fields = ['catalog_id', 'region_id', 'warehouse', 'qty_m', 'amount_cents', 'batch', 'expiry_date', 'location', 'location_version', 'zero_amount_reason', 'snapshot'];
+    const values = fields.map(field => field === 'snapshot' ? JSON.stringify(data.snapshot) : data[field]);
+    if (itemId) run(`UPDATE material_opening_items SET ${fields.map(field => `${field}=?`).join(',')},version=version+1 WHERE id=?`, ...values, itemId);
+    else run(`INSERT INTO material_opening_items(opening_id,${fields.join(',')}) VALUES(?,${fields.map(() => '?').join(',')})`, documentId, ...values);
+  }
+  function openingHeader(input) {
+    return { title: text(input.title, '单据主题', 200), date: date(input.date), description: text(input.description ?? '', '单据说明', 2000, true) };
+  }
+  function postOpening(document, user) {
+    const lines = all('SELECT * FROM material_opening_items WHERE opening_id=? ORDER BY id', document.id);
+    if (!lines.length || lines.length > 200) error(400, '单据须包含1至200条明细');
+    const unitCount = safeSum(lines.filter(row => catalog(row.catalog_id).tracking_mode === 'unit').map(row => row.qty_m / 1000));
+    if (unitCount > 1000) error(400, '每张单据一次最多生成1000个单件码，请拆分单据');
+    const locations = new Map();
+    for (const row of lines) {
+      const key = JSON.stringify(identityArgs(row));
+      const previous = locations.get(key);
+      if (previous && (previous.location !== row.location || previous.location_version !== row.location_version)) conflict('同一批次的存放位置或位置版本不一致，请统一后入库');
+      intakeLocation(row, { location: row.location, locationVersion: row.location_version }, user, '期初或补录入库位置', false);
+      locations.set(key, row);
+    }
+    for (const row of locations.values()) intakeLocation(row, { location: row.location, locationVersion: row.location_version }, user, `${document.no} 入库位置`);
+    for (const row of lines) {
+      const snapshot = JSON.parse(row.snapshot), master = catalog(row.catalog_id);
+      if (snapshot.trackingMode !== master.tracking_mode) conflict('物资管理方式已变化，请重新编辑该明细');
+      const reason = document.kind === 'supplement' ? `${document.no} 补录：${document.reason}` : `${document.no} 期初登记${row.zero_amount_reason ? `：${row.zero_amount_reason}` : ''}`;
+      const movement = addMovement({ ...row, type: document.kind === 'supplement' ? 'adjustment' : 'opening',
+        source_key: `opening-doc:${document.id}:${row.id}`, snapshot, date: document.date, reason }, user);
+      run('UPDATE material_opening_items SET movement_id=? WHERE id=?', movement.id, row.id);
+    }
+    run("UPDATE material_openings SET status='posted',version=version+1,posted_by=?,posted_at=? WHERE id=?", user.id, now(), document.id);
+    log(user, document.kind === 'supplement' ? 'SUPPLEMENT' : 'OPENING', 'material_openings', document.id, document.no);
+    return { opening: openingView(document.id), openingClosed: openingClosed() };
   }
   function checkedIssue(id, user) {
     const row = one('SELECT * FROM material_issues WHERE id=?', integer(id));
@@ -808,12 +933,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const rejectedReason = rejected > 0 ? text(input.rejectedReason, '拒收原因', 1000) : '';
         const zeroReason = quantity > 0 && amount === 0 ? text(input.zeroAmountReason, '零金额原因', 1000) : '';
         if (quantity === 0 && amount !== 0) error(400, '纯拒收不能计入合格库存金额');
+        const identity = { catalog_id: line.catalog_id, region_id: line.region_id, warehouse: line.warehouse,
+          batch: text(input.batch ?? '', '批号', 100, true), expiry_date: date(input.expiryDate, '有效期', true) };
+        if (quantity > 0) snapshot.location = intakeLocation(identity, input, user, `${order.no} 验收入库位置`);
         event = insertReceipt({ type: quantity > 0 ? 'acceptance' : 'rejection', request_id: order.id,
           item_id: line.id, request_revision: order.revision, snapshot,
           qty_m: quantity, rejected_qty_m: rejected, amount_cents: amount,
           rejected_reason: rejectedReason, zero_amount_reason: zeroReason,
-          batch: text(input.batch ?? '', '批号', 100, true),
-          expiry_date: date(input.expiryDate, '有效期', true), date: date(input.date) }, user);
+          batch: identity.batch, expiry_date: identity.expiry_date, date: date(input.date) }, user);
         if (quantity > 0) {
           addMovement({ type: 'receipt', catalog_id: line.catalog_id, region_id: line.region_id,
             warehouse: line.warehouse, qty_m: quantity, amount_cents: amount, receipt_id: event.id,
@@ -962,12 +1089,117 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const route = url.pathname.slice('/api/materials'.length) || '/';
     const method = req.method;
     const input = ['POST', 'PATCH', 'DELETE', 'PUT'].includes(method) ? await body(req) : {};
-    const user = tokenUser ? tokenUser(req) : initialUser;
+    let user = tokenUser ? tokenUser(req) : initialUser;
     if (!user) error(401, '请先登录');
     const reply = (value, status = 200) => send(res, status, scrub(value, user));
     let match;
     if (route === '/meta' && method === 'GET') return reply({ capabilities: capability(user), warehouses: WAREHOUSES,
       openingClosed: openingClosed(), quantityScale: 1000, amountScale: 100 });
+
+    if (route === '/openings/template.xlsx' && method === 'GET') return openingWorkbook(res, user);
+    if (route === '/openings') {
+      if (method === 'GET') {
+        requireOpeningRead(user);
+        const status = url.searchParams.get('status'), kind = url.searchParams.get('kind');
+        if (status && !['draft', 'posted'].includes(status)) error(400, '单据状态无效');
+        if (kind && !['opening', 'supplement'].includes(kind)) error(400, '单据类型无效');
+        let rows = all('SELECT id FROM material_openings ORDER BY id DESC').map(row => openingView(row.id, false));
+        if (status) rows = rows.filter(row => row.status === status);
+        if (kind) rows = rows.filter(row => row.kind === kind);
+        return reply(paginate(search(rows, url, ['no', 'title', 'description']), url));
+      }
+      if (method === 'POST') {
+        const result = transaction(() => {
+          const kind = openingClosed() ? 'supplement' : 'opening';
+          requireMaterial(user, kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize');
+          const data = openingHeader(input), reason = text(input.reason ?? '', '补录原因', 1000, kind === 'opening');
+          const no = `${kind === 'supplement' ? 'BL' : 'QC'}-${today().replaceAll('-', '')}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+          const inserted = run(`INSERT INTO material_openings(no,title,date,description,kind,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+            no, data.title, data.date, data.description, kind, reason, user.id, now());
+          log(user, 'CREATE', 'material_openings', Number(inserted.lastInsertRowid), no);
+          return openingView(inserted.lastInsertRowid);
+        });
+        return reply(result, 201);
+      }
+    }
+    if ((match = route.match(/^\/openings\/(\d+)\/export\.xlsx$/)) && method === 'GET') {
+      requireOpeningRead(user);
+      return openingWorkbook(res, user, openingView(match[1]));
+    }
+    if ((match = route.match(/^\/openings\/(\d+)\/post$/)) && method === 'POST') {
+      requireMaterial(user, opening(match[1]).kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize');
+      const result = idempotent(user, route, input, () => {
+        const document = opening(match[1]);
+        openingWritable(document, input, user);
+        return postOpening(document, user);
+      });
+      return reply(result.value, result.status);
+    }
+    if ((match = route.match(/^\/openings\/(\d+)\/import$/)) && method === 'POST') {
+      openingWritable(opening(match[1]), input, user);
+      if (!permit(user, 'materials.amount.read')) error(403, '导入含金额的期初或补录明细需要金额读取权限');
+      let rows;
+      try { rows = await readOpeningWorkbook(input); } catch (failure) { error(failure.status || 400, failure.message); }
+      user = tokenUser ? tokenUser(req) : user;
+      if (!user) error(401, '请先登录');
+      if (!permit(user, 'materials.amount.read')) error(403, '导入含金额的期初或补录明细需要金额读取权限');
+      const result = transaction(() => {
+        const document = opening(match[1]); openingWritable(document, input, user);
+        if (one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id).total + rows.length > 200) error(400, '每张单据最多200条明细');
+        for (const [index, cells] of rows.entries()) {
+          try {
+            const master = one('SELECT id FROM material_catalog WHERE code=?', String(cells[0]).trim());
+            const region = one('SELECT id FROM material_regions WHERE name=?', String(cells[1]).trim());
+            if (!master || !region) error(400, '物资编码或区域未在主档中建立');
+            const identity = stockIdentity({ catalogId: master.id, regionId: region.id, warehouse: cells[2], batch: cells[5] || '', expiryDate: cells[6] || '' });
+            const current = stockLocation(identity);
+            const data = openingItemInput({ catalogId: master.id, regionId: region.id, warehouse: cells[2],
+              quantity: String(cells[3]), amount: String(cells[4]), batch: cells[5] || '', expiryDate: cells[6] || '',
+              location: cells[7] || current?.location || '', locationVersion: current?.version || 0, zeroAmountReason: cells[8] || '' }, user);
+            saveOpeningItem(document.id, data);
+          } catch (failure) {
+            if (failure.status) error(failure.status, `Excel 第${index + 2}行：${failure.message}`, failure.code);
+            throw failure;
+          }
+        }
+        run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id);
+        log(user, 'IMPORT', 'material_openings', document.id, `新增${rows.length}条草稿明细`);
+        return openingView(document.id);
+      });
+      return reply(result, 201);
+    }
+    if ((match = route.match(/^\/openings\/(\d+)\/items(?:\/(\d+))?$/))) {
+      if (['POST', 'PUT', 'DELETE'].includes(method)) {
+        const result = transaction(() => {
+          const document = opening(match[1]); openingWritable(document, input, user);
+          const old = match[2] ? one('SELECT * FROM material_opening_items WHERE opening_id=? AND id=?', document.id, integer(match[2])) : null;
+          if (match[2] && !old) error(404, '单据明细不存在');
+          if ((method === 'POST') === Boolean(old)) error(400, '单据明细操作路径无效');
+          if (old && input.itemVersion !== old.version) conflict('明细已变化，请重新读取后保存');
+          if (method === 'DELETE') run('DELETE FROM material_opening_items WHERE id=?', old.id);
+          else {
+            if (!old && one('SELECT COUNT(*) AS total FROM material_opening_items WHERE opening_id=?', document.id).total >= 200) error(400, '每张单据最多200条明细');
+            saveOpeningItem(document.id, openingItemInput(input, user, old || {}), old?.id);
+          }
+          run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id);
+          log(user, method === 'DELETE' ? 'DELETE_ITEM' : 'SAVE_ITEM', 'material_openings', document.id, document.no);
+          return openingView(document.id);
+        });
+        return reply(result, method === 'POST' ? 201 : 200);
+      }
+    }
+    if ((match = route.match(/^\/openings\/(\d+)$/))) {
+      if (method === 'GET') { requireOpeningRead(user); return reply(openingView(match[1])); }
+      if (method === 'PATCH') {
+        return reply(transaction(() => {
+          const document = opening(match[1]); openingWritable(document, input, user);
+          const data = openingHeader(input), reason = text(input.reason ?? document.reason, '补录原因', 1000, document.kind === 'opening');
+          run('UPDATE material_openings SET title=?,date=?,description=?,reason=?,version=version+1 WHERE id=?', data.title, data.date, data.description, reason, document.id);
+          log(user, 'UPDATE', 'material_openings', document.id, document.no);
+          return openingView(document.id);
+        }));
+      }
+    }
 
     if (route === '/unit-label-rule') {
       if (method === 'GET') return reply(unitRuleView());
@@ -1281,6 +1513,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (route === '/stock/units' && method === 'GET') return reply(listUnits(url, user));
     if (route === '/stock/movements' && method === 'GET') {
       const filters = [], args = [];
+      if (url.searchParams.has('type')) {
+        const type = url.searchParams.get('type');
+        if (!['opening', 'receipt', 'reversal', 'adjustment', 'issue'].includes(type)) error(400, '库存流水类型无效');
+        filters.push('m.type=?'); args.push(type);
+      }
       for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse'], ['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
         if (url.searchParams.has(parameter)) {
           filters.push(`m.${column}=?`);
@@ -1408,13 +1645,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 4, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 5, generatedAt: now(),
       users: all('SELECT id,username FROM users ORDER BY id'), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
   }
   function remapSnapshot(value, mapping) {
-    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId', 'processedBy']);
+    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId', 'processedBy', 'postedBy']);
     if (Array.isArray(value)) return value.map(entry => remapSnapshot(entry, mapping));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
@@ -1434,6 +1671,41 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     if (!openingClosed() && one("SELECT 1 FROM material_receipts WHERE type='acceptance' LIMIT 1")) {
       error(400, '存在合格验收历史时不能恢复为开放期初');
+    }
+    const openingMovements = new Set();
+    for (const document of all('SELECT * FROM material_openings')) {
+      if (text(document.title, '单据主题', 200) !== document.title || date(document.date) !== document.date ||
+          text(document.description, '单据说明', 2000, true) !== document.description ||
+          !/^(?:QC|BL)-\d{8}-[A-F0-9]{10}$/.test(document.no) ||
+          !document.no.startsWith(document.kind === 'supplement' ? 'BL-' : 'QC-') || !validTimestamp(document.created_at)) error(400, '期初或补录单信息无效');
+      text(document.reason, '补录原因', 1000, document.kind === 'opening');
+      if (document.kind === 'supplement' && !openingClosed()) error(400, '存在补录单时期初必须已关闭');
+      if (document.status === 'posted' && (!validTimestamp(document.posted_at) || document.posted_at < document.created_at || document.version < 2)) error(400, '已入库单据处理信息无效');
+      const lines = all('SELECT * FROM material_opening_items WHERE opening_id=?', document.id);
+      if (lines.length > 200 || (document.status === 'posted' && !lines.length)) error(400, '期初或补录单明细数量无效');
+      const count = safeSum(lines.filter(row => catalog(row.catalog_id).tracking_mode === 'unit').map(row => row.qty_m / 1000));
+      if (document.status === 'posted' && count > 1000) error(400, '已入库单据的单件数量超限');
+      for (const row of lines) {
+        const master = catalog(row.catalog_id), snapshot = JSON.parse(row.snapshot);
+        unitQuantity(master, row.qty_m, '期初数量', 1000); warehouse(row.warehouse);
+        if (text(row.batch, '批号', 100, true) !== row.batch || date(row.expiry_date, '有效期', true) !== row.expiry_date ||
+            text(row.location, '存放位置', 200, true) !== row.location || row.location_version < 0 ||
+            snapshot.catalogId !== row.catalog_id || snapshot.regionId !== row.region_id || snapshot.warehouse !== row.warehouse ||
+            snapshot.location !== row.location || !['unit', 'quantity'].includes(snapshot.trackingMode)) error(400, '期初或补录明细身份或位置无效');
+        text(row.zero_amount_reason, '零金额原因', 1000, row.amount_cents > 0);
+        if (document.status === 'draft') {
+          if (row.movement_id !== null) error(400, '草稿不能包含库存流水');
+        } else {
+          const movement = one('SELECT * FROM material_stock_movements WHERE id=?', row.movement_id);
+          const reason = document.kind === 'supplement' ? `${document.no} 补录：${document.reason}` : `${document.no} 期初登记${row.zero_amount_reason ? `：${row.zero_amount_reason}` : ''}`;
+          if (!movement || openingMovements.has(movement.id) || movement.type !== (document.kind === 'supplement' ? 'adjustment' : 'opening') ||
+              identityArgs(movement).some((value, index) => value !== identityArgs(row)[index]) || movement.qty_m !== row.qty_m ||
+              movement.amount_cents !== row.amount_cents || movement.source_key !== `opening-doc:${document.id}:${row.id}` ||
+              movement.reason !== reason || movement.date !== document.date || movement.actor_id !== document.posted_by ||
+              stableJson(JSON.parse(movement.snapshot)) !== stableJson(snapshot)) error(400, '期初或补录单与库存来源流水无法对账');
+          openingMovements.add(movement.id);
+        }
+      }
     }
     for (const order of all('SELECT * FROM material_requests')) {
       if (order.status === 'submitted') {
@@ -1520,6 +1792,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if ((snapshot.trackingMode ?? 'quantity') !== master.tracking_mode) error(400, '库存快照与单件管理方式不一致');
       if (['receipt', 'reversal'].includes(row.type) !== Boolean(row.receipt_id)) error(400, '库存来源引用无效');
       if (row.receipt_id && row.source_key !== `receipt:${row.receipt_id}`) error(400, '验收库存来源键无效');
+      if (row.source_key.startsWith('opening-doc:') && !openingMovements.has(row.id)) error(400, '期初或补录来源缺少已入库单据');
       const key = JSON.stringify([row.catalog_id, row.region_id, row.warehouse, row.batch, row.expiry_date]);
       const previous = batches.get(key) || { qty: 0, amount: 0 };
       if (row.type === 'issue') {
@@ -1584,10 +1857,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
-    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : TABLES;
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : TABLES;
     if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
         Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
@@ -1604,7 +1877,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       mapping.set(id, current.id);
       usernames.add(username);
     }
-    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id', 'processed_by']);
+    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id', 'processed_by', 'posted_by']);
     const jsonColumns = new Set(['original_snapshot', 'before_snapshot', 'after_snapshot', 'snapshot', 'response']);
     const normalized = {};
     for (const table of TABLES) {
@@ -1700,6 +1973,34 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }
       throw failure;
     }
+  }
+  async function openingWorkbook(res, user, document = null) {
+    requireOpeningRead(user);
+    if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
+    const amount = permit(user, 'materials.amount.read');
+    const cell = value => typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
+    const sheet = (name, headings, rows) => ({ sheet: name, data: [headings.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
+    const headings = !document || amount ? OPENING_HEADERS : OPENING_HEADERS.filter((_, index) => index !== 4);
+    const rows = document ? document.items.map(row => {
+      const values = [row.code, row.regionName, row.warehouse, row.qtyM / 1000, row.amountCents / 100, row.batch, row.expiryDate, row.location, row.zeroAmountReason];
+      return amount ? values : values.filter((_, index) => index !== 4);
+    }) : [];
+    const sheets = [sheet('期初明细', headings, rows)];
+    if (document) sheets.push(sheet('单据信息', ['单号', '主题', '日期', '类型', '状态', '说明', '补录原因', '入库人', '入库时间'],
+      [[document.no, document.title, document.date, document.kind, document.status, document.description, document.reason, document.posterName, document.postedAt]]));
+    else {
+      const masters = all('SELECT * FROM material_catalog ORDER BY code LIMIT 5001');
+      if (masters.length > 5000) error(413, '主档超过5000条，请联系管理员按实际主档填写导入模板');
+      sheets.push(sheet('物资主档参考', ['物资编码', '名称', '规格', '单位', '管理方式'], masters.map(row => [row.code, row.name, row.spec, row.unit, row.tracking_mode])),
+        sheet('区域参考', ['区域'], all('SELECT name FROM material_regions ORDER BY name LIMIT 5000').map(row => [row.name])),
+        sheet('仓库参考', ['仓库编码', '仓库名称'], WAREHOUSES.map(row => [row.code, row.name])),
+        sheet('填写说明', ['说明'], [['仅填写第一张期初明细，编码、区域和仓库使用参考表中的值。'], ['每张单据最多200行；逐件物资数量为整数，入库时整单最多生成1000个单件码。'], ['数量最多3位小数，金额最多2位小数；金额为零必须填写零金额原因。'], ['有效期使用YYYY-MM-DD文本；不接受公式、宏、外部链接或旧版.xls。'], ['导入只增加草稿明细，核对后点击入库才改变库存。'], ['同批次位置必须一致；空位置沿用当前批次位置。']]));
+    }
+    const exporter = writeXlsx || require('write-excel-file/node').default;
+    const buffer = await exporter(sheets).toBuffer();
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="labos-opening-${document ? document.no : 'template'}.xlsx"`, 'Content-Length': buffer.length });
+    res.end(buffer);
   }
   async function exportWorkbook(res, url, user) {
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');

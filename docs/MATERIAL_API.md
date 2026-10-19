@@ -1,4 +1,4 @@
-# 0.4.0 物资 API 合同
+# 0.5.0 物资 API 合同
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，返回 `{handle, backup, restore}`。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`。新业务只使用专表，不写旧 `records`。以下合同供前端与 HTTP 回归共同使用。
 
@@ -89,7 +89,7 @@
 
 - `GET /acceptance` → SQL 筛选与分页 `{...明细,requestNo,requestTitle,requestVersion,requestRevision,requestCreatedAt}`；仅已提交行；可用 `status=all|pending|partial|done|closed` 按 receiptStatus 筛选，新增 `status=open` 按剩余数量大于零同时包含未验收及部分验收，SQL 总数和分页均只计算命中行。默认仍包含完成历史。可用 `catalogId,regionId,warehouse` 精确筛选，`from,to` 按原申请创建日期筛选；`q` 覆盖名称/编码/规格、分类/区域及来源单号/标题。
 - `GET /receipts?requestId=&itemId=` → 分页事件。事件含 `{id,type,requestId,itemId,requestRevision,snapshot,qtyM,rejectedQtyM,closedQtyM,amountCents?,reason,rejectedReason,zeroAmountReason,originalReceiptId,batch,expiryDate,date,actorId,actorName,createdAt,reversed}`。type 为 `acceptance|rejection|close|reversal`。
-- `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。
+- `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?,location?,locationVersion?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。合格入库可同时设置位置：省略 location 时保留现位置；显式提供时需当前 locationVersion，实际变更另需 ADMIN/MATERIAL 加 materials.stock.location。位置与验收同事务，历史 snapshot.location 保留入库时位置。
 - `POST /requests/:id/items/:itemId/close`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`，将当时剩余量结案，不产生库存。
 - `POST /receipts/:id/reverse`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`。仅整笔冲正原合格验收，最多一次，数量金额精确反向，库存不能负数。
 
@@ -98,6 +98,34 @@
 以上动作需要 MATERIAL + `materials.acceptance.write`。记账 `requestIdempotencyKey` 为 8–128 字符；同用户同键同正文返回原结果（200），同键不同正文 409。客户端每次真实操作产生新键，网络重试复用原键及原正文；不要与申报单 requestId 混淆。
 
 ## 库存与期初
+
+### 期初／存量补录单据（0.5.0）
+
+以下路径均在 `/api/materials` 下。草稿不记库存，已入库单不能编辑。普通读取需 `materials.read`，或 MATERIAL 加期初／调整权限；金额继续按 `materials.amount.read` 裁剪。写入期初需要 MATERIAL + `materials.stock.initialize`，补录需要 MATERIAL + `materials.stock.adjust`，ADMIN 单独不能办理业务。
+
+| 接口 | 内容 |
+| --- | --- |
+| `GET /openings` | 分页，支持 `q,status,kind`；summary 不含 items |
+| `POST /openings` | `{title,date?,description?,reason?}`，201 返回单据；闭账后自动为 supplement 且原因必填 |
+| `GET /openings/:id` | 单据及全部明细 |
+| `PATCH /openings/:id` | `{version,title,date?,description?,reason?}`，更新草稿表头 |
+| `POST /openings/:id/items` | `{version,catalogId,regionId,warehouse,quantity,amount,batch?,expiryDate?,location?,locationVersion?,zeroAmountReason?}`，201 返回单据 |
+| `PUT /openings/:id/items/:itemId` | 同上，另需 `itemVersion`；更新草稿行 |
+| `DELETE /openings/:id/items/:itemId` | `{version,itemVersion}`，删除草稿行 |
+| `POST /openings/:id/import` | `{version,name,content}`；XLSX canonical base64，201 全部追加草稿 |
+| `GET /openings/template.xlsx` | 带主档、区域、仓库参考页的空模板，需 `materials.export` |
+| `GET /openings/:id/export.xlsx` | 导出当前单据，需 `materials.export`，金额按权限裁剪 |
+| `POST /openings/:id/post` | `{version,requestIdempotencyKey}`；201 首次成功／200 同正文重试，返回 `{opening,openingClosed}` |
+
+单据含 `id,no,title,date,description,kind(opening|supplement),reason,status(draft|posted),version,createdBy,creatorName,createdAt,postedBy,posterName,postedAt,itemCount,unitCount,items`。明细包含主档／分类／区域名称与 ID、仓库、`qtyM,amountCents,batch,expiryDate,location,locationVersion,zeroAmountReason,movementId,unitCount,version`。其他详情／写操作直接返回单据。
+
+每单最多 200 行，一次入库最多生成 1000 个新单件码。入库将全部行、位置、库存流水、固定码及幂等记录置于一个事务；任何行失败全部回滚。`GET /stock/units?openingId=:id` 查询此单生成的实物，重印沿用原码；旧无单据期初通过 `GET /stock/movements?type=opening` 查历史，不虚构单据。
+
+首次验收或手动关闭后，原 opening 草稿只读，需另建有原因的 supplement。补录写正向 adjustment，来源为 `opening-doc:<docId>:<lineId>`，流水带单号和原因，不重开全局期初。
+
+导入额外要求 `materials.amount.read`；限 5 MiB、128 个 ZIP 条目，单条解压 6 MiB、总解压 12 MiB。只读取第一页，表头严格为“物资编码、区域、仓库编码、数量、总金额（元）、批号、有效期、存放位置、零金额原因”。精确匹配已有主档编码、区域名称、仓库编码；日期用 YYYY-MM-DD 文本，拒绝公式、宏、外链、嵌入对象、XML 实体及异常工作表范围。先完整验证再追加草稿，不直接入库，不部分导入。
+
+### 原有库存接口
 
 - `GET /stock` → 分页 `{id:复合稳定字符串,catalogId,code,name,spec,unit,regionId,regionName,warehouse,qtyM,amountCents?,lastMovementAt}`，可筛选 `regionId,warehouse,catalogId`。
 - `GET /stock/batches` → 分页的批次余额，保留 `/stock` 身份、数量及金额字段，另含 `batch,expiryDate,categoryId,categoryName,location,locationVersion,qrPayload`。按主档+仓库+区域+批号+有效期汇总；支持 `q,catalogId,regionId,warehouse,batch,expiryDate` 筛选，耗尽批次仍保留，未设置位置为 `""`、版本为 `0`。
@@ -145,9 +173,11 @@
 - `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十五张物资业务及辅助表（含单件、包装码映射、存放位置、领用）、编号规则与序号、附件内容、稳定用户映射与所有快照，不含用户密码。既有 Excel 导出保持原有数量金额及筛选口径。
 - `POST /restore`，正文为上述完整备份对象 → `{restored:true,counts}`，需 backup.restore + materials.amount.read；只允许空的新业务库，验证格式、用户 username→当前ID 映射、外键、库存及来源唯一性，事务恢复；同份重放与追加恢复均拒绝。
 
-物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=4`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
+物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=5`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表、schema 4 原十五表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
 
 恢复继续核对领用状态/版本、申请与发放流水、历史批次成本分摊、取消/驳回无流水、位置、包装码及非负库存。schema 4 另核对单件码／序号唯一、来源与退出流水、状态及数量守恒、编号规则和序号进度；失败整次回滚。旧服务不能恢复 schema 4，回退必须恢复升级前完整运行数据，不能只切旧镜像。旧版表结构升级要求仍保留。
+
+schema 5 新增 material_openings 与 material_opening_items，严格检查草稿无流水、已入库明细唯一对应正向来源流水、单件数量及补录闭账不变量；posted_by / postedBy 同样映射现有账号。旧格式恢复时补空两表，不虚构期初单据。旧服务无法恢复 schema 5，回退须恢复升级前完整运行目录。
 
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 

@@ -1,0 +1,74 @@
+# 手机实时扫码与群晖 HTTPS
+
+手机用 `http://群晖IP:3000` 打开时，浏览器禁止网页实时读取相机。拍照、选图识别和手工输入仍可使用；照片、视频帧均在手机本地识别，不上传到服务器。浏览器的安全限制不能靠升级 JavaScript、安装打印机驱动或增加网页权限按钮解除。
+
+启用实时扫码需要同时满足：**可信 HTTPS、浏览器和系统允许相机、设备有可用摄像头**。本版点击“开启后置摄像头”时先请求相机，再准备本地解码组件，避免组件下载耗时延后相机授权；优先请求后置镜头，停止、切页或隐藏页面会释放相机。HTTP 页面会说明缺少的条件，图片和手工入口继续保留。
+
+已有群晖反向代理、域名和受信任证书时，直接将 HTTPS 反向代理指向原 LabOS 的 HTTP 端口即可。证书须匹配手机访问的域名或 IP，手机须真正信任证书；仅在证书警告页选择“继续访问”不能替代信任。代理需保留原请求 Host（包括外部端口），避免首次设置时同源检查失败。
+
+## 可选：在原 Compose 项目增加局域网 HTTPS
+
+没有域名时，可使用附带的 Caddy 配置为群晖局域网 IP 签发本地证书。此方式需要在每台扫码手机上安装并信任这套私有 CA。只在自己管理并信任的局域网设备使用；不建议将此管理系统直接暴露到公网。
+
+保留原项目名、原 `docker-compose.yml`、原 `.env` 与数据挂载。先按[群晖部署说明](SYNOLOGY.md)备份，**不要为开启 HTTPS 新建空数据卷、重新初始化账号或删除旧项目数据**。将以下两个文件放到原 YML 旁边：
+
+- `docker-compose.https.yml`
+- `Caddyfile`
+
+在原 `.env` 追加 `LABOS_HTTPS_HOST`，值为手机实际访问的群晖局域网 IPv4 或主机名，**不带 `http://`、`https://`、路径和端口**；使用 IP 时建议在路由器为群晖保留固定地址。模板没有预填 IP，未配置时会拒绝解析。可选 `LABOS_HTTPS_PORT=8443`，默认 8443 避开 DSM 常用的 443；如端口被占用改为其他空闲端口。
+
+例如，原项目名是 `labos` 时，在原 YML 目录执行以下命令（其他项目名须使用自己的原名称；群晖可在 SSH 中执行，不在 Windows 启动本地生产服务）：
+
+```text
+docker compose -p labos -f docker-compose.yml -f docker-compose.https.yml config --quiet
+docker compose -p labos -f docker-compose.yml -f docker-compose.https.yml up -d
+```
+
+配置会额外拉取固定的官方 `caddy:2.11.7-alpine` 镜像，新增 `labos-https` 容器；应用继续使用原数据。它通过同一 Compose 网络代理到 `labos:3000`，保留原 Host，不改变账号、数据库、附件及 HTTP 端口。Compose 多文件的相对路径以第一份 YML 的目录为基准；`Caddyfile` 缺失会报错，不会错误创建成目录。
+
+```text
+原项目目录/
+  docker-compose.yml
+  docker-compose.https.yml
+  Caddyfile
+  .env
+  runtime/              # 使用新模板时的业务数据；旧部署保留自己的原挂载
+  https/
+    data/               # Caddy 证书、私有 CA 和私钥，须保留且严禁公开
+    config/             # Caddy 配置状态
+```
+
+`https/` 由 Docker 创建并持久化；它和 `runtime/` 都是运行数据，不提交源码。旧项目仍使用命名卷时，增加此 overlay 不会改动旧卷。不要把包含私钥的 `https/data/` 发送给他人，也不要删除后重建 CA；CA 被替换后，手机原先的信任需要重新安装。没有配置 HTTP 跳转，保留原 HTTP 地址作为图片识别和手工操作入口。
+
+## 将根证书安装到手机
+
+首次运行后，根证书位于 YML 旁 `https/data/caddy/pki/authorities/local/root.crt`。**只导出公开的 `root.crt`，不要复制或导出任何 `.key` 文件。** 可从 NAS 管理界面取出，或沿用上面的项目名执行：
+
+```text
+docker compose -p labos -f docker-compose.yml -f docker-compose.https.yml cp labos-https:/data/caddy/pki/authorities/local/root.crt ./https/labos-root.crt
+```
+
+通过可信、已认证的 NAS 文件管理或 USB 将 `https/labos-root.crt` 交给自己的手机；不要从陌生来源安装 CA。CA 信任会扩大设备对该 CA 签发网站的信任，只安装自己维护的这一份；停用后可从手机移除。
+
+- **iPhone / iPad**：打开根证书并按系统提示安装描述文件，然后到“设置 → 通用 → 关于本机 → 证书信任设置”，对这份根证书启用“完全信任”。只安装描述文件但未启用完全信任仍不够。不同 iOS 版本可能先在“VPN 与设备管理”中完成描述文件安装。
+- **Android**：系统设置中搜索“安装证书”或“CA 证书”，在安全/加密与凭据中选择安装 **CA 证书**，选择上述文件并完成锁屏确认。菜单名称因品牌、版本而异；不是安装 Wi-Fi 证书或用户客户端证书。工作资料、企业管理策略及部分浏览器可能限制用户 CA，需由设备管理员允许，或改用受公共 CA 信任的域名证书。
+
+关闭原 HTTP 页面，用 Safari / Chrome 等完整浏览器直接打开 `https://群晖实际IP:8443`（自定义端口则换成对应端口）。地址必须与 `LABOS_HTTPS_HOST` 相同，浏览器不应出现证书警告。不要把 LabOS 放在不安全 HTTP 页面的内嵌框架中访问。允许浏览器网站相机权限和系统相机权限后，打开物资扫码并点击“开启后置摄像头”。从 HTTP 换成 HTTPS 是不同网站来源，可能需要重新登录，但不是重设管理员或清空历史数据。
+
+排查顺序：
+
+1. 地址确实是 `https://`，IP/主机名和端口正确，NAS 防火墙允许该局域网访问端口。
+2. 证书无警告，已信任的是当前 Caddy 实例的根证书；确认未删除过 `https/data/`。
+3. 浏览器与系统都允许相机，用完整浏览器直接访问，关闭其他占用相机的应用。
+4. 若提示组件加载失败，检查本站 `/vendor/zxing-wasm/3.1.5/index.js` 与 WASM 能否加载；不是更改相机权限可以解决的问题。
+
+本地源码测试覆盖合成相机授权顺序、授权/解码晚返回释放、错误提示与 HTTP 回退，配置测试覆盖缺少主机时拒绝、Compose 合并及目录保持；这些不等于真实手机、群晖证书信任或打印机验收。实际设备仍需完成安装证书、首次允许相机和扫码校准。
+
+## 官方依据
+
+- [W3C Media Capture and Streams](https://www.w3.org/TR/mediacapture-streams/)：`mediaDevices` / `getUserMedia` 的安全上下文和授权规则。
+- [Caddy Automatic HTTPS](https://caddyserver.com/docs/automatic-https) 与 [Docker 使用说明](https://caddyserver.com/docs/running#docker-compose)：本地 CA 需客户端信任，Docker 数据路径及持久化。
+- [Caddy reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)：HTTP 上游默认保留 Host。
+- [Docker 官方 Caddy 镜像清单](https://github.com/docker-library/official-images/blob/master/library/caddy)：本配置固定 2.11.7 Alpine，包含 amd64/arm64；未来维护升级须另行验证，不用浮动 latest。
+- [Apple：信任手动安装的证书描述文件](https://support.apple.com/en-us/102390)：手动安装后须显式开启 SSL/TLS 完全信任。
+- [Android 证书安装说明（Cloudflare）](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/user-side-certificates/manual-deployment/android/)：CA 安装路径及不同设备差异；不表示需要 Cloudflare 服务。

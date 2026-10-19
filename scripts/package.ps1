@@ -27,7 +27,7 @@ try {
     }
     $sources = @($inputs | ForEach-Object {
         $relative = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
-        if ($relative -match '(^|/)(var|runtime|backups|data|uploads|logs|artifacts|\.git|node_modules)(/|$)' -or
+        if ($relative -match '(^|/)(var|runtime|backups|https|data|uploads|logs|artifacts|\.git|node_modules)(/|$)' -or
             $_.Name -match '\.(log|db(-wal|-shm)?)$' -or
             ($_.Name -like '.env*' -and @('config/.env.example', 'deploy/.env.example') -notcontains $relative)) { return }
         $item = $_
@@ -72,6 +72,7 @@ try {
     }
     @('@echo off', 'cd /d "%~dp0"',
         'if not exist "node_modules\write-excel-file\package.json" goto install',
+        'if not exist "node_modules\read-excel-file\package.json" goto install',
         'if exist "node_modules\zxing-wasm\dist\full\zxing_full.wasm" goto start',
         ':install',
         "  call npm ci --omit=dev --ignore-scripts --no-audit --no-fund --cache artifacts\cache\$version\npm",

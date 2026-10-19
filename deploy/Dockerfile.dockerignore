@@ -17,6 +17,7 @@
 **/var
 **/runtime
 **/backups
+**/https
 **/logs
 **/artifacts
 **/.git

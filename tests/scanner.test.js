@@ -11,7 +11,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 // Only scanner DOM/media APIs are modeled here. These checks do not emulate a physical camera or browser layout.
-function fixture({ secure = true, protocol = secure ? 'https:' : 'http:', mediaDevices = true, getUserMedia, readBarcodes = async () => [], library = true } = {}) {
+function fixture({ secure = true, protocol = secure ? 'https:' : 'http:', mediaDevices = true, getUserMedia, prepareZXingModule, readBarcodes = async () => [], library = true } = {}) {
   const windowEvents = {}, documentEvents = {}, timers = new Map(), urls = new Set(), revoked = [], draws = [];
   const nodes = [];
   class Element {
@@ -59,7 +59,7 @@ function fixture({ secure = true, protocol = secure ? 'https:' : 'http:', mediaD
     addEventListener(name, handler) { windowEvents[name] = handler; }
   };
   if (library) context.ZXingWASM = {
-    async prepareZXingModule(options) { prepares.push(options); },
+    async prepareZXingModule(options) { prepares.push(options); return prepareZXingModule?.(); },
     readBarcodes, async writeBarcode(text, options) { writes.push({ text, options }); return { image: new Blob(['png'], { type: 'image/png' }), error: '' }; }
   };
   context.globalThis = context;
@@ -88,6 +88,7 @@ test('HTTP scan has photo/file/manual fallbacks and never requests a live camera
   assert.match(app.dialog().innerHTML, /capture="environment"/);
   assert.match(app.dialog().innerHTML, /data-ms="file"/);
   assert.match(app.dialog().parts['.ms-status'].textContent, /HTTP.*禁止实时相机.*信任的 HTTPS/);
+  assert.match(app.dialog().parts['.ms-status'].textContent, /手机信任证书.*跳过证书警告不够/);
   await app.dialog().parts['[data-ms="camera"]'].onclick();
   assert.equal(app.requests.length, 0);
   assert.match(app.dialog().parts['.ms-status'].textContent, /HTTP.*禁止实时相机.*拍照、选图或手动输入/);
@@ -148,6 +149,37 @@ test('closing while camera permission is pending stops a late granted stream and
   app.manual('new-session'); assert.equal(await second, 'new-session');
 });
 
+test('camera permission starts in the button gesture before decoder preparation and stopping cannot revive it', async () => {
+  const preparing = deferred();
+  const app = fixture({ prepareZXingModule: () => preparing.promise });
+  const result = app.api.scan();
+  const starting = app.dialog().parts['[data-ms="camera"]'].onclick();
+  assert.equal(app.requests.length, 1, 'permission request must occur before the handler yields');
+  assert.equal(app.prepares.length, 0);
+  await tick();
+  assert.equal(app.prepares.length, 1);
+  assert.equal(app.dialog().parts.video.hidden, false);
+  assert.equal(app.dialog().parts['[data-ms="stop"]'].hidden, false);
+  app.dialog().parts['[data-ms="stop"]'].onclick();
+  assert.equal(app.tracks[0].stopped, 1);
+  preparing.resolve(); await starting;
+  assert.equal(app.dialog().parts.video.hidden, true);
+  assert.equal(app.timers.size, 0);
+  assert.match(app.dialog().parts['.ms-status'].textContent, /摄像头已停止/);
+  app.manual('AFTER-STOP'); assert.equal(await result, 'AFTER-STOP');
+});
+
+test('closing during decoder preparation releases the camera and discards late preparation', async () => {
+  const preparing = deferred();
+  const app = fixture({ prepareZXingModule: () => preparing.promise });
+  const first = app.api.scan(), starting = app.dialog().parts['[data-ms="camera"]'].onclick();
+  await tick(); app.api.close();
+  assert.equal(await first, null); assert.equal(app.tracks[0].stopped, 1);
+  const second = app.api.scan(); preparing.resolve(); await starting;
+  assert.equal(app.dialog().parts.video.srcObject, undefined); assert.equal(app.timers.size, 0);
+  app.manual('NEXT'); assert.equal(await second, 'NEXT');
+});
+
 test('late decoder results are discarded after stopping, hiding, navigating or cancelling', async () => {
   const decoding = deferred(); const app = fixture({ readBarcodes: () => decoding.promise });
   const first = app.api.scan(); const starting = app.dialog().parts['[data-ms="camera"]'].onclick();
@@ -165,6 +197,7 @@ test('permission denial retains photo decoding and manual entry; selected images
   const app = fixture({ getUserMedia: async () => { throw Object.assign(Error('denied'), { name: 'NotAllowedError' }); }, readBarcodes: async () => { reads++; return [{ text: 'PHOTO-0007', isValid: true }]; } });
   const result = app.api.scan(); await app.dialog().parts['[data-ms="camera"]'].onclick();
   assert.match(app.dialog().parts['.ms-status'].textContent, /权限/);
+  assert.equal(app.prepares.length, 0, 'permission denial must not load the decoder');
   const input = app.dialog().parts.photo; input.files = [{ size: 1024 }];
   await input.onchange(); assert.equal(await result, 'PHOTO-0007'); assert.equal(reads, 1);
   assert.equal(app.urls.size, 0); assert.ok(app.revoked.length);
@@ -215,16 +248,21 @@ test('multiple visible codes do not select an arbitrary target and missing WASM 
   app.manual('chosen'); assert.equal(await result, 'chosen'); assert.equal(app.tracks[0].stopped, 1);
   const unavailable = fixture(); unavailable.context.WebAssembly = undefined;
   const fallback = unavailable.api.scan(); await unavailable.dialog().parts['[data-ms="camera"]'].onclick();
-  assert.equal(unavailable.requests.length, 0); unavailable.manual('manual'); assert.equal(await fallback, 'manual');
+  assert.equal(unavailable.requests.length, 1); assert.ok(unavailable.tracks[0].stopped);
+  assert.equal(unavailable.dialog().parts.video.srcObject, null);
+  unavailable.manual('manual'); assert.equal(await fallback, 'manual');
 });
 
 test('the decoder script loads on demand from the pinned local URL and a load failure leaves manual entry usable', async () => {
   const app = fixture({ library: false });
   const result = app.api.scan(); const starting = app.dialog().parts['[data-ms="camera"]'].onclick();
+  await tick();
   const script = app.nodes.find(node => node.tag === 'script');
   assert.equal(script.src, '/vendor/zxing-wasm/3.1.5/index.js');
   script.onerror(); await starting;
-  assert.equal(app.requests.length, 0); assert.equal(app.timers.size, 0); assert.equal(script.isConnected, false);
+  assert.equal(app.requests.length, 1); assert.ok(app.tracks[0].stopped);
+  assert.equal(app.dialog().parts.video.srcObject, null);
+  assert.equal(app.timers.size, 0); assert.equal(script.isConnected, false);
   assert.match(app.dialog().parts['.ms-status'].textContent, /扫码组件加载失败/);
   assert.doesNotMatch(app.dialog().parts['.ms-status'].textContent, /相机权限未获允许|无法开启摄像头/);
   app.manual('offline-manual'); assert.equal(await result, 'offline-manual');

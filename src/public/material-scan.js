@@ -33,7 +33,7 @@ function engine() {
 function stopTracks(stream) { stream?.getTracks().forEach(track => track.stop()); }
 function close() { active?.finish(null); }
 function cameraUnavailableMessage() {
-  if (!globalThis.isSecureContext) return (globalThis.location?.protocol === 'http:' ? '当前使用 HTTP，浏览器禁止实时相机。' : '当前连接不满足浏览器的相机安全要求。') + '请通过浏览器信任的 HTTPS 地址打开；仍可拍照、选图或手动输入。';
+  if (!globalThis.isSecureContext) return (globalThis.location?.protocol === 'http:' ? '当前使用 HTTP，浏览器禁止实时相机。' : '当前连接不满足浏览器的相机安全要求。') + '请通过浏览器信任的 HTTPS 地址打开；群晖 IP 需配置 HTTPS 并让手机信任证书，仅跳过证书警告不够。仍可拍照、选图或手动输入。';
   if (typeof navigator.mediaDevices?.getUserMedia !== 'function') return '当前浏览器不支持实时相机，请使用支持相机的浏览器直接打开，并检查网站相机权限；仍可拍照、选图或手动输入。';
   return '';
 }
@@ -47,7 +47,7 @@ function scan() {
     dialog.setAttribute('aria-labelledby', 'ms-title');
     dialog.innerHTML = `<div class="ms-head"><h2 id="ms-title">扫描条码 / 二维码</h2><button type="button" data-ms="close" aria-label="关闭扫码">×</button></div>
       <div class="ms-body"><p class="ms-help">对准一个条码。照片和摄像画面仅在当前设备解析，不上传。EAN/UPC 等价码可能采用 13 位表示，绑定时请以扫码结果为准。</p>
-      <video class="ms-video" playsinline muted hidden aria-label="后置摄像头预览"></video>
+      <video class="ms-video" playsinline muted autoplay hidden aria-label="后置摄像头预览"></video>
       <p class="ms-status" role="status" aria-live="polite"></p>
       <div class="ms-actions"><button type="button" class="primary" data-ms="camera">开启后置摄像头</button><button type="button" class="ghost" data-ms="stop" hidden>停止摄像头</button></div>
       <div class="ms-actions ms-files"><label>拍照识别<input data-ms="photo" type="file" accept="image/*" capture="environment"></label><label>选择图片<input data-ms="file" type="file" accept="image/*"></label></div>
@@ -105,11 +105,9 @@ function scan() {
       if (unavailable) { message(unavailable); return; }
       const job = session.cameraJob;
       startButton.disabled = true; message('正在准备摄像头，请允许使用相机。');
-      let stream, preparingDecoder = true;
+      let stream, preparingDecoder = false;
       try {
-        const library = await engine();
-        preparingDecoder = false;
-        if (!live() || job !== session.cameraJob) return;
+        // Request permission during the button gesture, before awaiting the decoder download.
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
         if (!live() || job !== session.cameraJob || document.hidden) {
           stopTracks(stream);
@@ -119,7 +117,12 @@ function scan() {
         session.stream = stream; video.srcObject = stream; video.hidden = false;
         await video.play();
         if (!live() || job !== session.cameraJob) { stopTracks(stream); return; }
-        stopButton.hidden = false; message('将一个条码放在画面内，保持清晰并稍作停留。');
+        stopButton.hidden = false; message('相机已开启，正在准备本地识别组件…');
+        preparingDecoder = true;
+        const library = await engine();
+        preparingDecoder = false;
+        if (!live() || job !== session.cameraJob) return;
+        message('将一个条码放在画面内，保持清晰并稍作停留。');
         async function detect() {
           if (!live() || job !== session.cameraJob) return;
           try {
