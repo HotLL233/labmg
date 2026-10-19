@@ -1,0 +1,9 @@
+{
+  "version": "0.6.2",
+  "commit": "989554e60aea0be96c943909fadde8f9bb0bd7d7",
+  "indexDigest": "sha256:68075ddf6c38605d85d95aae7f10e2c4eb58da99278b1839062f7719b604b376",
+  "baseParent": "805dbb72d38f7aa4608ab03377fed2de5384f93c",
+  "featureBranch": "feature/v0.6.2-single-compose-postgresql18",
+  "status": "source-frozen",
+  "buildRunId": 39213871240
+}
