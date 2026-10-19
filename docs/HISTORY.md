@@ -338,8 +338,24 @@ amd64 TAR为221388800字节，SHA-256 `31cf5429ec374cd0d836bef3287dda0b8d9444cec
 
 ## 2026-10-19：0.6.1 群晖运行目录补丁开发
 
-用户在真实群晖部署 0.6.0 时提供 `runtime/postgres` bind source 不存在的错误。0.6.0 云端 Linux 的 Compose 与持久化门禁曾通过，但没有覆盖该群晖的目录创建行为；保留原发布证据，并记录此实机故障作为覆盖边界。从发布记录提交 `7f11dc4b5100e063a4a0ffd10545adbdca44d897` 创建 `feature/v0.6.1-synology-runtime`，源码版本改为 0.6.1，当前未冻结、未发布。
+用户在真实群晖部署 0.6.0 时提供 `runtime/postgres` bind source 不存在的错误。0.6.0 云端 Linux 的 Compose 与持久化门禁曾通过，但没有覆盖该群晖的目录创建行为；保留原发布证据，并记录此实机故障作为覆盖边界。从发布记录提交 `7f11dc4b5100e063a4a0ffd10545adbdca44d897` 创建 `feature/v0.6.1-synology-runtime`，源码版本改为 0.6.1，该开发事件记录时未冻结、未发布。
 
 初始化器显式创建 `postgres/`，目录用 `O_DIRECTORY | O_NOFOLLOW` 打开并拒绝符号链接；PostgreSQL 数据目录不执行应用 UID/GID 的 chown/chmod，交由 PG entrypoint 管理。Compose 四处 bind 改为传统短语法，保留原数据路径与秘密目录只读挂载；重复启动保留已有 PG 目录权限和口令。应用、数据库与附件继续沿用同一 `runtime/`，不按补丁版本另建业务数据。
 
 新增目录回归先在旧源码上失败，修复后本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过。真实 root 容器预检已增加目录创建、重跑保留 PG 属主／0700／marker／口令字节及拒绝符号链接检查，实际云端 Linux Docker 和目标群晖执行待验证；本机 Docker 不可用，不能将本地检查写成容器或群晖验收。本轮业务/API/UI 未变，未重跑 0.6.0 的 28 项 Edge UI。缓存及交付目标为 `artifacts/cache/0.6.1/`、`artifacts/releases/0.6.1/`，历史标签和归档不改写。
+
+## 2026-10-19：0.6.1 冻结验证与公开交付
+
+补充前一开发事件的待验证结果：[0.6.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.1) 已公开为验证版（prerelease，ID `416971870`），源码冻结 `f0c1686b83cbc954e74cebe4b72ebdcaec192e6a` / `v0.6.1`。源码 ZIP 为 490675 字节，SHA-256 `533453e0e779bc944d4720dfd0e0c6c38a24349a0375eed92a4ada48dfde7d1b`。构建 Actions `39209842823` 的真实 CI 131/131 通过、0 失败、0 跳过；正式应用索引 `sha256:f1dce90f09ab78254f269de3bd4ce05fbfe75257d9d4c5469cbaeca4bcfc9026` 已由根代理和独立复核代理与原始成功构建日志核对。
+
+验证 Actions `39210165557` / 运维提交 `fa18b8a3cd01af3b8c419da4ffa03ca71475108d` 四门禁通过：应用和 PG 双架构匿名拉取及冻结 Compose 生命周期；绑定前一门禁同一次真实执行的 PG17 六项持久化证据，并非另一次独立运行；每架构包含应用+PG的双 TAR 冻结容器检查，ARM64 为 QEMU；真实 Caddy 无 SNI 请求、仅信隔离 CA 且严格校验证书的 HTTPS 首设、HTTP/HTTPS 同账号与重建后账号及 CA 保留。真实 root 初始化预检已通过，覆盖新增的目录创建与重复初始化保护；未进行 SQLite 迁移或使用用户真实业务数据。
+
+amd64 TAR 为 221388800 字节，SHA-256 `037df6de45e4662f11bfec1a74512ef0712aa59248a9eb90516fe4fb36d8434e`；arm64 TAR 为 219362816 字节，SHA-256 `b07416db5a28595ccc4de67de9c6d3458b24e7caf1af6df1d67d63a3a77eb99f`。配套 PG 镜像索引为 `sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826`。两 TAR 在 runner 验证并上传，本机无 Docker，未完整下载 TAR。14 附件官方元数据及 13 条 SHA256SUMS 一致，12 个非 TAR 附件经官方公开 API 无凭据完整下载通过，报告为 `artifacts/cache/0.6.1/github-release-verification.json`。
+
+小证据 artifact `12167293125` 为 12449 字节，SHA-256 `7383529eddc895bcacdb011483f2905fc29625ddf132150e83a46fe3b4ffd0ea`，导入六项通过；原始小证据和报告留在 `artifacts/cache/0.6.1/remote-validation/`。本轮未改业务/API/UI，未重跑 0.6.0 的 28 项 Edge UI。API 核验不等于浏览器 UI 或附件点击验收，实际群晖、手机证书及相机、USB 打印、BarTender 和长期容量仍未验收。发布后只以独立文档提交补记录，不移动 `v0.6.1` 或重打 ZIP/TAR，附件保留冻结快照；0.6.0 与更早版本完整历史保留。
+
+随后独立下载诊断 artifact `12167880494`（25067 字节，SHA-256 `5b6d12261eb9808e53029b0c102ae507cedd8105a9fc51d35cb46716828a1475`），核对匿名 amd64 Compose、离线 amd64、离线 arm64 三份原始 TAP：各第 2 行均有运行目录初始化预检通过标记，且各 1 项通过、0 失败、0 跳过。PG captured 证据绑定的原日志 SHA-256 与匿名 Compose 日志一致。报告为 `artifacts/cache/0.6.1/remote-validation/diagnostics/marker-evidence.json`；本次只下载复核同一成功运行的日志，没有新跑容器或群晖测试。
+
+## 2026-10-19：0.6.0 手机相机访问方式复核
+
+用户反馈已部署 0.6.0，手机实时相机仍不可用，异步再次确认仍访问 `http://群晖IP:3000`。核对现有[手机实时扫码与群晖 HTTPS](SCANNING_HTTPS.md)、Caddy 配置与 Compose HTTPS overlay，确定当前访问仍不满足相机所需的安全上下文。现有指导是在原项目加入 HTTPS 入口、按实际 IP／主机名配置，并在手机安装及信任该实例公开根证书，再从无证书警告的 HTTPS 地址允许网站和系统相机权限。文档快速入口同时建议先在 File Station 创建 `https/data`、`https/config` 再启用 Caddy，避免同类 DSM bind 目录缺失；不修改已冻结 YML。保持原项目、账号、数据库及附件，HTTP 下现有拍照／选图和手输仍保留；此为已有方案的配置指导，记入“未发布”文档变更，不另发业务版本。尚未在用户群晖或手机执行该流程、完成证书信任或实际扫码，未宣称相机已解决。

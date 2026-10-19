@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.6.1（开发中，未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
+本源码版本为 **0.6.1（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -49,11 +49,15 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.6.1：群晖运行目录兼容补丁（开发中）
+## 0.6.1：群晖运行目录兼容补丁（已公开验证版）
 
 从 `7f11dc4b5100e063a4a0ffd10545adbdca44d897` 创建 `feature/v0.6.1-synology-runtime`。用户实机报错 `runtime/postgres` bind source 不存在，补充了 0.6.0 云端 Linux Compose 门禁的覆盖边界。初始化器主动创建该目录并拒绝符号链接，不改 PostgreSQL 数据目录属主及权限，重复启动保留既有口令；Compose 的四处 bind 使用传统短语法，原路径和只读秘密挂载保留。后续重建继续沿用原 `runtime/`，不为补丁新建业务数据目录。
 
-本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过；真实 root 容器初始化预检已补充，实际云端容器及群晖待验证。本轮未改业务/API/UI，未重跑旧版 28 项 UI。缓存、合成检查及交付分别放 `artifacts/cache/0.6.1/`、`artifacts/releases/0.6.1/`；尚未冻结或发布，不改写 0.6.0 标签与附件。
+源码阶段本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过；真实 root 容器初始化预检已补充，当时实际云端容器及群晖待验证，由下列发布结果补充。本轮未改业务/API/UI，未重跑旧版 28 项 UI。缓存、合成检查及交付分别放 `artifacts/cache/0.6.1/`、`artifacts/releases/0.6.1/`；本节初始开发记录时尚未冻结或发布，不改写 0.6.0 标签与附件。
+
+2026-10-19 已公开 [0.6.1 验证版](https://github.com/HotLL233/labmg/releases/tag/v0.6.1)（prerelease，ID `416971870`），冻结 `f0c1686b83cbc954e74cebe4b72ebdcaec192e6a` / `v0.6.1`；源码 ZIP SHA-256 为 `533453e0e779bc944d4720dfd0e0c6c38a24349a0375eed92a4ada48dfde7d1b`。构建 Actions `39209842823` 的真实 CI 131/131 通过，无失败或跳过，正式应用索引 `sha256:f1dce90f09ab78254f269de3bd4ce05fbfe75257d9d4c5469cbaeca4bcfc9026` 已独立对照原始构建日志。
+
+验证 Actions `39210165557` / 运维提交 `fa18b8a3cd01af3b8c419da4ffa03ca71475108d` 四门禁通过：应用和 PG 双架构匿名拉取及冻结 Compose、同一次真实 Compose 的 PG17 六项持久化证据、每架构包含应用+PG的双 TAR 容器、真实 Caddy 无 SNI 严格可信 HTTPS。匿名 amd64 Compose 及离线 amd64/arm64 三份原始 TAP 均确认真实 root 初始化预检通过，各 1 项通过且无失败或跳过；PG 证据门禁不另算一次执行，ARM64 为 QEMU。14 附件和 13 条校验清单一致，12 个非 TAR 附件经官方公开 API 匿名完整下载通过；本机未运行 Docker 或完整下载 TAR。完整摘要、证据包及检查边界见[开发历程](HISTORY.md)，原报告在 `artifacts/cache/0.6.1/`。实际群晖、手机、USB 打印、BarTender 与长期容量未验收，API 核验不等于浏览器 UI；发布后只补记录，不重打附件或移动标签。
 
 ## 0.6.0：PostgreSQL 与物资信息库
 
@@ -282,7 +286,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前 0.6.1 Compose 的目标版本镜像为 `ghcr.io/hotll233/labmg:0.6.1`，尚未冻结或发布，可拉取状态以实际 GitHub Release 和发布核验为准；0.6.0 的发布证据保留在上文。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
+当前 0.6.1 Compose 使用已公开验证版镜像 `ghcr.io/hotll233/labmg:0.6.1`，正式双架构匿名拉取已通过；发布证据见上文。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
@@ -321,7 +325,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.6.0'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.6.1'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```

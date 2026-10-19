@@ -6,9 +6,16 @@
 
 ## 未发布
 
+- 文档：补充已部署项目的手机 HTTPS 快速入口与证书信任步骤；针对 DSM bind 目录兼容性，建议先在 File Station 创建 `https/data`、`https/config` 再启用 Caddy。沿用原项目和业务数据，不修改已冻结 YML 或新增业务版本，实际手机与群晖操作仍待验证。
+
+## 0.6.1（2026-10-19，群晖运行目录兼容验证版）
+
 - 0.6.1 群晖部署兼容补丁：针对 `runtime/postgres` bind source 不存在，初始化器主动创建 PostgreSQL 数据目录，四处 Compose bind 改用传统短语法，保留原路径及秘密目录只读挂载。
 - 重复初始化保留 PostgreSQL 数据目录属主、权限和既有数据库口令；目录打开拒绝符号链接，PG 目录仍由 PostgreSQL entrypoint 管理，不随应用 UID/GID 改写。
-- 本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过；真实容器初始化预检已补充，云端 Docker 与目标群晖验证待执行。本轮未改业务/API/UI，未重跑旧版 UI 验收；0.6.0 云端门禁通过不代表已覆盖目标群晖目录行为。
+- 源码阶段本地部署相关回归 5/5（含双镜像打包 Mock）、33 个 JS 语法检查通过；冻结时实际云端容器待验，现由下列发布结果补充。本轮未改业务/API/UI，未重跑旧版 UI；0.6.0 云端门禁通过不代表已覆盖目标群晖目录行为。
+- [0.6.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.6.1) 已公开为验证版（prerelease，ID `416971870`），冻结 `f0c1686b83cbc954e74cebe4b72ebdcaec192e6a` / `v0.6.1`。构建 Actions `39209842823` 的真实 CI 131/131 通过、无失败或跳过，正式应用索引 `sha256:f1dce90f09ab78254f269de3bd4ce05fbfe75257d9d4c5469cbaeca4bcfc9026` 已独立对照原始日志。
+- 验证 Actions `39210165557` / 运维提交 `fa18b8a3cd01af3b8c419da4ffa03ca71475108d` 四门禁通过：应用/PG 双架构匿名拉取与冻结 Compose、同一次真实执行的 PG17 六项持久化证据、应用+PG 双 TAR 容器和严格可信 Caddy IP HTTPS。匿名 amd64 Compose 及离线 amd64/arm64 三份原始 TAP 均确认真实 root 初始化预检通过，各 1 项通过且无失败或跳过；PG 证据不算第二次运行，ARM64 为 QEMU。
+- 14 附件及 13 条校验清单一致，12 个非 TAR 附件经官方公开 API 匿名完整下载通过；双 TAR 在 runner 验证上传，本机未运行 Docker 或完整下载 TAR。冻结后只补文档，不重打附件或移动标签。实际群晖、手机、USB 打印、BarTender 及容量仍未验收，API 下载不等于浏览器 UI 检查。
 
 ## 0.6.0（2026-10-19，PostgreSQL 与库存匹配验证版）
 
