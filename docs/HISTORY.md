@@ -393,3 +393,19 @@ amd64 TAR 为 247920640 字节，SHA-256 `77694734e026115dae7020a36df30fd9b9f74b
 通过官方 Release API 重新核对资产 ID、大小、SHA-256 及冻结源码后，从官方二进制存储下载两个原始 TAR；临时文件仅在 `artifacts/cache/0.6.2/`，完整校验后才移入 `artifacts/releases/0.6.2/`。amd64 为 247920640 字节、SHA-256 `77694734e026115dae7020a36df30fd9b9f74ba5ec2485acbb9f916ba332172d`；arm64 为 244634624 字节、SHA-256 `1b88476f6f11fbcef7e501fc17428537f832f20b9794ff325730bb4d8b89ea9f`，均与官方元数据、既有发布记录、架构 JSON 及 SHA256SUMS 一致。匿名元数据请求曾返回 403，随后使用已有 GitHub 凭据仅在内存核对官方 API，二进制下载不向存储主机发送该凭据；不记录令牌或签名 URL。
 
 下载报告为 `artifacts/cache/0.6.2/local-image-download-report.json`。本次只补齐本地交付与记录，没有重跑业务测试、Docker 或用户群晖；原冻结源码、镜像、归档与发布证据保留，未将文件下载写成新增容器或实机验收。后续应明确区分云端发布与本地包实际存在。
+
+## 2026-10-19：0.6.2 群晖 PostgreSQL 不健康反馈（待定位）
+
+部署汇总显示 PostgreSQL 不健康、应用依赖受阻，用户表示容器没有可用日志，后续镜像列表包含 `labos:0.6.2`、`postgres:18-bookworm` 和 `caddy:2.11.7-alpine`。该截图只能确认标签存在，未显示架构或 PostgreSQL 具体错误。只读复核 YML 与官方 PG18 entrypoint 后仍未确定根因；未据此修改权限、删除目录、取消健康检查或重打旧版本。
+
+在 `docs/SYNOLOGY.md` 增补容器状态与退出码、Docker State／Health.Log、标准日志及宿主／镜像架构的只读诊断步骤，等待目标 NAS 输出和型号。此轮仅文档和诊断记录，未执行 NAS 命令或容器测试，不新增业务版本；原云端成功证据与目标 NAS 尚未验收的边界保留。
+
+## 2026-10-19：授权 SSH 查明旧 PG17 目录并恢复全新 PG18 部署
+
+用户提供群晖 SSH 连接方式用于现场诊断；不记录账号口令或会话凭据。实查 DS918+／x86-64／4.4.302+，导入镜像为 linux/amd64。PG 容器 restarting、退出码 1、非 OOM，官方日志明确拒绝旧物理数据目录；只读检查挂载源的 PG_VERSION 为 17，PGDATA 指向 18/docker。由此确定本次故障原因，补充前一事件的待定位状态，不将其归为架构或健康检查超时。
+
+沿用此前“无需旧库、全新 PostgreSQL 18”决策，停止本项目 PG 并确认不再运行；核对真实路径后，将原 postgres 目录原样重命名至 `runtime/pg17-backup-20261019T155415/postgres`，备份同一 YML 与秘密文件，未输出秘密内容。重新执行 init、强制重建四服务；PG 启动后 HTTPS 又明确报其宿主父目录不存在，创建 `https/` 并在 NAS YML 配置实际 host 后启动。秘密文件与备份字节比较一致，PG18 的 PG_VERSION=18，SQL 报 18.6／18/docker，核验时账号数 0。**没有执行 PG17 数据迁移。**
+
+收尾时发现该备份目录已不在原位置，异步询问后用户明确回复“我删除了，旧库不需要保留”；记录主动删除的决定，未由代理删除其他旧库或运行目录。最终观察 PG 和应用 healthy、重启数 0，Caddy running／重启数 0，init Exited(0)。NAS curl 与独立局域网 Node 客户端检查 HTTP 首页／首设状态接口及 HTTPS 首设状态接口均 200，HTTPS 使用导出的公开根证书严格验证；未创建管理员。公共 `root.crt` 与 `verification.json` 在 `artifacts/cache/0.6.2/nas-diagnostics/`，不提交 Git；私钥未导出。SSH 会话退出且本次 sudo 缓存已清除。
+
+更正部署／扫码文档关于群晖必能自动创建 `https/` 父目录的推断，改为先准备父目录、内部目录仍由服务创建。更正开发说明落后的未发布描述，保留冻结当时的验证边界；本次只修复 NAS 的部署状态和补文档，未修改源码／镜像、冻结 YML／ZIP／TAR、业务版本或标签。检查仅覆盖该 NAS 的启动和 LAN HTTP/HTTPS，不包括管理员登录、物资流程、手机证书安装／实际扫码、USB 打印或长期容量。

@@ -13,7 +13,7 @@
 
 ## 首次部署
 
-1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。
+1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。在 File Station 先创建 YML 旁的 `runtime/`、`https/` 两个父目录，避免 DSM 拒绝不存在的 bind 路径；已有部署保留原目录内容。
 2. 编辑 YML，将唯一配置行 LABOS_HTTPS_HOST 内的 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10；不要填协议、端口、路径。建议为群晖保留固定 IP。默认 HTTP 3000、HTTPS 8443；端口已占用时调整对应映射。
 3. 在线版可直接构建项目并拉取；本地版先在群晖导入相应 amd64 或 arm64 TAR。每个 TAR 同时包含 labos:0.6.2、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。
 4. 启动项目。labos-init 正常退出为 0，PostgreSQL 初始化后应用启动；labos-https 提供 HTTPS。空数据库首次打开网页设置管理员账号和密码。
@@ -53,7 +53,7 @@ docker compose -f docker-compose.local.yml up -d --pull never
     config/
 ~~~
 
-Docker 通过短语法挂载准备 runtime/ 与 https/ 父目录，应用初始化器创建 PostgreSQL 父目录及秘密文件，PostgreSQL 自行管理 18/docker/，HTTPS 代理自行准备 data/、config/ 并生成证书。无需另行创建这些子目录。PostgreSQL 18 的容器挂载点为 /var/lib/postgresql，PGDATA 为 /var/lib/postgresql/18/docker，不能套用本页旧版 PG17 的 /var/lib/postgresql/data 布局。
+此前根据云端 Docker 检查说明短语法挂载会准备 runtime/ 与 https/ 父目录；2026-10-19 在 DS918+ 实测，缺少 `https/` 父目录仍会报 bind mount failed。因此群晖先按首次部署步骤准备两个父目录，本版不能保证该设备自动创建它们。应用初始化器创建 PostgreSQL 父目录及秘密文件，PostgreSQL 自行管理 18/docker/，HTTPS 代理自行准备 data/、config/ 并生成证书，无需预建这些子目录。PostgreSQL 18 的容器挂载点为 /var/lib/postgresql，PGDATA 为 /var/lib/postgresql/18/docker，不能套用本页旧版 PG17 的 /var/lib/postgresql/data 布局。
 
 根证书只导出 root.crt；其旁的私钥不能公开。手机只需对本项目根证书完成一次安装和信任。IP 或 CA 改变时须重新核对；仅跳过证书警告不算信任。HTTP 入口仍可拍照、选图和手输，但不能开启实时摄像头。
 
@@ -66,6 +66,25 @@ Docker 通过短语法挂载准备 runtime/ 与 https/ 父目录，应用初始�
 可选环境变量仍可覆盖端口、UID/GID 和数据路径；本地版应用镜像固定为 labos:0.6.2，避免残留 LABOS_IMAGE 将其切回远程仓库。没有自定义需求时直接编辑所选 YML 的 IP 即可。
 
 业务功能沿用物资信息、Excel、申报验收和逐件库存流程，见[物资 API](MATERIAL_API.md)及[标签打印](LABEL_PRINTING.md)。配置解析及自动化容器验证不能代替实际群晖、手机证书、物理相机和 USB 打印验收；实际结果以版本记录为准。
+
+## PostgreSQL 不健康但界面没有日志
+
+镜像页只说明镜像标签已存在，不能确认容器正常启动。0.6.2 本地版需要 `labos:0.6.2`、`postgres:18-bookworm`、`caddy:2.11.7-alpine`；另有 `postgres:18` 不会改变该 YML 使用的标签。先到 Container Manager 左侧“容器”，选择实际的 PostgreSQL 容器查看状态、退出码和日志。
+
+若仍无可用日志，在 **NAS 的 SSH 终端**执行以下只读命令；`labos-postgres-1` 是本次反馈中的名称，其他项目应替换为自己的实际容器名：
+
+```sh
+sudo docker inspect --format '{{json .State}}' labos-postgres-1
+sudo docker logs --tail 50 labos-postgres-1
+uname -m
+sudo docker image inspect postgres:18-bookworm --format '{{.Os}}/{{.Architecture}}'
+```
+
+提供命令输出及群晖型号，重点核对 `Status`、`ExitCode`、`Error`、`OOMKilled` 和 `Health.Log`。不要发送秘密文件或完整环境变量。`labos-init` 是一次性初始化服务，退出码为 0 后停止属于预期。没有上述信息时，不能确定是权限、架构、运行时还是初始化耗时问题；先保留 `runtime/`，不以删除数据或取消健康检查代替诊断。
+
+本次最初未取得日志，后于 2026-10-19 通过授权 SSH 查明：DS918+ 的镜像架构匹配，失败原因是 `runtime/postgres/PG_VERSION` 仍为 17，PG18 官方入口检测到旧物理目录后退出，并非健康检查等待不足。按用户已确认的全新 PG18 部署需求，停止本项目数据库，将原目录连同 YML 和秘密文件备份后重新执行初始化、重建服务；另创建缺失的 `https/` 父目录并配置实际 IP。**这不是 PG17 数据迁移，不能用于需要保留旧业务数据的升级。** 用户后续明确自行删除旧库备份、不再需要旧库。
+
+目标 NAS 的 PG18.6、应用 healthy、Caddy running 和 init Exited(0) 已观察；NAS 与独立局域网客户端的 HTTP/HTTPS 接口均返回 200，HTTPS 使用本实例根证书严格校验通过。核验时新库无账号，首次设置仍待用户完成；未验证登录、物资业务、手机相机、USB 打印或长期容量。实际现场结果补充早期“未取得输出”的状态，不改写冻结版本附件。
 
 ## 历史：0.6.1 PostgreSQL 17 部署资料
 

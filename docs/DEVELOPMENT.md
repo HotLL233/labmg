@@ -37,7 +37,7 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 0.6.2 应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
 
-用户最新明确“不用管旧版本旧库”，本轮按全新 PG18 部署，不实施 PG17／SQLite 迁移或旧库兼容检测，不读取、删除或搬迁旧运行文件。历史文档中的 PG17、SQLite、仅换镜像升级与卷迁移行为只适用于当时版本，不作为本轮从旧库升级的承诺。
+用户最新明确“不用管旧版本旧库”，0.6.2 开发与发布按全新 PG18 部署，不实施 PG17／SQLite 迁移或旧库兼容检测，当时不读取、删除或搬迁旧运行文件。2026-10-19 后续授权 NAS 现场排障发现误挂 PG17 目录，在停库备份后新建 PG18，用户随后明确自行删除该旧库备份；这是现场部署处理，不是旧库迁移。历史文档中的 PG17、SQLite、仅换镜像升级与卷迁移行为只适用于当时版本，不作为本轮从旧库升级的承诺。
 
 ## 记忆、历程与版本说明
 
@@ -306,7 +306,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前 0.6.2 在线 Compose 的应用目标镜像为 `ghcr.io/hotll233/labmg:0.6.2`，尚未冻结／发布，可拉取状态待实际发布核验。两份配置均含应用、PG18、初始化与 Caddy 四服务，`runtime/` 与 `https/` 固定在 YML 旁；在线版与本地版各自单独使用。0.6.1 的公开镜像及验证证据保留在上文，不作为 PG18 的验证。本轮只提供全新 PG18 部署，不实施旧库迁移。具体部署说明见 [群晖部署](SYNOLOGY.md)。
+当前 0.6.2 在线 Compose 的应用目标镜像为 `ghcr.io/hotll233/labmg:0.6.2`，已公开为验证版，冻结源码为 `989554e`／`v0.6.2`；构建、匿名拉取及发布证据见[项目记忆](MEMORY.md)。更正本段此前仍停留在“尚未冻结／发布”的开发初期记录。两份配置均含应用、PG18、初始化与 Caddy 四服务，`runtime/` 与 `https/` 固定在 YML 旁；在线版与本地版各自单独使用。0.6.1 的公开镜像及验证证据保留在上文，不作为 PG18 的验证。本轮只提供全新 PG18 部署，不实施旧库迁移。具体部署说明及 DS918+ 父目录准备要求见 [群晖部署](SYNOLOGY.md)。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
