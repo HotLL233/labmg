@@ -296,3 +296,17 @@ README、开发说明和群晖文档补充原 YML 仅换镜像升级、首设异
 同一运行的真实Caddy HTTPS最终门禁失败：证书成功签发给127.0.0.1，IP客户端无SNI经Docker NAT导致EPROTO握手失败，清理完成。保留Release `416849441` 为未公开草稿和全部原始失败证据，不把三门禁通过写成发布成功。由此开启 `feature/v0.5.1-https-ip` 实际补丁，加入Caddy默认SNI及回归、同步新版本部署文件；原0.5.0标签、ZIP、镜像与历史main保留。新0.5.1完整交付仍待验证，未操作用户群晖、手机、打印机或真实var。
 
 0.5.1重新执行27个JS语法和完整123项源码回归：122通过、1个Docker条件跳过、0失败，含默认SNI配置防退化检查。业务及前端src保持0.5.0冻结内容，旧Edge、ZXing与打印PDF证据原样引用，不将其复制或冒称本版硬件实测。工作流显式固定Compose5.5.1，后续完整云端交付另记。
+
+## 2026-10-19：0.5.1完整验证与公开交付
+
+0.5.1冻结于 `60f96393e3307bab55da3250c11ab777a9e46f04` / `v0.5.1`。ZIP共435262字节，SHA-256 `f6664cb3af9c98adb7d86e472bdd5f9e4dbb2dbff4119467e5a6f908a2b9821b`。Actions `39192642471` 的119项回归全通过，构建正式双架构镜像 `ghcr.io/hotll233/labmg:0.5.1`；从成功job `117868579468` 原始导出日志独立核对索引 `sha256:470fb6b01183a6adc1f3f8a080d6cb4195bc0cef0ce5df2a662f96f5c06fd537`。
+
+首次0.5.1云端HTTPS helper将publicUser误当含username；接口实际只返回id、display_name、role及permissions，断言失败属于校验脚本。仅在忽略缓存修正为setup返回正整数用户id，并确认HTTP、HTTPS与重建后的id一致，未修改业务源码、版本、标签或归档。最终Actions `39193510875` / 运维提交 `c66e6603d08a897c2b39db28fbb85fa165480514` 四门禁全部通过：双架构匿名拉取及正式Compose固定runtime、非root、首设及重建；amd64原0.4.0 YML／项目／数据卷／UID-GID仅换镜像升级18项；同一公开镜像导出的双TAR冻结容器专项；真实Caddy、servername为空、rejectUnauthorized为true、仅信隔离root.crt的HTTPS首设、Host/Origin校验、HTTP/HTTPS同账号和重建保留账号及CA。ARM64容器使用QEMU，HTTPS使用Linux amd64回环隔离容器，不等于实际手机或NAS。
+
+升级专项保留历史账号、角色、数量账、独立单件、位置、包装码与已发放记录，覆盖验收位置冲突原子性、期初关闭后有原因补录、9件／3单及幂等发码、真实XLSX、schema4旧备份与schema5单据恢复。隔离容器、卷、合成凭据及fixture清理完成；未操作真实var、Downloads旧YML、群晖、手机或USB打印机。
+
+官方小证据artifact `12161250692` 的13133字节、9文件及SHA-256 `bba37a95cc1c2eb6ae64a839eb13a13183f8c078a00e65eb6266122f41b32180`一致，导入6项通过。canonical报告保留原字节和独立来源记录；本地、远程草稿发布门禁通过后，公开[0.5.1验证版Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1)（ID `416860635`）。14附件ID、大小和官方摘要与13条SHA256SUMS一致，12个非TAR附件经官方资产API匿名完整下载通过；两TAR由同一runner验证上传，本机未全量下载或运行Docker。amd64 TAR SHA-256 `6f4f40c92d77af6f07058797d824de7c3199ef84ccbc6998dda35e921384c0e4`，arm64 `7c95fd809b5f42b23d899453b38acc797d2304f4a1c5c4b557eadf667ca0a1b6`。报告在 `artifacts/cache/0.5.1/`；本机网页浏览器及常规下载链接未另验收。
+
+冻结后仅同步发布文档，附件保留冻结快照，不重打ZIP或移动标签；main与全部历史产物保留，0.5.0 Release `416849441` 仍为未公开草稿。真实群晖、手机证书／相机、USB标签打印、BarTender运行、ARM64升级和长期容量仍需目标环境验收。已有部署先停服完整备份，保留原YML／项目／挂载及UID/GID，仅更新镜像；回退须恢复升级前完整数据副本。
+
+发布后记录检查：仅6份文档变化，差异格式检查通过；11份文档的76个相对文件链接有效，v0.5.0／v0.5.1、main及冻结ZIP摘要未变。此轮只补发布事实，不重复业务测试或扩大原验证范围。

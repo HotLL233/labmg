@@ -1,6 +1,8 @@
 # 群晖 Docker 部署
 
-本文目标应用镜像对应 `0.5.1`（期初单据、存放位置与标签打印补丁），最终容器验证与 Release 交付仍待完成。0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，现由 0.5.1 替代；其标签、ZIP 和未公开草稿 Release 保留。镜像、源码 ZIP、两架构离线 TAR 及配套文件的实际发布和验证结果，以 [Release](https://github.com/HotLL233/labmg/releases)、对应 Actions 和[版本说明](CHANGELOG.md)为准。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
+本文对应已公开的 **[0.5.1 验证版](https://github.com/HotLL233/labmg/releases/tag/v0.5.1)**（2026-10-19，prerelease，Release ID `416860635`），提供 amd64/arm64 镜像、源码 ZIP、两架构离线 TAR 及配套文件，共 14 件附件。最终四项容器验证通过，具体范围见本页发布记录与[版本说明](CHANGELOG.md)。应用使用 SQLite 和本地附件，无需 PostgreSQL 或 MinIO。
+
+0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，已由 0.5.1 替代；其标签、ZIP 和未公开草稿 Release 保留。已冻结附件中的文档保留当时状态，最新验证记录以本页和版本说明为准，不覆盖旧附件。
 
 **仓库后续部署模板已改为将数据默认放在 YML 同目录的 `runtime/`，不再按镜像版本另建卷。** 历史 Release 附件不覆盖，0.4.0 冻结 YML 仍采用版本命名卷；不要将本文的同目录默认值误认为旧附件已经修改。0.5.1 沿用该固定数据路径并增加业务功能；历史默认卷不自动迁移。已有部署可以继续使用原 YML 原地升级。
 
@@ -166,7 +168,7 @@ LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.2
 
 ## 首次在线部署
 
-1. 在 [Release](https://github.com/HotLL233/labmg/releases) 和版本说明核对 0.5.1 镜像与附件的实际交付状态，本轮最终验证与发布仍待完成。同目录数据方案使用仓库当前 [docker-compose.yml](../deploy/docker-compose.yml) 和[环境示例](../deploy/.env.example)；0.4.0 及更早 Release 内冻结的同名附件仍按历史命名卷规则工作。GitHub 附件环境示例名可能为 `env.example`，源码中为 `.env.example`。
+1. 下载 [0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 的 `docker-compose.yml` 和 `env.example`，也可使用仓库当前 [docker-compose.yml](../deploy/docker-compose.yml) 和[环境示例](../deploy/.env.example)。这些 0.5.1 文件采用同目录数据方案；0.4.0 及更早 Release 内冻结的同名附件仍按历史命名卷规则工作。GitHub 附件环境示例名为 `env.example`，源码中为 `.env.example`。
 2. 在“Container Manager → 项目 → 新增”中选择保存 YML 的项目目录。仓库新模板自动在这个目录下创建 `runtime/`，不需另建版本数据目录。能否在 File Station 中浏览取决于 NAS 账号权限与 ACL；应按需授予访问权限，不用开放 `777` 或盲目递归改属主来解决。
 3. `.env` 可选。需要自定义端口或用户时，将仓库环境示例复制为项目同目录的 `.env`；首次部署保留 `LABOS_DATA_DIR` 为未设置状态，默认等同 `./runtime`。例如：
 
@@ -179,7 +181,7 @@ LABOS_IMAGE=ghcr.io/hotll233/labmg:0.3.2
    ```
 
    新建运行目录适用上述 UID/GID，无需改成 NAS 登录用户。`labos-init` 只创建并设置 `/var/lib/labos`、`data/`、`uploads/`、`logs/` 四个目录的属主及目录访问权限，不递归更改已有文件。应用继续使用 `LABOS_UID/LABOS_GID` 指定的非 root 用户；`PUID/PGID` 不控制本镜像的运行用户。
-4. 确认 `ghcr.io/hotll233/labmg:0.5.1` 已公开可拉取后，使用该 YML 创建并启动项目，Compose 按设备自动选择 amd64/arm64。`labos-init` 显示退出码 0 是正常完成；它失败时先查看日志并排错，应用不会启动。
+4. 使用该 YML 创建并启动项目，默认拉取公开镜像 `ghcr.io/hotll233/labmg:0.5.1`，Compose 按设备自动选择 amd64/arm64。`labos-init` 显示退出码 0 是正常完成；它失败时先查看日志并排错，应用不会启动。
 5. 访问 `http://群晖IP:3000`，设置管理员账号和新密码（8–1024 字符、不能全为空白、需确认）。完成后自动登录；已有数据库使用原账号。修改端口后使用对应地址，首次设置完成前仅允许可信人员访问。
 
 在 NAS SSH 会话进入放置 YML 的项目目录后，可逐条执行，每条成功后再继续：
@@ -231,7 +233,7 @@ rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while
 
 ## 离线导入与慢拉取
 
-若 NAS 拉取 `ghcr.io` 慢，可使用构建电脑上已经生成的同版本 TAR，经局域网传到 NAS，避免再次公网下载。产物位于构建电脑的 `artifacts/releases/<version>/`，不随 Git 克隆提供；下表为 0.5.1 文件名，可用性以实际完成的构建及 Release 交付为准。
+若 NAS 拉取 `ghcr.io` 慢，可下载 [0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 中对应架构的 TAR，再经局域网传到 NAS 导入，避免 NAS 再次公网拉取镜像。构建电脑若已有同版本 TAR，可直接使用 `artifacts/releases/0.5.1/` 中的文件；这些生成物不随 Git 克隆提供。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -240,6 +242,8 @@ rc.2 / rc.3 旧 YML 要求 `LABOS_ADMIN_PASSWORD`，缺失时会报 `error while
 | 同名 `.json`、`SHA256SUMS` | 架构、提交、归档大小与 SHA-256 核对 |
 | `docker-compose.yml`、环境示例、`SYNOLOGY.md` | 配套部署文件 |
 | `labos-0.5.1.zip`、`manifest.json` | 源码及构建清单 |
+| `docker-compose.https.yml`、`Caddyfile`、`SCANNING_HTTPS.md` | 可选的本地 CA HTTPS 部署 |
+| `LABEL_PRINTING.md` | 网页标签及 BarTender CSV 使用说明 |
 
 只导入与 NAS 架构匹配的一份 TAR。使用“映像 → 新增 → 从文件添加”，或在 NAS 执行：
 
@@ -346,7 +350,7 @@ if ($LASTEXITCODE -ne 0) { throw '读取目标索引失败' }
 
 GitHub Actions 按版本标签发布 amd64/arm64，最终可用性以实际 Release、Actions 和匿名拉取结果为准。仓库维护者使用 PowerShell 7 执行 `npm run package:docker`，生成源码 ZIP、两架构 TAR/清单及独立部署文件；缓存统一在 `artifacts/cache/<version>/`，不覆盖旧版本。
 
-自行构建可在源码根目录使用 PowerShell 7 执行，标签与构建版本读取该份源码的实际版本（当前开发版本为 0.5.1；需要旧版时使用其发布源码）：
+自行构建可在源码根目录使用 PowerShell 7 执行，标签与构建版本读取该份源码的实际版本（当前公开版本为 0.5.1；需要旧版时使用其发布源码）：
 
 ```powershell
 $labosVersion = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
@@ -358,7 +362,14 @@ ARM64 改为 `linux/arm64`，跨架构构建须有相应 Buildx/模拟支持。�
 
 推荐用配套项目 YML；单独从 GUI 创建一个应用容器不会执行 `labos-init`，不能自动获得同样的目录准备流程。自行管理容器时须另行准备存储及 UID/GID，内部端口保持 3000、运行目录保持 `/var/lib/labos`。应用镜像默认用户为非 root `node`，初始化服务的 root 权限仅用于准备挂载目录，不开放 Web 服务。
 
-0.5.1 的最终容器与 Release 交付仍待验证，实际发布及验证范围见 [Release](https://github.com/HotLL233/labmg/releases) 和[版本说明](CHANGELOG.md)；本机验证结果不代表目标 NAS 的性能或完整灾备已经验收。
+0.5.1 冻结于 `60f96393e3307bab55da3250c11ab777a9e46f04` / `v0.5.1`，[镜像构建 Actions 39192642471](https://github.com/HotLL233/labmg/actions/runs/39192642471)成功。[最终验证 Actions 39193510875](https://github.com/HotLL233/labmg/actions/runs/39193510875)使用独立运维提交 `c66e6603d08a897c2b39db28fbb85fa165480514`，四项验证均通过：
+
+- 空镜像仓库凭据下，amd64/arm64 正式镜像匿名拉取及配套 Compose 生命周期检查。
+- 保留原 0.4.0 YML、项目、挂载和 UID/GID，仅换镜像的 amd64 升级检查，18/18 通过。
+- 两份正式离线 TAR 的冻结容器检查，ARM64 使用 QEMU 模拟。
+- 真实隔离 Caddy 与应用容器的 HTTPS 检查：客户端不发送 SNI，严格验证本次本地 CA，覆盖首次设置、HTTP/HTTPS 共用账号及重建保留 CA 和账号。
+
+[公开 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1)含 14 件附件，大小、官方摘要及 13 条 SHA256SUMS 核对一致；12 个非 TAR 附件经官方 API 匿名完整下载通过，两份 TAR 在云端验证并上传，本机未全量下载。以上验证使用云端隔离环境和合成数据，不代表真实群晖 NAS、手机证书安装与实时相机、DL-886A USB 打印或 BarTender 流程已经验收，也不代表 NAS 性能或完整灾备验收。
 
 ## 可选 HTTPS 与 USB 标签打印
 

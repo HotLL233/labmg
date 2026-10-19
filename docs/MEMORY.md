@@ -43,9 +43,17 @@
 
 0.5.0 源码冻结于 `372069ce0f1f334ab1041ba449e71c56d9232c7f` / `v0.5.0`，ZIP SHA-256 `cccb69ee7082816a2401d1d7cd2c73d15efeda740f29bc7ee211362d80f0a3f3`。Actions `39190569007` 构建双架构镜像成功；运行 `39191542596` 的匿名拉取、Compose、0.4.0 原挂载升级 18 项及双 TAR 容器检查通过，但真实 Caddy IP HTTPS 在无 SNI 请求下握手失败。因此 Release `416849441` 保留未公开草稿，不将三项通过写成完整交付。此前 ZIP 启动器依赖检查与 XLSX 文件头两次校验脚本错误已在忽略缓存内修正，均未改变业务源码。
 
-真实缺陷是 Docker NAT 后 IP 客户端不发送 SNI，Caddy 无法用容器本地地址选中外部 IP 证书。后续从冻结提交建立 `feature/v0.5.1-https-ip`，将部署配置加入 `default_sni {$LABOS_HTTPS_HOST}`，沿用原业务、schema5、固定 runtime 及权限规则；手机仍须安装并信任 CA。0.5.1 是实际配置修复的新补丁版本，保留 0.5.0 标签、镜像和归档，不移动旧标签或覆盖附件。缓存、合成测试和交付分别使用 `artifacts/cache/0.5.1/`、`artifacts/releases/0.5.1/`，最终无 SNI HTTPS、完整镜像和 Release 结果按实际追加。
+真实缺陷是 Docker NAT 后 IP 客户端不发送 SNI，Caddy 无法用容器本地地址选中外部 IP 证书。后续从冻结提交建立 `feature/v0.5.1-https-ip`，将部署配置加入 `default_sni {$LABOS_HTTPS_HOST}`，沿用原业务、schema5、固定 runtime 及权限规则；手机仍须安装并信任 CA。0.5.1 是实际配置修复的新补丁版本，保留 0.5.0 标签、镜像和归档，不移动旧标签或覆盖附件。缓存、合成测试和交付分别使用 `artifacts/cache/0.5.1/`、`artifacts/releases/0.5.1/`，实际交付结果见下文。
 
-0.5.1源码阶段27个JS语法通过，全量123项中122通过、1个Docker条件跳过、0失败。业务与前端src未改，0.5.0的真实Edge、ZXing及打印PDF报告保留原版本和检查边界，不将其写为本版重复实测。最终容器、升级与发布结果待补记。
+0.5.1源码阶段27个JS语法通过，全量123项中122通过、1个Docker条件跳过、0失败。业务与前端src未改，0.5.0的真实Edge、ZXing及打印PDF报告保留原版本和检查边界，不将其写为本版重复实测。源码阶段的待验证状态由下列实际交付结果补充。
+
+[0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 已公开为验证版（prerelease，ID `416860635`），源码冻结 `60f96393e3307bab55da3250c11ab777a9e46f04` / `v0.5.1`。ZIP SHA-256 `f6664cb3af9c98adb7d86e472bdd5f9e4dbb2dbff4119467e5a6f908a2b9821b`。构建 Actions `39192642471` 的119项回归全部通过，发布镜像 `ghcr.io/hotll233/labmg:0.5.1`，正式索引 `sha256:470fb6b01183a6adc1f3f8a080d6cb4195bc0cef0ce5df2a662f96f5c06fd537` 已与成功原始 job 日志独立核对。
+
+最终验证 Actions `39193510875` / 运维提交 `c66e6603d08a897c2b39db28fbb85fa165480514` 四门禁全部通过：双架构匿名拉取与正式 Compose／固定 runtime／非 root／首设／重建；amd64 沿用0.4.0原YML、项目、卷及UID/GID仅换镜像升级18项；同一镜像双TAR冻结容器专项（ARM64为QEMU）；真实Caddy、空SNI、严格证书校验且只信隔离CA的HTTPS首设、Host/Origin、HTTP/HTTPS同账号ID和重建保留账号及CA。升级覆盖历史数据、新补录与XLSX、schema4/5恢复及幂等。首轮0.5.1云端验证的用户名断言错误仅在缓存helper：接口实际返回用户id，不返回username；修正为正整数id与跨入口一致性后重跑通过，业务源码及冻结归档未改。
+
+小证据artifact `12161250692`（13133字节，9文件，SHA-256 `bba37a95cc1c2eb6ae64a839eb13a13183f8c078a00e65eb6266122f41b32180`）与官方摘要一致，导入6项通过。发布前本地与草稿门禁通过；14附件ID、大小、官方摘要及13条SHA256SUMS核对通过，12个非TAR附件经官方资产API匿名完整下载通过。两TAR由同一runner验证并直接上传，本机未全量下载或运行Docker；amd64 SHA-256 `6f4f40c92d77af6f07058797d824de7c3199ef84ccbc6998dda35e921384c0e4`，arm64 `7c95fd809b5f42b23d899453b38acc797d2304f4a1c5c4b557eadf667ca0a1b6`。报告在 `artifacts/cache/0.5.1/`，公开检查为 `github-release-verification.json`；网页浏览器及常规下载链接未另验收。
+
+用户真实群晖、手机信任证书、USB打印和BarTender运行、ARM64升级及长期容量仍未实机验收。手机须按[HTTPS说明](SCANNING_HTTPS.md)安装并信任CA；标签须按[打印说明](LABEL_PRINTING.md)在现有驱动试打校准。已有部署先停服完整备份，沿用原YML／项目／挂载／UID-GID，仅更新镜像；旧命名卷不自动搬迁。main和全部历史标签、归档保留，0.5.0 Release仍为未公开草稿。发布后仅独立提交文档，不移动标签或重打冻结附件。
 
 ## 0.5.0：期初单据、位置与标签（冻结候选，未公开发布）
 
@@ -187,7 +195,7 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 | 在线部署版 | `0.2.0-rc.3`，源码提交 `46f2a3c`，公开镜像 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，匿名双架构拉取与正式 Compose 验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 已发布 |
 | 首次设置密码版 | `0.2.0-rc.4`，冻结提交 `8ed6ea4`，公开镜像及正式 YML 首设/登录验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.4) 已发布并核验 10 附件；已有账号保持原样 |
 | 自动部署存储版 | `0.2.0-rc.5`，冻结提交 `b067c8c`，默认自动创建命名卷及目录权限；正式双架构 TAR、公开镜像匿名拉取和配套 YML 验收通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.5) 已公开并核验 10 附件 |
-| 当前工作流 | 0.5.1 在 `feature/v0.5.1-https-ip` 修复真实 IP HTTPS 并验证完整交付；0.5.0 冻结 `372069c` / `v0.5.0`，其 Release 保留未公开草稿。0.4.0 及历史已交付版本、main 保留，最终发布结果按实际追加 |
+| 当前工作流 | 0.5.1 已公开为验证版，冻结 `60f9639` / `v0.5.1`，完整镜像／离线包／YML及四项云端门禁通过；发布记录在 `feature/v0.5.1-https-ip` 与 develop 同步。0.5.0 冻结 `372069c` / `v0.5.0`，Release 保留未公开草稿；main、旧标签及归档保留 |
 | 默认分支 | `develop`，2026-10-16 设置并经 API 核验，以提供当前开发文档及手动发布入口；`main` 提交仍为 `2672321` |
 | Node.js | 要求 `>=22.13`，建议 24；此前本机检查为 Node `24.18.0`、npm `11.16.0` |
 
@@ -383,5 +391,7 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 | 2026-10-19 | 用户要求原地升级保留数据，并把数据放在 YML 旁便于查找。核实首设不会重置已有用户、历史版本卷可能误接空库；将后续模板改为固定 ./runtime bind，补迁移和备份说明、Git/打包/镜像上下文数据排除及隔离测试。本轮仅修订部署配置，沿用已发布0.4.0镜像；23JS语法、16后端、1Compose四场景和1打包回归通过，Docker专项条件跳过，未操作用户NAS、真实var或Downloads旧YML。 |
 
 | 2026-10-19 | 0.5.0 完成期初／补录单、位置、领用入口、标签模板及 BarTender CSV。冻结源码并构建镜像后，真实云端检查通过原0.4.0挂载升级18项和双TAR容器，但Caddy IP无SNI握手失败；保留未公开草稿与原归档，开启实际0.5.1补丁修复，不移动旧标签。 |
+
+| 2026-10-19 | 0.5.1冻结60f9639/v0.5.1，构建39192642471及最终四门禁39193510875全通过，含原0.4.0配置升级18项及真实无SNI严格可信HTTPS。公开验证版Release416860635交付14附件，12小件匿名完整下载与全部摘要通过；两TAR在runner验证上传、ARM64为QEMU。冻结后只补文档，保留0.5.0未公开草稿、main及旧标签；真实NAS/手机/USB打印未验收。 |
 
 后续在此追加新事件摘要，并同步上方当前状态与关联文档。具体提交记录以 Git 为准，不在文件中预写本次尚未生成的提交散列。

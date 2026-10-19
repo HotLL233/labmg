@@ -1,6 +1,10 @@
 # LabOS 实验室综合管理系统
 
-当前开发版本：**0.5.1 期初单据与标签补丁版**，最终容器验证与 Release 交付仍待完成。0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，现由 0.5.1 替代；保留其标签、ZIP 和未公开草稿 Release。交付状态与验证范围以 [Release](https://github.com/HotLL233/labmg/releases)、GitHub Actions 实际结果和[版本说明](docs/CHANGELOG.md)为准。已公开的 [0.4.0](https://github.com/HotLL233/labmg/releases/tag/v0.4.0) 及更早版本的源码、双架构镜像、离线包和配套 YML 继续保留。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
+当前公开版本：**[0.5.1 期初单据与标签补丁版](https://github.com/HotLL233/labmg/releases/tag/v0.5.1)**（2026-10-19，prerelease）。已提供 amd64/arm64 镜像及 14 件 Release 附件，最终四项容器验证通过；范围见下方发布记录和[版本说明](docs/CHANGELOG.md)。
+
+0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，已由 0.5.1 替代；保留其标签、ZIP 和未公开草稿 Release。已公开的 [0.4.0](https://github.com/HotLL233/labmg/releases/tag/v0.4.0) 及更早版本的源码、双架构镜像、离线包和配套 YML 继续保留。
+
+系统使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
 
 ## 快速启动
 
@@ -47,7 +51,7 @@ npm start
 
 升级后又出现“首次设置管理员”时，先停止写入，核对原容器 `/var/lib/labos` 的实际挂载源；接错目录或卷不等于旧数据已删除。保留旧卷与新目录，按[排查步骤](docs/SYNOLOGY.md#更新后又出现首次设置管理员)接回旧数据。账号、权限、系统设置、历史记录及附件均依赖同一运行挂载；保留容器名称或 YML 文件本身不能代替保留数据。
 
-首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。目标镜像为 `ghcr.io/hotll233/labmg:0.5.1`，支持 amd64/arm64，交付与验证范围见[发布页](https://github.com/HotLL233/labmg/releases)和版本说明。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
+首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，或下载 [0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 的配套文件，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。公开镜像为 `ghcr.io/hotll233/labmg:0.5.1`，支持 amd64/arm64。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
 
 离线部署仍可导入同架构 TAR，在 `.env` 设置 `LABOS_IMAGE=labos:0.5.1`，跳过拉取后启动。升级和回退须保留完整数据备份；旧版本不能识别新版所有数据，回退不能只切旧镜像。普通 `docker compose down` 保留数据；旧命名卷配置不要用 `down -v`，绑定目录也不要手工删除。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
 
@@ -80,7 +84,9 @@ npm run package:zip
 
 GitHub Actions 在推送与 `package.json` 版本匹配的 `v*` 标签时构建并推送 GHCR 多架构镜像；镜像发布结果与匿名拉取验证以对应 Actions 运行和包状态为准，部署配置本身不代表发布已成功。`0.2.0-rc.2` 引入的本地 TAR 交付方式及历史版本继续保留。
 
-0.4.0 及更早版本的正式容器、双架构 TAR、原挂载升级及附件核验记录保留在[版本说明](docs/CHANGELOG.md)。0.5.1 的最终容器、升级与 Release 交付结果仍待追加；历史 ARM64 云端容器验证使用 QEMU，不能替代目标群晖实机验收。手机实时相机与 DL-886A USB 物理打印也尚未验收。
+0.5.1 冻结于 `60f9639` / `v0.5.1`，[镜像构建](https://github.com/HotLL233/labmg/actions/runs/39192642471)与[最终验证](https://github.com/HotLL233/labmg/actions/runs/39193510875)成功。四项验证包括双架构匿名拉取及正式 Compose、原 0.4.0 配置同挂载的 amd64 升级 18/18、双架构离线 TAR 容器检查，以及无 SNI、仅信任隔离 CA 且严格验证证书的 HTTPS 生命周期检查；ARM64 使用 QEMU 模拟。14 件附件摘要一致，12 个非 TAR 附件经官方 API 匿名完整下载通过；两份 TAR 在云端验证并上传，本机未全量下载。
+
+Release 附件保留源码冻结时的文档，最新交付记录见本页和[版本说明](docs/CHANGELOG.md)，不重打已冻结归档。0.4.0 及更早验证记录继续保留。真实群晖 NAS、手机证书与实时相机、DL-886A USB 打印及 BarTender 流程尚未验收。
 
 解压后先执行 `npm ci --omit=dev --ignore-scripts` 再运行 `npm start`；`start-labos.cmd` 在首次缺少依赖时自动安装。源码 ZIP 不含 node_modules，首次安装需要 npm 网络或已有缓存；Docker 镜像已包含运行依赖，可用 TAR 离线部署。部署包不包含本地运行数据；后续引用版本时同时核对清单中的版本、源码摘要和 ZIP 校验值。
 

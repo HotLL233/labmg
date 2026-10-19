@@ -130,9 +130,15 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 
 0.5.0 已冻结于 `372069ce0f1f334ab1041ba449e71c56d9232c7f` / `v0.5.0`。镜像构建及真实云端匿名拉取、原0.4.0挂载升级18项和双TAR容器检查通过，但最终HTTPS检查发现IP无SNI经Docker NAT后无法选中证书，Release保持未公开草稿。旧标签、ZIP、镜像与证据保留，不能修改旧标签来掩盖该结果。
 
-新分支 `feature/v0.5.1-https-ip` 修复 Caddy `default_sni`，继承全部0.5物资功能、schema5、生产固定runtime及原挂载升级方式；只调整补丁版本、配套部署和文档。工作流明确使用已验证的Compose5.5.1，避免runner默认CLI省略字段造成配置测试误报。新版本缓存／合成运行目录使用 `artifacts/cache/0.5.1/`，交付使用 `artifacts/releases/0.5.1/`，旧数据与产物不搬迁。真实无SNI HTTPS和完整交付结果待实际验证后追加，不以配置测试代替。
+新分支 `feature/v0.5.1-https-ip` 修复 Caddy `default_sni`，继承全部0.5物资功能、schema5、生产固定runtime及原挂载升级方式；只调整补丁版本、配套部署和文档。工作流明确使用已验证的Compose5.5.1，避免runner默认CLI省略字段造成配置测试误报。新版本缓存／合成运行目录使用 `artifacts/cache/0.5.1/`，交付使用 `artifacts/releases/0.5.1/`，旧数据与产物不搬迁。真实无SNI HTTPS和完整交付结果见下文，不以配置测试代替。
 
 源码阶段27个JS语法、全量122通过／1个Docker条件跳过／0失败（共123项）；src业务未变，先前0.5.0的Edge和打印PDF记录保持原报告身份。后续发布必须实际重跑匿名拉取、原挂载升级、双TAR和无SNI可信HTTPS，不因补丁较小跳过交付。
+
+实际交付已完成：[0.5.1验证版](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 公开，Release `416860635`，冻结提交 `60f96393e3307bab55da3250c11ab777a9e46f04` / `v0.5.1`。构建 Actions `39192642471` 的119项回归全通过；公开镜像 `ghcr.io/hotll233/labmg:0.5.1` 索引 `sha256:470fb6b01183a6adc1f3f8a080d6cb4195bc0cef0ce5df2a662f96f5c06fd537` 已与成功原始job日志核对。
+
+验证 Actions `39193510875` / 运维提交 `c66e6603d08a897c2b39db28fbb85fa165480514` 四项门禁全通过：双架构匿名拉取及正式Compose生命周期；amd64原0.4.0 YML／项目／挂载／UID-GID仅换镜像升级18项（含补录、XLSX和schema4/5恢复）；双架构TAR容器专项，ARM64使用QEMU；真实Caddy无SNI且严格验证隔离CA的HTTPS首设、同源检查、同账号及重建保留CA。0.5.1首次云端helper误读未返回的username，改验实际返回的用户id后重跑通过，未改源码或冻结产物。
+
+14份附件及13条SHA256SUMS一致，12个非TAR附件官方API匿名完整下载通过；两TAR由同run验证并上传，本机未全量下载。小证据包官方摘要核对及6项导入通过，原报告在 `artifacts/cache/0.5.1/`。目标NAS、手机、ARM64升级、USB打印和BarTender实际运行仍未验收；网页浏览器与常规下载链接未另验证。发布后仅补文档，附件文档保留冻结快照，不重打ZIP、不移动v0.5.1；0.5.0继续保留未公开草稿。已有部署保留原数据与YML，仅更新镜像，升级前先完整备份。
 
 ## 0.5.0：期初单据、位置与标签（冻结候选，未公开发布）
 

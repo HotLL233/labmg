@@ -11,10 +11,14 @@
 ## 0.5.1（2026-10-19，期初标签与 IP HTTPS 验证版）
 
 - 完整继承下方0.5.0冻结候选的物资功能：验收存放位置、库存申请领用、永久期初单据、XLSX导入导出、关闭后有原因的存量补录及调整流水、入库按件发码、可配置标签与BarTender CSV。
-- 修复Caddy经Docker NAT接收IP无SNI客户端时的证书选择，配置默认SNI为实际访问IP／主机名；保留TLS证书校验，手机仍须安装并信任CA。源码回归防止遗漏此配置，实际无SNI容器握手验证仍待执行。
+- 修复Caddy经Docker NAT接收IP无SNI客户端时的证书选择，配置默认SNI为实际访问IP／主机名；保留TLS证书校验，手机仍须安装并信任CA。源码回归防止遗漏此配置；实际无SNI且严格可信的容器HTTPS验证已通过，范围见下列发布结果。
 - 配套镜像、YML、环境示例及构建版本改为0.5.1，CI固定Compose5.5.1。生产继续复用原数据源，新增物资备份schema5兼容旧格式，回退需恢复升级前完整数据副本。
-- 0.5.0的最终HTTPS门禁未通过，因此未公开Release；保留其冻结标签、源码ZIP、镜像及草稿，不覆盖既有产物。本版完整镜像、离线包与公开发布结果完成后追加。
+- 0.5.0的最终HTTPS门禁未通过，因此未公开Release；保留其冻结标签、源码ZIP、镜像及草稿，不覆盖既有产物。本版已完成下列完整交付。
 - 本版源码阶段27个JS语法通过，全量123项中122通过、1个Docker条件跳过、0失败，包含新默认SNI配置检查。业务和前端src未改，0.5.0的Edge、解码图片和打印PDF证据保留为原快照，不冒充本版重跑或物理设备验收。
+- [0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 已公开为验证版（prerelease，ID `416860635`），冻结提交 `60f96393e3307bab55da3250c11ab777a9e46f04` / `v0.5.1`。Actions `39192642471` 的119项回归全通过并构建双架构镜像 `ghcr.io/hotll233/labmg:0.5.1`，正式索引 `sha256:470fb6b01183a6adc1f3f8a080d6cb4195bc0cef0ce5df2a662f96f5c06fd537` 已从成功原始日志独立核对。
+- GitHub Ubuntu runner `39193510875` / 运维提交 `c66e6603d08a897c2b39db28fbb85fa165480514` 四门禁通过：双架构匿名拉取及正式Compose首设／固定runtime／非root／重建持久化；amd64原0.4.0 YML、项目、卷及UID/GID仅换镜像升级18项（历史数据、新补录、XLSX、schema4/5恢复及幂等）；同一镜像双TAR冻结容器专项，ARM64为QEMU；真实Caddy空SNI、严格证书验证且仅信隔离CA的HTTPS首设、Host/Origin、同账号ID及重建保留账号与CA。首次云端helper的username断言错误仅改缓存脚本，按接口实际返回id验证后通过，未改变源码归档。
+- 14附件的ID／大小／官方SHA及13条SHA256SUMS一致；12个非TAR附件经官方资产API匿名完整下载通过。两TAR由runner验证并直接上传，本机未全量下载或运行Docker；小证据包官方摘要核对及6项导入通过。源码ZIP SHA-256 `f6664cb3af9c98adb7d86e472bdd5f9e4dbb2dbff4119467e5a6f908a2b9821b`，amd64 TAR `6f4f40c92d77af6f07058797d824de7c3199ef84ccbc6998dda35e921384c0e4`，arm64 TAR `7c95fd809b5f42b23d899453b38acc797d2304f4a1c5c4b557eadf667ca0a1b6`。冻结后仅补记录，不移动标签或重打附件。
+- 真实群晖、手机证书安装／相机、USB打印及BarTender运行、ARM64升级与长期容量未实机验收；网页浏览器和常规下载链接未另验证。旧部署先完整备份，保留原YML、项目及存储，仅更新镜像；手机按[HTTPS说明](SCANNING_HTTPS.md)信任证书，标签按[打印说明](LABEL_PRINTING.md)实际试打校准。
 
 ## 0.5.0（2026-10-19，期初单据与标签冻结候选，未公开发布）
 
