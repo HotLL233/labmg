@@ -436,3 +436,17 @@ amd64 TAR 为 247920640 字节，SHA-256 `77694734e026115dae7020a36df30fd9b9f74b
 本机源码阶段最终：36 个 JavaScript 语法检查通过；物资真实隔离 PG17.11 与 HTTP 全套 43/43，包含中文与旧列、NFKC 身份复用、自动码、D/E 冲突准确定位、5001 条主档仍可筛选导出、逐批次导回草稿及权限重读。标签与 XLSX 联合 20/20，账号 CSV 8/8 和真实隔离 API 7/7；独立其他源码/配置合跑 108/108（含当时 CSV 7 项，与上述有重复，不累计），打包/初始化/启动 5 通过、1 个本机 Docker 条件跳过。最新真实 Edge 全站布局专项 1/1 无跳过；物资 UI 模拟 API 的 29 项及 8 图已目视。以上本机数据库为 PG17.11，正式 PG18 CI、容器和镜像仍待发布门禁。
 
 尚未冻结或发布；正式镜像、PG18、双架构三镜像离线包和公开Release将按实际结果补记。未连接NAS、实际业务数据、真手机、Excel/WPS下拉UI或USB打印机。
+
+## 2026-10-19：0.7.0 冻结验证与公开交付
+
+补充前述源码阶段待验状态：[0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0) 已公开为验证版（prerelease，ID `417087149`），冻结 `ef9d0f6cf3629ddf02500e94ee11992bf8c934af` / `v0.7.0`，注解标签对象为 `8a6a432e638bcae35212fe8eb646817cc8e2a94a`。源码 ZIP 为 557351 字节，SHA-256 `e4ee7ccd3de522ef0cdcff7b377aa70be43267f485d680f9119496330299c92a`。构建 Actions `39226182604` 的真实 PG18 CI159/159、36个JS语法检查通过，无失败或跳过；正式应用索引为 `sha256:a2900bc0fdd7f18d55146070592be7a318335735915def21a31f46a05b169ad9`。
+
+验证 Actions `39226749808` / 运维提交 `79b07ae7ebfef4fc24b6d0668aee68bc207db1c8` 四门禁通过：三镜像双架构匿名拉取及冻结在线 Compose；绑定在线同次真实执行的 PG18 六项持久化证据，不算另一次独立运行；实际冻结本地 YML、四服务禁止拉取的三镜像双 TAR 容器检查，ARM64为QEMU；无SNI且严格校验本实例CA的HTTPS生命周期。独立本地registry核验只读取5份JSON元数据，不能视为本机拉取或容器执行。小证据artifact `12174207583`（13668字节，SHA-256 `41258d56e0773ed9080b4150f0fa6ea455d287f408eac33f8f8445879d4b4107`）核对后六项导入通过。
+
+诊断artifact `12174451955` 为27753字节，SHA-256 `f5fa571ef622bde8a573ca92eb33b7f3aa240b98f71522117f9c6463bc3ae284`。独立复核在线amd64、离线amd64及arm64三份原始TAP，各1项通过、0失败、0跳过，均有真实root初始化预检标记；PG captured与在线同次原日志逐字节一致。报告为 `artifacts/cache/0.7.0/remote-validation/diagnostics/marker-evidence.json`，只是复核同一成功运行，没有重跑容器。
+
+本地两TAR已实际保存于 `artifacts/releases/0.7.0/`：amd64为247932416字节，SHA-256 `74eb36730a3802025290001fb12cf11f0e614bf3784350c6b92ec2957144cdef`；arm64为244646400字节，SHA-256 `d2c6bdabb41fbcf7585fee3e112e4090c23a2a24d124698a716f33d459e9c388`。`local-image-download-report.json`核对正式原包大小与摘要，`local-image-archive-verification.json`通过TarReader读取manifest／config确认每包三镜像、六config的linux／架构及SHA一致，未逐层读取layer或运行本机Docker。最终 `artifacts/cache/0.7.0/local-delivery-verification.json` 确认12件本地交付文件共493247056字节，全部大小与SHA-256通过。
+
+公开API的12件附件元数据、发布响应与11条SHA256SUMS一致。最初API下载两份YML后遇到403额度限制，原报告保留为 `github-release-verification-api-rate-limited.json`；随后改用官方 `github.com/releases/download/v0.7.0` 公开URL，无凭据完整下载10个非TAR附件，10/10 HTTP200、共668240字节，大小及SHA-256通过，报告为 `artifacts/cache/0.7.0/public-asset-download-verification.json`。后一次下载未调用API、未下载TAR，也未进行浏览器UI或附件点击验收，不记为10件API下载成功。
+
+冻结源码的真实隔离Edge标签检查37/37通过，390／768／1440px共6张截图已目视，报告为 `artifacts/cache/0.7.0/label-ui/report.json`；实际加载固定ZXing码图，但数据为合成记录且`window.print()`被拦截，只核对预览、范围、首张试打、错误和CSV，无系统打印窗口、USB或BarTender调用。实际NAS、真手机、Excel／WPS下拉UI、物理打印及长期并发未验，未访问用户业务数据。本版内容归入统一0.7.0／2026-10-19版本说明，0.6.2后续纯文档条目仍留“未发布”；发布后只补文档，不移动标签、重打镜像或改写冻结归档，旧版历史完整保留。

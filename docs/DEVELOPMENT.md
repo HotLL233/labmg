@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.7.0（开发中，尚未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为 PostgreSQL 18；当前公开交付为下方 0.6.2，旧版测试、容器和实机结果不代替 0.7.0 的实际验证。发布状态以[版本说明](CHANGELOG.md)及 GitHub Release 为准。
+本源码版本为 **0.7.0（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为 PostgreSQL 18；本版实际 CI、容器和交付记录见下文，旧版结果仍保留。发布状态以[版本说明](CHANGELOG.md)及 GitHub Release 为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -35,7 +35,7 @@ artifacts/             唯一构建产物与缓存目录，不提交
   legacy/              目录整理前的产物和数据迁移备份
 ```
 
-当前应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。0.7.0 配置中的镜像标签是待发布目标，不能当作镜像已存在。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
+当前应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。两份完整 Compose 使用 `postgres:18-bookworm`，父目录挂载到 `/var/lib/postgresql`，PGDATA 为 `/var/lib/postgresql/18/docker`，对应 YML 旁 `runtime/postgres/18/docker/`；数据库连接口令仍在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`。Caddy 数据在同目录 `https/`，这两个运行目录均须保留。0.7.0 已交付 GHCR 双架构镜像、两份完整 YML 及三镜像离线包。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
 
 用户最新明确“不用管旧版本旧库”，0.6.2 开发与发布按全新 PG18 部署，不实施 PG17／SQLite 迁移或旧库兼容检测，当时不读取、删除或搬迁旧运行文件。2026-10-19 后续授权 NAS 现场排障发现误挂 PG17 目录，在停库备份后新建 PG18，用户随后明确自行删除该旧库备份；这是现场部署处理，不是旧库迁移。历史文档中的 PG17、SQLite、仅换镜像升级与卷迁移行为只适用于当时版本，不作为本轮从旧库升级的承诺。
 
@@ -51,21 +51,27 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.7.0：中文 Excel 与打印、手机体验（进行中）
+## 0.7.0：中文 Excel 与打印、手机体验（已公开验证版）
 
-从 `42f5963` 创建 `feature/v0.7.0-excel-names-and-label-printing`，版本为 0.7.0；缓存统一在 `artifacts/cache/0.7.0/`，交付目标为 `artifacts/releases/0.7.0/`。本轮尚未冻结、创建标签、构建正式镜像或公开 Release，`main`、0.6.2 标签和归档保持原样。
+从 `42f5963` 创建 `feature/v0.7.0-excel-names-and-label-printing`，版本为 0.7.0；缓存统一在 `artifacts/cache/0.7.0/`，交付目录为 `artifacts/releases/0.7.0/`。本节最初记录时尚未冻结或发布，后续结果补充如下；`main`、0.6.2 标签和归档保持原样。
 
 用户要求库存及其他导入模板优先引用现有中文名称，程序编码只用于身份识别；错误尽量明确工作表及单元格，并要求导出 Excel 可回导。后续确认**仅库存和物资信息库需要回导**，因此不新增申报、验收或领用历史报表的导入入口。信息库按名称＋规格＋单位复用，库存按批次复制到期初／补录草稿，核对后再入库；不能把重复导入解释为历史恢复或自动去重。
 
-前端已按结构化 `IMPORT_VALIDATION` 错误显示工作表、实际行列、中文字段、输入值和原因，失败保留文件、表单及版本。物资选项优先显示中文名称／规格／单位，系统编码只读且非必填；后端自动编码、中文字典解析、整批事务校验、导出回导和中文仓库输出已完成源码集成，本机物资完整回归 43/43 通过（隔离 PG17.11），正式 PG18 CI 尚待执行、镜像未发布。解析工作簿后重新读取会话与权限，401／403 保留为权限错误。手机改动覆盖局部横向表格和导航、44px 触控、16px 输入、动态视口弹窗和固定保存栏。DL-886A（NEW）面板支持范围与首张试打，通过系统打印窗口使用现有 USB 驱动；不静默选择设备或调用 BarTender。详见 [打印说明](LABEL_PRINTING.md)和 [API 说明](MATERIAL_API.md)。
+前端已按结构化 `IMPORT_VALIDATION` 错误显示工作表、实际行列、中文字段、输入值和原因，失败保留文件、表单及版本。物资选项优先显示中文名称／规格／单位，系统编码只读且非必填；后端自动编码、中文字典解析、整批事务校验、导出回导和中文仓库输出已完成源码集成，本机物资完整回归 43/43 通过（隔离 PG17.11），当时正式 PG18 CI 和镜像仍待发布门禁，现由下列实际结果补充。解析工作簿后重新读取会话与权限，401／403 保留为权限错误。手机改动覆盖局部横向表格和导航、44px 触控、16px 输入、动态视口弹窗和固定保存栏。DL-886A（NEW）面板支持范围与首张试打，通过系统打印窗口使用现有 USB 驱动；不静默选择设备或调用 BarTender。详见 [打印说明](LABEL_PRINTING.md)和 [API 说明](MATERIAL_API.md)。
 
 参考下拉每类最多 5000 条，本次导出涉及的数据优先；参考库更大时该列表允许手填已有中文名称，服务端仍检查物资组合、分类、区域及仓库。此上限是工作簿引用列表及单次明细容量，不是信息库总量限制；各列独立下拉不能代替名称＋规格＋单位的联合身份校验。源码语法检查当次 36 个 JavaScript 通过，完整材料回归与正式容器结果仍按实际后续补记。
 
 已执行的有限检查：前端 VM 45/45；物资真实 Edge（模拟 API）390px／768px 共 29 项及 8 张截图目视，报告为 `artifacts/cache/0.7.0/material-ui/report.json`；全站响应式真实 Edge 用合成数据检查 13 模块、4 管理子页、长表单／附件／登录／打印布局，`tests/mobile-layout.test.js` 最新本机 1/1，无跳过。账号 CSV 前端 8/8，账号事务 API 在本地 PG17.11 专用隔离数据库及 HTTP 服务中 7/7、无失败或跳过，覆盖整批回滚、username 身份、密码／会话、最后 ADMIN 与权限保护；正式 CI 已纳入两份账号测试。上述检查不使用真实业务库，也不代表真手机、PG18、NAS 或打印硬件验收。XLSX 与标签的专项结果及后续完整业务回归和容器结果在完成后补记，不预写“全部通过”。
 
-发布准备沿用现有脚本：`package.ps1` 从 `package.version` 生成不可覆盖的源码 ZIP；`package-docker.ps1` 复用冻结 ZIP，每架构导出应用、`postgres:18-bookworm` 与 `caddy:2.11.7-alpine` 三镜像。最终仍须交付 GHCR amd64／arm64、两份本地实际存在且校验通过的 TAR、两份完整 YML、源码及摘要。发布流程动态读取标签与包版本，不需要把所有旧版本引用批量改成 0.7.0。当前只是准备配置与门禁计划，尚未执行冻结或远程发布。
+发布准备沿用现有脚本：`package.ps1` 从 `package.version` 生成不可覆盖的源码 ZIP；`package-docker.ps1` 复用冻结 ZIP，每架构导出应用、`postgres:18-bookworm` 与 `caddy:2.11.7-alpine` 三镜像。交付要求为 GHCR amd64／arm64、两份本地实际存在且校验通过的 TAR、两份完整 YML、源码及摘要。发布流程动态读取标签与包版本，不需要把所有旧版本引用批量改成 0.7.0；此段初期为配置与门禁计划，实际冻结和发布见下文。
 
-本轮另在 ignored 的 `artifacts/cache/0.7.0/` 准备 22 个发布 helper 模板，真实 commit／digest 尚空；21 个脚本语法、3 个内联脚本、四门禁绑定及合成三镜像 TAR 离线自检通过。当前两份 Compose 与 HTTPS 配置检查 2/2、无失败或跳过；这些不是容器生命周期或真实发布结果。执行顺序及仍需核实的输入记录在缓存内 `RELEASE-PREPARATION.md`，不提交生成物或改写旧 helper。
+初期另在 ignored 的 `artifacts/cache/0.7.0/` 准备 22 个发布 helper 模板，真实 commit／digest 当时尚空；21 个脚本语法、3 个内联脚本、四门禁绑定及合成三镜像 TAR 离线自检通过。当时两份 Compose 与 HTTPS 配置检查 2/2、无失败或跳过；这些不是容器生命周期或真实发布结果。执行顺序记录在缓存内 `RELEASE-PREPARATION.md`，不提交生成物或改写旧 helper。
+
+[0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0) 已公开为 prerelease（ID `417087149`），冻结 `ef9d0f6cf3629ddf02500e94ee11992bf8c934af` / `v0.7.0`。构建 Actions `39226182604` 的真实 PG18 CI 159/159 通过、0 失败、0 跳过，36 个 JS 语法检查通过；正式应用索引为 `sha256:a2900bc0fdd7f18d55146070592be7a318335735915def21a31f46a05b169ad9`。
+
+验证 Actions `39226749808` / 运维提交 `79b07ae7ebfef4fc24b6d0668aee68bc207db1c8` 四门禁通过：三镜像双架构匿名拉取及在线 Compose、绑定在线同次执行的 PG18 六项持久化证据、实际本地 YML 且四服务禁止拉取的三镜像双 TAR 容器、无 SNI 严格校验本实例 CA 的 HTTPS 生命周期。三份原始 TAP 各 1 项通过、0 失败、0 跳过，均确认真实 root 初始化预检标记；PG 证据不算第二次运行，ARM64 为 QEMU。本地独立 registry 核验只读取 5 份 JSON，真实拉取与容器运行来自云端。
+
+本地 `artifacts/releases/0.7.0/` 全部 12 件、493247056 字节的大小及 SHA-256 核对通过，报告为 `artifacts/cache/0.7.0/local-delivery-verification.json`；双 TAR 的三镜像／六 config 结构核验通过，本地未运行 Docker 或逐层读取 layer。12 件公开 API 元数据与 11 条 SHA256SUMS 一致；10 个非 TAR 附件经官方 Release 公开 URL 匿名完整下载通过，报告为 `public-asset-download-verification.json`，未调用 API。最初 API 下载两份 YML 后额度受限的原报告保留，不把两种下载路径混为一次成功。完整摘要与证据见[开发历程](HISTORY.md)。冻结源码标签真实 Edge 37/37、6 图已目视，报告为 `artifacts/cache/0.7.0/label-ui/report.json`，`window.print()` 被拦截，不是系统窗口或 USB 输出验收。实际 NAS、真手机、Excel／WPS 下拉 UI、BarTender、物理打印与长期并发未验；发布后只补文档，不移动标签或改写冻结归档。
 
 ## 0.6.2：PostgreSQL 18 与两份完整 YML（已公开验证版）
 
@@ -322,7 +328,9 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前 0.6.2 在线 Compose 的应用目标镜像为 `ghcr.io/hotll233/labmg:0.6.2`，已公开为验证版，冻结源码为 `989554e`／`v0.6.2`；构建、匿名拉取及发布证据见[项目记忆](MEMORY.md)。更正本段此前仍停留在“尚未冻结／发布”的开发初期记录。两份配置均含应用、PG18、初始化与 Caddy 四服务，`runtime/` 与 `https/` 固定在 YML 旁；在线版与本地版各自单独使用。0.6.1 的公开镜像及验证证据保留在上文，不作为 PG18 的验证。本轮只提供全新 PG18 部署，不实施旧库迁移。具体部署说明及 DS918+ 父目录准备要求见 [群晖部署](SYNOLOGY.md)。
+当前在线 Compose 的应用镜像为 `ghcr.io/hotll233/labmg:0.7.0`，已公开为验证版，冻结源码为 `ef9d0f6`／`v0.7.0`；本版构建、匿名拉取及发布证据见上方 0.7.0 条目和[项目记忆](MEMORY.md)。两份配置均含应用、PG18、初始化与 Caddy 四服务，`runtime/` 与 `https/` 固定在 YML 旁；在线版与本地版各自单独使用。同一 PG18 项目更新保留原存储，不实施旧数据库主版本迁移。具体部署说明及 DS918+ 父目录准备要求见 [群晖部署](SYNOLOGY.md)。
+
+历史：0.6.2 在线镜像为 `ghcr.io/hotll233/labmg:0.6.2`，冻结源码为 `989554e`／`v0.6.2`。此前已将其开发初期“尚未冻结／发布”更正为公开验证版；0.6.1 及更早验证记录保留，不能替代本版结果。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
@@ -352,7 +360,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-0.6.2 已交付每架构 TAR，均包含 `labos:0.6.2`、匹配架构的 `postgres:18-bookworm` 与 `caddy:2.11.7-alpine`；两架构的冻结本地 YML 容器检查通过，ARM64 为 QEMU，非目标群晖实机验收。导入并核对同版本、同架构 TAR 后单独使用 `docker-compose.local.yml`，四服务均禁止拉取，无需通过 `.env` 改应用标签；默认在线 YML 与本地 YML 是两份完整配置，不叠加。0.6.0／0.6.1 的历史 TAR 只含应用+PG17，HTTPS 另需 Caddy；rc.2／rc.3 及 rc.4 继续按对应历史版本配置使用，不覆盖旧包。
+0.7.0 两架构 TAR 已完整交付并保存在本机，每包包含 `labos:0.7.0`、匹配架构的 `postgres:18-bookworm` 与 `caddy:2.11.7-alpine`。两架构实际本地 YML 容器检查通过，ARM64 为 QEMU，非目标群晖实机验收。导入并核对同版本、同架构 TAR 后单独使用 `docker-compose.local.yml`，四服务均禁止拉取，无需通过 `.env` 改应用标签；默认在线 YML 与本地 YML 是两份完整配置，不叠加。历史 0.6.2 也已交付同类三镜像 TAR 及其冻结本地 YML 验证记录，应用标签为 `labos:0.6.2`；0.6.0／0.6.1 的历史 TAR 只含应用+PG17，HTTPS 另需 Caddy；rc.2／rc.3 及 rc.4 继续按对应历史版本配置使用，不覆盖旧包。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
@@ -361,7 +369,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 并预装同架构 PG18、Caddy 镜像时才运行真实容器检查；普通 `npm test` 会明确跳过该项。`LABOS_DOCKER_MODE` 仅允许 `online`／`local`，默认读取在线 YML；离线必须设为 `local`，实际读取本地 YML 并断言固定应用标签及四服务禁止拉取。例如在三镜像已导入后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.6.2'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.7.0'
 $env:LABOS_DOCKER_MODE = 'local'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_MODE

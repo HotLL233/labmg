@@ -1,8 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.7.0（开发中，尚未发布）**，本轮完善中文 Excel 模板与引用下拉、详细导入错误、库存和物资信息回导、手机布局及内置 DL-886A（NEW）打印面板。后端源码已集成，本机物资完整回归 43/43 通过（隔离 PG17.11），正式 PG18 CI 尚待执行、镜像未发布；当前仓库的 0.7.0 YML 引用不能视为镜像已经存在。发布状态、下载和实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)与[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
+本源码版本：**0.7.0（已公开验证版）**，本轮完善中文 Excel 模板与引用下拉、详细导入错误、库存和物资信息回导、手机布局及内置 DL-886A（NEW）打印面板。真实 PostgreSQL 18 CI 159/159、36 个 JS 语法检查和四项云端部署门禁通过。发布状态、下载和实际验证记录见 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)与[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
 
-当前已公开的 [0.6.2 验证版](https://github.com/HotLL233/labmg/releases/tag/v0.6.2)附两份完整 YML、amd64／arm64 三镜像 TAR 及校验清单。131 项业务测试、在线与本地容器部署、严格证书校验的 HTTPS 验证通过；ARM64 使用 QEMU。后续 DS918+ 现场恢复全新 PG18 并通过局域网 HTTP／严格可信 HTTPS 冒烟；实际手机扫码和 USB 打印仍未验收。这些旧版结果不代表 0.7.0 已通过。
+本版附两份完整 YML、amd64／arm64 三镜像 TAR 及校验清单，两 TAR 已实际保存在本机 `artifacts/releases/0.7.0/` 并核对大小、摘要与镜像架构。在线与本地容器、严格证书校验的 HTTPS 验证通过；ARM64 使用 QEMU。标签真实 Edge 37/37 为拦截打印的有限检查；本轮未在群晖、真手机或 USB 打印机验收。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
@@ -57,7 +57,7 @@ npm test
 | 在线拉取 | [docker-compose.yml](deploy/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
 | 本地导入 | [docker-compose.local.yml](deploy/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-0.7.0 正式镜像尚未发布，当前部署请使用已发布版本的配套文件。发布后，在所选 YML 中把 `CHANGE_ME` 改成群晖实际 IPv4 或主机名，例如 `192.168.1.10`，不带协议、端口或路径。首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
+从 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0) 下载同版本配套文件，在所选 YML 中把 `CHANGE_ME` 改成群晖实际 IPv4 或主机名，例如 `192.168.1.10`，不带协议、端口或路径。首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
 
 数据自动保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令。HTTPS 证书保存在旁边的 `https/data/`，代理自动创建内部目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 

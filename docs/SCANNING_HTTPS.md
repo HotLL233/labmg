@@ -1,6 +1,6 @@
 # 手机实时扫码与群晖 HTTPS
 
-**0.6.2 及后续版本**的在线、本地两份完整 YML 都已内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。当前源码为 **0.7.0（开发中，未发布）**，源码 YML 指向的新版镜像和离线包仍待实际构建、验收；当前部署使用 0.6.2 Release 的配套文件。数据库继续使用 PostgreSQL 18，同一 PG18 项目更新保留完整 runtime/ 和 https/；发布状态以[版本说明](CHANGELOG.md)为准。
+**0.6.2 及后续版本**的在线、本地两份完整 YML 都已内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。当前 **0.7.0 已公开验证版**提供配套镜像及两架构三镜像 TAR，下载见 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)。本版云端已通过无 SNI 且严格校验本实例 CA 的 HTTPS 生命周期，不能代替真手机证书信任和相机验收。数据库继续使用 PostgreSQL 18，同一 PG18 项目更新保留完整 runtime/ 和 https/；发布状态以[版本说明](CHANGELOG.md)为准。
 
 ## 为什么 HTTP 不能实时扫码
 
