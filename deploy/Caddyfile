@@ -2,6 +2,7 @@
     admin off
     auto_https disable_redirects
     skip_install_trust
+    default_sni {$LABOS_HTTPS_HOST}
 }
 
 https://{$LABOS_HTTPS_HOST}:443 {

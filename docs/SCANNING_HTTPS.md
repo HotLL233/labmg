@@ -26,6 +26,8 @@ docker compose -p labos -f docker-compose.yml -f docker-compose.https.yml up -d
 
 配置会额外拉取固定的官方 `caddy:2.11.7-alpine` 镜像，新增 `labos-https` 容器；应用继续使用原数据。它通过同一 Compose 网络代理到 `labos:3000`，保留原 Host，不改变账号、数据库、附件及 HTTP 端口。Compose 多文件的相对路径以第一份 YML 的目录为基准；`Caddyfile` 缺失会报错，不会错误创建成目录。
 
+`Caddyfile` 使用 `default_sni {$LABOS_HTTPS_HOST}`，让不发送 TLS 服务器名称（SNI）的 IP 访问仍选中配置的证书。Docker 端口映射后的容器内地址与群晖 IP 不同，仅成功签发 IP 证书并不足以保证握手成功；此设置不跳过客户端的证书校验，手机仍须信任根证书，证书中的 IP 也须与访问地址一致。更换 IP 时同步修改 `.env` 并重建代理，保留原 `https/` 数据。
+
 ```text
 原项目目录/
   docker-compose.yml
@@ -69,6 +71,7 @@ docker compose -p labos -f docker-compose.yml -f docker-compose.https.yml cp lab
 - [W3C Media Capture and Streams](https://www.w3.org/TR/mediacapture-streams/)：`mediaDevices` / `getUserMedia` 的安全上下文和授权规则。
 - [Caddy Automatic HTTPS](https://caddyserver.com/docs/automatic-https) 与 [Docker 使用说明](https://caddyserver.com/docs/running#docker-compose)：本地 CA 需客户端信任，Docker 数据路径及持久化。
 - [Caddy reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)：HTTP 上游默认保留 Host。
+- [Caddy default_sni](https://caddyserver.com/docs/caddyfile/options#default-sni) 与 [Docker NAT 下 IP 证书选择说明](https://github.com/caddyserver/caddy/issues/7526)：未发送 SNI 时选择配置的证书，避免按容器内 IP 查找证书。
 - [Docker 官方 Caddy 镜像清单](https://github.com/docker-library/official-images/blob/master/library/caddy)：本配置固定 2.11.7 Alpine，包含 amd64/arm64；未来维护升级须另行验证，不用浮动 latest。
 - [Apple：信任手动安装的证书描述文件](https://support.apple.com/en-us/102390)：手动安装后须显式开启 SSL/TLS 完全信任。
 - [Android 证书安装说明（Cloudflare）](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/user-side-certificates/manual-deployment/android/)：CA 安装路径及不同设备差异；不表示需要 Cloudflare 服务。

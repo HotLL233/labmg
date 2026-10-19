@@ -12,6 +12,8 @@ test('optional HTTPS Compose requires an explicit host and preserves the origina
 }, t => {
   assert.ifError(available.error);
   assert.equal(available.status, 0, available.stderr);
+  // IP clients normally omit SNI. Docker NAT must still select the certificate for the configured public host.
+  assert.match(fs.readFileSync(path.join(root, 'deploy/Caddyfile'), 'utf8'), /^\s+default_sni\s+\{\$LABOS_HTTPS_HOST\}\s*$/m);
   const cache = path.join(root, 'artifacts/cache', require('../package.json').version);
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'https-config-'));

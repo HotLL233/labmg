@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-当前开发版本：**0.5.0 期初单据与标签版**。交付状态与验证范围以 [Release](https://github.com/HotLL233/labmg/releases)、GitHub Actions 实际结果和[版本说明](docs/CHANGELOG.md)为准。历史 [0.3.3](https://github.com/HotLL233/labmg/releases/tag/v0.3.3) 源码、双架构镜像、离线包和配套 YML 继续保留。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
+当前开发版本：**0.5.1 期初单据与标签补丁版**，最终容器验证与 Release 交付仍待完成。0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，现由 0.5.1 替代；保留其标签、ZIP 和未公开草稿 Release。交付状态与验证范围以 [Release](https://github.com/HotLL233/labmg/releases)、GitHub Actions 实际结果和[版本说明](docs/CHANGELOG.md)为准。已公开的 [0.4.0](https://github.com/HotLL233/labmg/releases/tag/v0.4.0) 及更早版本的源码、双架构镜像、离线包和配套 YML 继续保留。使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
 
 ## 快速启动
 
@@ -15,13 +15,13 @@ npm start
 
 日常运行地址为 `http://127.0.0.1:3000`，数据保存在 `var/`。空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位并需确认；没有默认密码。设置成功后自动登录，之后使用该账号登录；已有账号保持原密码。
 
-开发使用 `npm run dev`，默认地址为 `http://127.0.0.1:3001`，本版本的独立数据保存在 `var/development/0.5.0/`。切换版本不会自动复制旧数据。
+开发使用 `npm run dev`，默认地址为 `http://127.0.0.1:3001`，本版本的独立数据保存在 `var/development/0.5.1/`。切换版本不会自动复制旧数据。
 
 ## 物资管理
 
 沿用 0.4.0 已有的物资与批次账及“一瓶／一件一个独立编号”，保留包装商品码和批次码。单件管理物资在合格验收、期初和盘盈时按整数数量生成独立编号，发放和盘亏须选择具体在库单件；编号规则支持日期、流水号及补零位数，改规则保留旧码及全局序号。旧物资默认继续按数量管理，有业务历史不能切换管理方式；新增编号不重复增加库存。具体业务规则与验收结果见[版本说明](docs/CHANGELOG.md)。以下现有申报、验收、批次库存及领用流程继续保留。
 
-0.5.0 增加独立期初单据、XLSX 导入导出和逐件标签模板；验收可填写存放位置，库存行可直接申请领用。物资页包含“物资申报 / 验收 / 库存 / 期初库存 / 领用”五个入口，支持历史查询、真正的 Excel 导出、分类与归属区域、受控修订、分批验收入库及期初流水。
+0.5.1 沿用 0.5.0 候选新增的独立期初单据、XLSX 导入导出和逐件标签模板；验收可填写存放位置，库存行可直接申请领用。物资页包含“物资申报 / 验收 / 库存 / 期初库存 / 领用”五个入口，支持历史查询、真正的 Excel 导出、分类与归属区域、受控修订、分批验收入库及期初流水。
 
 首次使用先由系统管理员建立分类和区域，再在“管理 → 人员账号管理”给业务负责人添加 **MATERIAL（物资管理员）** 角色。全员可新建申报单、添加物资；新物资可先提交，验收前由管理员维护规范主档，再由物资管理员在原单“修订”中匹配并填写原因；普通人员仅编辑本人草稿行，物资管理员可提交和说明原因修订已提交单。ADMIN 未兼任 MATERIAL 时可维护字典与主档，办理入库仍需添加物资管理员角色。
 
@@ -39,17 +39,17 @@ npm start
 
 ## Docker 与群晖
 
-**可以原地升级，账号、设置和历史数据应继续保留。** 已有部署先停服完整备份，继续用原 YML、项目、数据挂载及 UID/GID，只在原 `.env` 更新 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.5.0`，再执行 `docker compose pull` 和 `docker compose up -d`。不需要每次换 YML 或重新设置管理员；首次设置只会在当前连接的数据库没有用户时开放。
+**可以原地升级，账号、设置和历史数据应继续保留。** 已有部署先停服完整备份，继续用原 YML、项目、数据挂载及 UID/GID，只在原 `.env` 更新 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.5.1`，再执行 `docker compose pull` 和 `docker compose up -d`。不需要每次换 YML 或重新设置管理员；首次设置只会在当前连接的数据库没有用户时开放。
 
 仓库当前部署模板将数据默认放在 **YML 所在目录的 `runtime/`**，启动时自动创建 `runtime/data/`、`runtime/uploads/`、`runtime/logs/`。镜像更新沿用这个目录，不随业务版本另建数据位置；可在同目录 `.env` 用 `LABOS_DATA_DIR` 指定已有绝对路径。应用仍按非 root UID/GID 运行，一次性初始化服务只准备目录与权限。模板使用绑定目录自动创建功能，部署前需检查 Compose 支持情况。
 
-**历史 0.4.0 及更早 Release 附件保持原样**，其中 rc.5 起的旧 YML 默认采用版本命名卷，例如 `<项目名>_labos-runtime-0.4.0`；0.5.0 新模板改用固定 runtime/，不会自动迁移旧卷。换用新模板前，须把实际旧数据停服完整复制或恢复到项目 `runtime/`，核验后才切换，不能直接接一个空目录。具体步骤见[群晖部署](docs/SYNOLOGY.md#将旧命名卷迁移到-yml-同目录)。
+**历史 0.4.0 及更早 Release 附件保持原样**，其中 rc.5 起的旧 YML 默认采用版本命名卷，例如 `<项目名>_labos-runtime-0.4.0`；0.5.1 新模板改用固定 runtime/，不会自动迁移旧卷。换用新模板前，须把实际旧数据停服完整复制或恢复到项目 `runtime/`，核验后才切换，不能直接接一个空目录。具体步骤见[群晖部署](docs/SYNOLOGY.md#将旧命名卷迁移到-yml-同目录)。
 
 升级后又出现“首次设置管理员”时，先停止写入，核对原容器 `/var/lib/labos` 的实际挂载源；接错目录或卷不等于旧数据已删除。保留旧卷与新目录，按[排查步骤](docs/SYNOLOGY.md#更新后又出现首次设置管理员)接回旧数据。账号、权限、系统设置、历史记录及附件均依赖同一运行挂载；保留容器名称或 YML 文件本身不能代替保留数据。
 
-首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。镜像为 `ghcr.io/hotll233/labmg:0.5.0`，支持 amd64/arm64，交付与验证范围见[发布页](https://github.com/HotLL233/labmg/releases)和版本说明。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
+首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。目标镜像为 `ghcr.io/hotll233/labmg:0.5.1`，支持 amd64/arm64，交付与验证范围见[发布页](https://github.com/HotLL233/labmg/releases)和版本说明。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
 
-离线部署仍可导入同架构 TAR，在 `.env` 设置 `LABOS_IMAGE=labos:0.5.0`，跳过拉取后启动。升级和回退须保留完整数据备份；旧版本不能识别新版所有数据，回退不能只切旧镜像。普通 `docker compose down` 保留数据；旧命名卷配置不要用 `down -v`，绑定目录也不要手工删除。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
+离线部署仍可导入同架构 TAR，在 `.env` 设置 `LABOS_IMAGE=labos:0.5.1`，跳过拉取后启动。升级和回退须保留完整数据备份；旧版本不能识别新版所有数据，回退不能只切旧镜像。普通 `docker compose down` 保留数据；旧命名卷配置不要用 `down -v`，绑定目录也不要手工删除。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
 
 ## 目录
 
@@ -74,13 +74,13 @@ npm start
 npm run package:zip
 ```
 
-生成 `artifacts/releases/0.5.0/labos-0.5.0.zip` 及 `manifest.json`；构建和验证缓存使用 `artifacts/cache/0.5.0/`。先完成开发与检查，再冻结发布源码；发布后的文档记录不重新打包或移动标签。旧版本产物保留，相同版本只复用内容和校验一致的包；输入变化或已有包损坏时应使用新版本号。
+生成 `artifacts/releases/0.5.1/labos-0.5.1.zip` 及 `manifest.json`；构建和验证缓存使用 `artifacts/cache/0.5.1/`。先完成开发与检查，再冻结发布源码；发布后的文档记录不重新打包或移动标签。旧版本产物保留，相同版本只复用内容和校验一致的包；输入变化或已有包损坏时应使用新版本号。
 
 `npm run package:docker` 另构建并导出两个架构的镜像 TAR、镜像校验清单及独立的 YML/环境示例/群晖说明，仍位于同一版本目录。此命令需要运行中的 Linux Docker 引擎及 Buildx；层缓存按架构导出到 `artifacts/cache/<version>/`，后续版本可引用。
 
 GitHub Actions 在推送与 `package.json` 版本匹配的 `v*` 标签时构建并推送 GHCR 多架构镜像；镜像发布结果与匿名拉取验证以对应 Actions 运行和包状态为准，部署配置本身不代表发布已成功。`0.2.0-rc.2` 引入的本地 TAR 交付方式及历史版本继续保留。
 
-0.3.3 的正式容器、双架构 TAR 和 0.3.2 同卷升级检查已在 GitHub Ubuntu 运行器通过，ARM64 使用 QEMU 模拟；两份 TAR 由该运行器直接上传 Release。本机保留源码、部署文件、架构清单及原始验证报告，未因大包下载缓慢重复取回 TAR。十附件大小及 SHA-256、八份非 TAR 附件匿名下载均已核验；手机相机与目标群晖实机尚未验收。
+0.4.0 及更早版本的正式容器、双架构 TAR、原挂载升级及附件核验记录保留在[版本说明](docs/CHANGELOG.md)。0.5.1 的最终容器、升级与 Release 交付结果仍待追加；历史 ARM64 云端容器验证使用 QEMU，不能替代目标群晖实机验收。手机实时相机与 DL-886A USB 物理打印也尚未验收。
 
 解压后先执行 `npm ci --omit=dev --ignore-scripts` 再运行 `npm start`；`start-labos.cmd` 在首次缺少依赖时自动安装。源码 ZIP 不含 node_modules，首次安装需要 npm 网络或已有缓存；Docker 镜像已包含运行依赖，可用 TAR 离线部署。部署包不包含本地运行数据；后续引用版本时同时核对清单中的版本、源码摘要和 ZIP 校验值。
 
