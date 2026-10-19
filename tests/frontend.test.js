@@ -29,6 +29,7 @@ class Element {
   set id(value) { this.attrs.id = value; }
   get name() { return this.attrs.name; }
   set name(value) { this.attrs.name = value; }
+  get elements() { return Object.fromEntries(this.querySelectorAll('[name]').map(node => [node.name, node])); }
   get value() {
     if (this._value !== undefined) return this._value;
     if (this.tagName === 'select') {
@@ -557,14 +558,14 @@ test('new material can be submitted before catalog matching, with accounting blo
   const click = node => app.document.listeners.click({ target: { closest: () => node } });
   await app.run("go('materials')");
   await click(app.$('[data-mw=request]'));
-  assert.match(app.$('#page').textContent, /共 1 项待匹配主档，可直接提交新物资/);
+  assert.match(app.$('#page').textContent, /共 1 项待匹配物资信息，可直接提交新物资/);
   assert.ok(app.$('[data-mw=submit]'));
   await click(app.$('[data-mw=add-item]'));
   assert.equal('required' in app.$('#mw-fields [name=catalogId]').attrs, false);
   assert.match(app.$('#mw-fields').textContent, /新物资可直接填报提交/);
   await click(app.$('[data-mw=cancel]'));
   await click(app.$('[data-mw=submit]'));
-  assert.match(app.$('#mw-intro').textContent, /2 项，其中 1 项待匹配主档/);
+  assert.match(app.$('#mw-intro').textContent, /2 项，其中 1 项待匹配物资信息/);
   assert.match(app.$('#mw-intro').textContent, /新物资可直接提交/);
   await click(app.$('[data-mw=cancel]'));
   Object.assign(request, { status: 'submitted', revision: 1, canSubmit: false, canAddItem: false });
@@ -573,14 +574,14 @@ test('new material can be submitted before catalog matching, with accounting blo
   const receive = app.document.querySelectorAll('[data-mw=receive]'), close = app.document.querySelectorAll('[data-mw=close-item]');
   assert.equal(receive[0].disabled, true);
   assert.equal(close[0].disabled, true);
-  assert.match(receive[0].attrs.title, /待匹配主档/);
+  assert.match(receive[0].attrs.title, /待匹配物资信息/);
   assert.equal(receive[1].disabled, false);
   assert.equal(close[1].disabled, false);
   assert.match(app.$('#page').textContent, /请点“原单”/);
   for (const action of ['receive', 'close-item']) {
     await click({ dataset: { mw: action, request: '101', item: '11' } });
     assert.equal(app.$('#mw-dialog').open, false);
-    assert.match(app.$('#mw-status').textContent, /修订.*选择主档并填写原因/);
+    assert.match(app.$('#mw-status').textContent, /修订.*选择物资信息并填写原因/);
   }
   await click(app.$('[data-mw=request]'));
   assert.ok(app.$('[data-mw=edit-item]'));
@@ -839,7 +840,7 @@ test('stock QR lookup preserves empty batch filters and no-candidate or unknown 
   assert.equal(lookup.searchParams.get('warehouse'), 'MAIN'); assert.equal(lookup.searchParams.has('batch'), true); assert.equal(lookup.searchParams.get('batch'), '');
   assert.equal(lookup.searchParams.has('expiryDate'), true); assert.equal(lookup.searchParams.get('expiryDate'), '');
   await click('[data-mw=close-view]');
-  app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { error: '条码尚未绑定主档' }, status: 404 } : undefined;
+  app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { error: '条码尚未绑定物资信息' }, status: 404 } : undefined;
   await click('[data-mw=scan-issue]'); assert.match(app.$('#mw-status').textContent, /尚未绑定/); assert.equal(app.$('#mw-view').open, false);
   const manager = await materialApp(); materialScanner(manager.app, async () => 'empty');
   manager.app.state.materialResponse = ({ url }) => url.pathname.endsWith('/scan/resolve') ? { body: { kind: 'catalog', catalog: { ...row, id: row.catalogId }, barcode: {} } } : undefined;
@@ -912,7 +913,7 @@ test('catalog barcode binding preserves scanned strings and rejected input, repl
     if (url.pathname === '/api/materials/catalog/5/barcodes') {
       if (method === 'GET') return { body: { items: bindings, total: bindings.length, page: 1, pageSize: 50 } };
       writes.push(body);
-      if (writes.length === 1) return { body: { error: '条码被另一主档占用，请核对' }, status: 409 };
+      if (writes.length === 1) return { body: { error: '条码被另一物资信息占用，请核对' }, status: 409 };
       if (writes.length === 2) throw Error('synthetic lost binding response');
       bindings.push({ id: 51, code: body.code, catalogId: 5, creatorName: '<img src=x>', createdAt: '2026-10-17' }); return { body: { barcode: bindings[0] } };
     }
@@ -921,8 +922,8 @@ test('catalog barcode binding preserves scanned strings and rejected input, repl
   await click('[data-mw=dictionaries]'); await click('[data-mw=barcodes]'); await click('[data-mw=barcode-add]');
   await click('[data-mw=barcode-scan]'); assert.equal(app.$('#mw-fields [name=code]').value, '001AbC');
   await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /绑定原因不能为空/);
-  fill({ reason: '核对包装与主档后绑定' }); await submit();
-  assert.equal(app.$('#mw-fields [name=code]').value, '001AbC'); assert.match(app.$('#mw-error').textContent, /被另一主档占用/);
+  fill({ reason: '核对包装与物资信息后绑定' }); await submit();
+  assert.equal(app.$('#mw-fields [name=code]').value, '001AbC'); assert.match(app.$('#mw-error').textContent, /被另一物资信息占用/);
   await submit(); assert.equal(app.$('#mw-fields [name=code]').disabled, true); assert.match(app.$('#mw-error').textContent, /不会重复绑定/);
   await submit(); assert.deepEqual(writes[2], writes[1]); assert.equal(Object.hasOwn(writes[2], 'requestIdempotencyKey'), false);
   assert.equal(app.$('#mw-view img'), null); assert.match(app.$('#mw-view-body').textContent, /001AbC/);
@@ -1127,4 +1128,92 @@ test('closed openings stay visible and read-only while stock supplements require
   await click({dataset:{mw:'opening-detail',id:'82'}});assert.equal(app.$('[data-mw=opening-add-item]'),null);assert.ok(app.$('[data-mw=opening-export]'));assert.match(app.$('#page').textContent,/原期初单据保持只读/);
   await click('[data-mw=opening-back]');await click('[data-mw=new-opening]');fill({title:'已有账本补录',date:'2026-10-19'});await submit();assert.equal(created,undefined);assert.match(app.$('#mw-error').textContent,/补录原因/);fill({reason:'盘点发现遗漏登记的存量'});await submit();assert.equal(created.reason,'盘点发现遗漏登记的存量');assert.match(app.$('#page').textContent,/补录原因/);
   const ordinary=await materialApp(false);ordinary.app.state.materialOpeningClosed=true;await ordinary.click({dataset:{mw:'refresh'}});await ordinary.click({dataset:{mw:'page',page:'openings'}});assert.ok(ordinary.app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));assert.equal(ordinary.app.$('[data-mw=new-opening]'),null);
+});
+
+test('declaration lookup keeps server stock priority, passes the selected scope and reuses a zero-stock identity', async () => {
+  const { app, row, click, fill, submit } = await materialApp(false);
+  const matches = [{ ...row, id: 7, code: 'LOCAL', localQtyM: 2000, stockQtyM: 3000 },
+    { ...row, id: 8, code: 'OTHER', localQtyM: 0, stockQtyM: 9000 },
+    { ...row, id: 9, code: 'ZERO', localQtyM: 0, stockQtyM: 0 }];
+  let declaration;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/catalog' && url.searchParams.has('q')) {
+      assert.equal(url.searchParams.get('regionId'), '2'); assert.equal(url.searchParams.get('warehouse'), 'MAIN');
+      return { body: { items: matches, total: matches.length, page: 1, pageSize: 200 } };
+    }
+    if (url.pathname === '/api/materials/requests/101/items' && method === 'POST') { declaration = body; return { body: app.state.materialDetails[101], status: 201 }; }
+  };
+  await click('[data-mw=request]'); await click('[data-mw=add-item]');
+  fill({ catalogQuery: '合成', regionId: '2', warehouse: 'MAIN' }); await click('[data-mw=catalog-search]');
+  const options = app.$('#mw-fields [name=catalogId]').textContent;
+  assert.ok(options.indexOf('LOCAL') < options.indexOf('OTHER')); assert.ok(options.indexOf('OTHER') < options.indexOf('ZERO'));
+  assert.match(options, /所选范围 2 \/ 全部库存 3 件/); assert.match(options, /全部库存 0 件/);
+  fill({ catalogId: '9', quantity: '1' });
+  app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.equal(app.$('#mw-fields [name=code]').value, 'ZERO'); assert.equal(app.$('#mw-fields [name=name]').readOnly, true);
+  await submit(); assert.equal(declaration.catalogId, 9); assert.equal(declaration.code, 'ZERO');
+  assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname === '/api/materials/catalog'), false);
+});
+
+test('catalog Excel controls use a strict template and preserve the current export filter without altering stock', async () => {
+  const { app, click, fill, submit } = await materialApp(); let imported;
+  app.context.FileReader = class { readAsDataURL() { this.result = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,c3ludGhldGlj'; this.onload(); } };
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/catalog/import' && method === 'POST') { imported = body; return { body: { created: 1, skipped: 2 }, status: 201 }; }
+  };
+  await click('[data-mw=dictionaries]'); assert.match(app.$('#mw-view-body').textContent, /物资信息库.*库存数量由出入库流水累计/);
+  await click('[data-mw=catalog-template]'); assert.ok(app.requests.some(entry => entry.url.pathname === '/api/materials/catalog/template'));
+  app.$('#mw-catalog-management-query').value = '试剂 A'; await click('[data-mw=catalog-export]');
+  assert.equal(app.requests.find(entry => entry.url.pathname === '/api/materials/catalog/export.xlsx').url.searchParams.get('q'), '试剂 A');
+  await click('[data-mw=catalog-import]'); assert.equal(app.$('#mw-fields [name=file]').attrs.accept, '.xlsx');
+  fill({ file: { name: 'old.xls', size: 9 } }); await submit(); assert.equal(imported, undefined); assert.match(app.$('#mw-error').textContent, /xlsx/);
+  fill({ file: { name: '物资.xlsx', size: 9 } }); await submit(); assert.deepEqual(imported, { name: '物资.xlsx', content: 'c3ludGhldGlj' });
+  assert.match(app.$('#mw-status').textContent, /新增 1 项，复用 2 项.*库存数量未改变/);
+  assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname.includes('/stock')), false);
+  const ordinary = await materialApp(false); await ordinary.click({ dataset: { mw: 'catalog-import' } });
+  assert.equal(ordinary.app.$('#mw-dialog').open, false); assert.match(ordinary.app.$('#mw-status').textContent, /没有物资信息维护权限/);
+});
+
+test('late stock matching results cannot replace a newer query or a changed warehouse scope', async () => {
+  const { app, row, click, fill } = await materialApp(false); let release;
+  app.state.materialResponse = async ({ url }) => {
+    if (url.pathname !== '/api/materials/catalog' || !url.searchParams.has('q')) return;
+    const query = url.searchParams.get('q');
+    if (query === 'old' || query === 'scope') await new Promise(resolve => { release = resolve; });
+    return { body: { items: [{ ...row, id: 9, code: query, stockQtyM: 1000, localQtyM: 1000 }], total: 1, page: 1, pageSize: 200 } };
+  };
+  await click('[data-mw=request]'); await click('[data-mw=add-item]'); fill({ catalogQuery: 'old' });
+  const first = click('[data-mw=catalog-search]'); fill({ catalogQuery: 'new' }); await click('[data-mw=catalog-search]'); release(); await first;
+  assert.match(app.$('#mw-fields [name=catalogId]').textContent, /new/); assert.doesNotMatch(app.$('#mw-fields [name=catalogId]').textContent, /old/);
+  fill({ catalogQuery: 'scope', warehouse: '' }); const scoped = click('[data-mw=catalog-search]'); fill({ warehouse: 'MAIN' }); release(); await scoped;
+  assert.doesNotMatch(app.$('#mw-fields [name=catalogId]').textContent, /scope/); assert.match(app.$('#mw-status').textContent, /检索条件.*变化/);
+});
+
+test('managers create and link new materials with version conflict reloads, reasons and unchanged retry content', async () => {
+  const { app, item, request, click, fill, submit } = await materialApp();
+  Object.assign(item, { catalogId: null, code: '', name: '新耗材', spec: '1包', unit: '包' });
+  Object.assign(request, { status: 'submitted', canSubmit: false, canAddItem: false, revision: 1 });
+  const writes = [];
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/requests/101/items/11/catalog' && method === 'POST') {
+      writes.push(body);
+      if (writes.length === 1) { request.version++; item.version++; return { body: { error: '申报明细已变化，请重新读取' }, status: 409 }; }
+      if (writes.length === 2) throw Error('synthetic response loss');
+      Object.assign(item, { catalogId: 6, code: body.code }); request.version++; request.revision++;
+      return { body: { request }, status: 201 };
+    }
+  };
+  await click('[data-mw=request]'); assert.ok(app.$('[data-mw=request-catalog]')); await click('[data-mw=request-catalog]');
+  assert.equal(app.$('#mw-fields [name=name]').value, '新耗材'); assert.equal(app.$('#mw-fields [name=trackingMode]').value, 'unit');
+  fill({ code: 'NEW-6' }); await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /建档原因不能为空/);
+  fill({ reason: '确认无同规格库存或已建档信息' }); await submit();
+  assert.equal(writes[0].itemVersion, 1); assert.equal(writes[0].requestVersion, 1); assert.equal(writes[0].trackingMode, 'unit'); assert.ok(writes[0].requestIdempotencyKey);
+  assert.equal(app.$('[data-mw=reload-form]').hidden, false); await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-fields [name=code]').value, 'NEW-6'); await submit(); assert.equal(writes[1].requestVersion, 2); assert.equal(writes[1].itemVersion, 2);
+  assert.equal(app.$('#mw-save').textContent, '按原内容重试'); assert.equal(app.$('#mw-fields [name=code]').disabled, true);
+  app.$('#mw-fields [name=code]').value = 'CHANGED-AFTER-SEND'; await submit(); assert.deepEqual(writes[2], writes[1]);
+  assert.equal(app.$('[data-mw=request-catalog]'), null); assert.equal(app.$('#mw-dialog').open, false);
+  const ordinary = await materialApp(false); Object.assign(ordinary.item, { catalogId: null });
+  await ordinary.click('[data-mw=request]'); assert.equal(ordinary.app.$('[data-mw=request-catalog]'), null);
+  await ordinary.click({ dataset: { mw: 'request-catalog', item: '11' } }); assert.equal(ordinary.app.$('#mw-dialog').open, false);
 });

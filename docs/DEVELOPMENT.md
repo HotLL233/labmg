@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-项目继续使用 Node.js、内置 SQLite 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。源码、部署配置与本地数据分别存放，便于维护和回退。
+本源码版本为 **0.6.0**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。本轮 PostgreSQL 验证使用 17；0.5.1及更早版本使用 SQLite，历史实现与发布记录保留。发布状态以[版本说明](CHANGELOG.md)及GitHub Release为准。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -9,6 +9,8 @@ Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.
 ```text
 src/
   server.js            服务端入口
+  database.js          异步 PostgreSQL 查询与事务
+  schema.js            PostgreSQL 表结构、约束与兼容函数
   public/              页面、样式和浏览器脚本
 scripts/
   check.js             全部 JavaScript 的语法检查
@@ -18,19 +20,22 @@ config/
   .env.example         环境变量示例
 deploy/
   Dockerfile           Node 24 非 root 应用镜像
-  docker-compose.yml   应用单容器部署
+  docker-compose.yml   应用、PostgreSQL 与一次性目录初始化
   .env.example         Compose 变量示例
   docker-compose.infrastructure.yml  旧 PostgreSQL、MinIO 示例
 docs/                  开发说明与变更记录
 tests/                 启动、权限、前端状态与版本打包回归
-var/                   本地数据库、附件和日志，不提交
+var/                   本地附件和日志，不提交；数据库由连接地址决定
+runtime/               Compose YML 旁的 PostgreSQL、附件和秘密文件，不提交
 artifacts/             唯一构建产物与缓存目录，不提交
   releases/<version>/  ZIP 和 manifest.json，保留历史版本
   cache/<version>/     构建、测试和解压验证缓存
   legacy/              目录整理前的产物和数据迁移备份
 ```
 
-当前服务仍使用 SQLite 与本地附件；应用 Compose 只启动 LabOS。原来仅 PostgreSQL/MinIO 的 Compose 保留为 `deploy/docker-compose.infrastructure.yml`，不会自动接入应用。
+0.6.0 应用必须连接 PostgreSQL，连接未配置或失败时停止启动，不回退到 SQLite。正式 Compose 使用 `postgres:17-bookworm`，PostgreSQL 数据在 YML 旁 `runtime/postgres/`，自动生成的数据库连接口令在 `runtime/secrets/postgres-password`，附件在 `runtime/uploads/`；保留完整目录与秘密文件。旧 `deploy/docker-compose.infrastructure.yml` 是历史 PostgreSQL/MinIO 示例，不是当前部署入口。
+
+用户已确认尚未正式使用，本轮按全新 PostgreSQL 库处理，不实施 SQLite 迁移，不读取或删除旧 SQLite 文件。历史文档中的“旧版仅换镜像升级”、SQLite 文件备份与卷迁移步骤只适用于当时版本，不适用于切换到 0.6.0。
 
 ## 记忆、历程与版本说明
 
@@ -43,6 +48,18 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.6.0：PostgreSQL 与物资信息库
+
+开发分支为 `feature/v0.6.0-postgresql-material-catalog`，源码版本 0.6.0。开发与测试运行文件、校验脚本放 `artifacts/cache/0.6.0/`，发布产物目标目录为 `artifacts/releases/0.6.0/`；这些路径不代表已构建或发布。main、旧标签、旧产物与原运行目录保留。
+
+数据库查询与调用链改为异步，同一事务使用同一 PostgreSQL client。写操作用事务级 advisory lock 串行检查与入账，读请求可以并发；保留版本、幂等、金额数量整数与角色检查。请求正文在写事务前完整解析，成功响应在提交后发送；事务失败清理新建附件，彻底删除附件在提交后执行。全局写锁是当前 10–30 人查询录入目标的实现选择，不代表已通过目标 NAS 容量测试。
+
+“主档”在界面称为“物资信息库”，保存编码、名称、规格、单位、分类及管理方式，与库存余额分开。申报检索按所选区域／仓库的正库存、其他区域的正库存、零库存排序；零库存物资继续复用既有信息。服务端只按规范化后的唯一精确身份复用，不因名称相似或同名而合并不同规格／单位。未匹配新物资仍可先填报提交，有权限的管理员可在原单建档并关联；提交后的关联要求 MATERIAL、修订权限、原因与当前版本，保留原提交快照。
+
+物资信息 XLSX 模板、导入和筛选导出只处理标准信息；导入本身不新增库存或逐件码。数量、金额、批次和存放位置继续从期初／存量补录单导入草稿，确认入库后才生成流水和逐件编码。物资信息导入全批校验、同事务写入，已编码同字段的记录跳过，冲突不部分导入；具体字段与限额见 [物资 API](MATERIAL_API.md)。
+
+纯 PostgreSQL 新部署仍保留现有物资 JSON 备份 schema 1–5 的受控恢复能力；这与读取旧 SQLite 数据库不是同一功能。完整恢复仍仅允许空物资库，映射现有账号，并校验库存、单件与历史关联。0.6.0 正式镜像、离线包、群晖和实机验证结果须完成后再记录，本节不沿用 0.5.1 的交付结论。
 
 ## 0.4.0：整件条码与可配置编号
 
@@ -160,31 +177,33 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 
 ## 运行与检查
 
-在项目根目录运行：
+先准备独立 PostgreSQL 开发数据库；应用账号需有目标库的建表权限。在项目根目录用 PowerShell 7 运行：
 
 ```powershell
 npm ci --omit=dev --ignore-scripts
+$env:DATABASE_URL = 'postgresql://labos@127.0.0.1:5432/labos_development'
 npm run check
-npm test
-npm start
-```
-
-`npm run check` 检查全部 JavaScript 语法，不代替业务、权限或并发测试。`npm start` 默认监听 3000 端口，运行文件放在 `var/data`、`var/uploads`、`var/logs`。
-
-`npm test` 运行隔离 HTTP/数据库回归、按真实脚本顺序加载的前端 VM 检查和版本化打包测试；源码副本及缓存统一位于 `artifacts/cache/<version>/`。测试不使用 `var/` 中的真实数据库；VM 检查不代替真实浏览器验收。
-
-日常开发使用：
-
-```powershell
 npm run dev
 ```
 
-开发模式默认监听 3001 端口，并使用 `var/development/<package.version>` 下的独立数据库、附件和日志，例如 `var/development/0.3.0/`。它不会自动复制正式或旧开发版本的数据。
+连接地址须替换为自己准备的开发数据库，认证凭据按该 PostgreSQL 实例配置；不要把真实口令提交到仓库。`npm run check` 检查全部 JavaScript 语法，不代替业务、权限或并发测试。
 
-`LABOS_RUNTIME_DIR` 决定运行根目录，`PORT` 决定端口；需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如在 PowerShell 中：
+测试需要专用 PostgreSQL 实例，以及可以创建和删除临时数据库的测试账号：
+
+```powershell
+$env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
+npm test
+```
+
+`npm test` 运行真实 PostgreSQL 隔离 HTTP/数据库回归、按真实脚本顺序加载的前端 VM 检查和版本化打包测试；测试按用例创建随机库并清理，源码副本及缓存统一位于 `artifacts/cache/<version>/`。`LABOS_TEST_DATABASE_URL` 必须指向专用测试实例，不得指向日常业务库；缺少配置时数据库回归报错，不静默改用 SQLite。VM 检查不代替真实浏览器验收。
+
+开发模式默认监听 3001 端口，附件和日志放在 `var/development/<package.version>/`，例如 `var/development/0.6.0/`。数据库完全由 `DATABASE_URL` 决定，运行目录和 Git 分支不会隔离 PostgreSQL，须为开发、测试和日常使用分别准备数据库；不会自动复制旧开发版本的数据。`npm start` 默认监听 3000 端口，附件和日志默认放在 `var/`。
+
+`LABOS_RUNTIME_DIR` 决定附件、日志等运行文件的根目录，`PORT` 决定端口；它们不替代数据库连接。需要自定义时通过进程环境变量设置，建议给运行目录使用绝对路径。例如：
 
 ```powershell
 $env:LABOS_RUNTIME_DIR = 'C:\labmg\var\scratch'
+$env:DATABASE_URL = 'postgresql://labos@127.0.0.1:5432/labos_scratch'
 $env:PORT = '3002'
 npm start
 ```
@@ -193,7 +212,9 @@ npm start
 
 如自动化部署确需预设，仍可把非空 `LABOS_ADMIN_PASSWORD` 与可选 `LABOS_ADMIN_USER` 传给启动进程，仅在零用户时创建管理员；默认 Docker Compose 不传密码。不要将真实口令写回示例或提交到 Git，初始化变量不等于修改已有账号的密码。
 
-### 0.2.0-rc.1 兼容性
+### 历史：0.2.0-rc.1 SQLite 兼容性
+
+以下保留当时的升级行为，不适用于 0.6.0 新 PostgreSQL 部署。
 
 - 启动会为旧 `records` 表补充整数 `version`，重建体系文件当前版本联动触发器；旧客户端更新记录前需先读取并回传 `version`。缺失或非整数返回 400，版本过期返回 409；页面保留输入并允许明确重载。
 - 新建、重置和导入账号使用带盐 scrypt；旧明文账号成功登录后自动升级。已有旧账号并非在启动时全部迁移。备份会把旧明文转为哈希快照，历史备份不会自动改写。
@@ -245,9 +266,11 @@ npm run package:zip
 
 旧 0.1.1 ZIP 已归档到 `artifacts/releases/0.1.1/labos-0.1.1.zip`，原解压验证目录归入 `artifacts/cache/0.1.1/verification/`；更早产物及原数据迁移备份保留在 `artifacts/legacy/`。旧 ZIP 是历史保留件，不补写成新构建。
 
-部署包保留 `.github/`、`src/`、`scripts/`、`config/`、`deploy/`、`docs/`、`tests/` 及必要根文件，可在解压后的根目录执行 `npm start`，或运行 `start-labos.cmd`。包中不应包含本地数据库、附件、日志、真实环境配置和构建缓存。
+部署包保留 `.github/`、`src/`、`scripts/`、`config/`、`deploy/`、`docs/`、`tests/` 及必要根文件；先准备 PostgreSQL、配置 `DATABASE_URL` 并安装依赖，再在解压后的根目录执行 `npm start`，或运行 `start-labos.cmd`。包中不应包含本地数据库、附件、日志、真实环境配置和构建缓存。
 
 ### GHCR 多架构发布
+
+0.6.0 Compose 使用版本镜像 `ghcr.io/hotll233/labmg:0.6.0`，发布状态见GitHub Release。新部署使用配套的应用、PostgreSQL 与一次性初始化三个服务；数据、自动生成的连接口令与附件保存在固定 `runtime/`。具体部署、停服备份与恢复见 [群晖部署](SYNOLOGY.md)。后续 PostgreSQL 版本更新须保留原数据路径、秘密文件和数据库主版本；不能把“仅换应用镜像”当作数据库主版本升级流程。
 
 GitHub Actions 在推送 `v*` 标签时构建并推送 `linux/amd64`、`linux/arm64` 多架构镜像。标签版本须与 `package.json` 相符；例如 `v0.2.0-rc.3` 对应 `ghcr.io/hotll233/labmg:0.2.0-rc.3`。镜像写入版本及源码提交 OCI 标签，发布凭据由工作流的 `GITHUB_TOKEN` 提供。失败运行可在 Actions 页面重新运行，不要求部署用户持有 GitHub 凭据。
 
@@ -257,7 +280,11 @@ rc.3 首次推送后未生成运行记录，具体触发原因未确定。后续
 
 rc.3 已由运行 `38855576508` 构建发布，用户设置包 Public 后完成匿名双架构拉取及正式 YML 启动验证。Registry 检查使用完整的 OCI 索引媒体类型 `application/vnd.oci.image.index.v1+json`；缺失 `.v1` 时 GHCR 也返回 404，不能据此判断标签不存在。后续 CI 跟进修正该类型并保留已有版本校验。
 
-2026-10-19 用户要求原地升级并让数据可在 YML 同目录找到。仓库后续 `deploy/docker-compose.yml` 改为固定的 `./runtime` bind，两个服务通过 `create_host_path: true` 自动创建并共用该目录；`runtime/data` 保存 SQLite，`runtime/uploads` 保存附件，`runtime/logs` 为预留目录。镜像仍使用已发布的 `ghcr.io/hotll233/labmg:0.4.0`，本次仅修订部署模板，不重打镜像、不修改旧标签或 Release 附件。开发、测试及构建继续版本隔离，生产数据不随镜像版本更换目录。
+#### 历史：0.4.0 至 0.5.1 的 SQLite 部署模板
+
+以下保留 2026-10-19 的历史模板决策与升级规则，0.6.0 已改用 PostgreSQL，不能按本段从旧 SQLite 直接更换镜像。
+
+2026-10-19 用户要求原地升级并让数据可在 YML 同目录找到。当时仓库后续 `deploy/docker-compose.yml` 改为固定的 `./runtime` bind，两个服务通过 `create_host_path: true` 自动创建并共用该目录；`runtime/data` 保存 SQLite，`runtime/uploads` 保存附件，`runtime/logs` 为预留目录。该次模板维护继续使用已发布的 `ghcr.io/hotll233/labmg:0.4.0`，仅修订部署模板，不重打镜像、不修改旧标签或 Release 附件；后续 0.5.1 沿用该目录方式。开发、测试及构建继续版本隔离，生产数据不随镜像版本更换目录。
 
 历史 0.4.0 及更早 Release 附件的默认命名卷仍保留原样。已有部署优先沿用原 YML/项目/挂载和 UID/GID，仅更新镜像；若换用新模板，必须先按[群晖部署](SYNOLOGY.md)在停服后将原数据完整迁入项目的 `runtime/`，或将 `LABOS_DATA_DIR` 指向原宿主机目录。创建空目录不等于迁移，不能直接改用空目录初始化。相对路径跟随 YML 的项目目录，搬动 YML 时也要搬数据或改用原绝对路径。
 
@@ -273,20 +300,20 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.4.0 TAR 对应 `labos:0.4.0`），使用本地标签并跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
+导入并核对同版本 TAR 后，在部署 `.env` 中设置 `LABOS_IMAGE=labos:<实际版本>`（0.6.0 构建目标为 `labos:0.6.0`），使用本地标签。应用 TAR 不包含 PostgreSQL 镜像；完整离线部署还需提前导入匹配目标架构的 `postgres:17-bookworm`，启用 HTTPS 时另需配套 Caddy 镜像。全部所需镜像已导入时跳过 `docker compose pull`。默认 GHCR 名称与离线 TAR 名称不同，导入镜像不会自动修改 YML 的镜像选择。rc.2 / rc.3 历史 TAR 仍使用对应版本标签及原初始化配置，rc.4 仍使用该版本绑定目录及网页首设方式。
 
 需要运行中的 Linux Docker 引擎、Buildx 与跨架构构建支持；仅打源码 ZIP 不需要 Docker。PowerShell 可用 `scripts/package-docker.ps1 -Architectures amd64` 只导出一种架构。构建阶段、镜像临时导出和每架构本地层缓存均放在 `artifacts/cache/<version>/`；Docker 内部存储仍由引擎管理。后续版本可复用最近版本的对应架构缓存，旧发布包不可覆盖。
 
-镜像的运行目录固定为 `/var/lib/labos`，仓库后续 Compose 默认挂载 YML 同目录的 `runtime/`，也可指定已有宿主机目录；通过 `LABOS_UID/GID` 指定运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，不加载业务服务或创建数据库。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 使用自定义 UID 时仍须自行准备可写卷；自动初始化属于 Compose 项目启动流程。
+应用镜像的运行目录固定为 `/var/lib/labos`，Compose 默认挂载 YML 同目录的 `runtime/`，也可显式设置独立的宿主机目录；通过 `LABOS_UID/GID` 指定应用运行用户，两者须为 1–2147483647 的整数。初始化拒绝符号链接及非目录，准备附件、日志及秘密目录、一次性生成数据库连接口令，不加载业务服务；PostgreSQL 容器自行初始化和管理 `postgres/` 目录。已有 PostgreSQL 数据却缺失秘密文件时拒绝启动，不重新生成不匹配的口令。构建上下文只允许源码和包信息，并排除其中意外存在的环境文件/数据库/附件等。镜像不会包含本机真实业务数据或管理员口令。直接 `docker run` 时须自行准备可写存储和 PostgreSQL 连接；自动初始化属于 Compose 项目启动流程。
 
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 时才运行真实容器检查；普通 `npm test` 会明确跳过该项。例如在镜像已构建后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.4.0'
+$env:LABOS_DOCKER_IMAGE = 'labos:0.6.0'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_IMAGE
 ```
 
-该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、YML 副本及旁边的 `runtime/`，验证自动创建、初始化属主、非 root、首次设置、登录和业务数据在容器重建后的持久化，不使用 `var/` 真实数据库。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的路径解析检查，覆盖换镜像、换项目名仍读取同一 YML 旁目录，以及保留自定义原目录；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
+该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、YML 副本及旁边的 `runtime/`，验证自动创建、数据库健康依赖、非 root、首次设置、登录和业务数据在容器重建后的持久化；不使用日常业务库或真实 `var/`。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的配置解析检查；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。

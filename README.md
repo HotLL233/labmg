@@ -1,97 +1,83 @@
 # LabOS 实验室综合管理系统
 
-当前公开版本：**[0.5.1 期初单据与标签补丁版](https://github.com/HotLL233/labmg/releases/tag/v0.5.1)**（2026-10-19，prerelease）。已提供 amd64/arm64 镜像及 14 件 Release 附件，最终四项容器验证通过；范围见下方发布记录和[版本说明](docs/CHANGELOG.md)。
+本源码版本：**0.6.0**，改用 PostgreSQL，补充申报库存匹配与物资信息 Excel 导入。发布状态、下载和实际验证记录见 [GitHub Release](https://github.com/HotLL233/labmg/releases)与[版本说明](docs/CHANGELOG.md)。0.5.1及更早SQLite版本的镜像、部署文件与历史记录保留。
 
-0.5.0 是未公开的冻结候选，HTTPS 验证发现真实 IP 无 SNI、经 NAT 访问时握手失败，已由 0.5.1 替代；保留其标签、ZIP 和未公开草稿 Release。已公开的 [0.4.0](https://github.com/HotLL233/labmg/releases/tag/v0.4.0) 及更早版本的源码、双架构镜像、离线包和配套 YML 继续保留。
+系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户确认尚未正式使用，本轮按全新 PostgreSQL 部署处理，不提供旧 SQLite 数据迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
-系统使用 Node.js 内置 SQLite，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。稳定分支 `main` 仍保留 0.1.1。
+## 本机运行与开发
 
-## 快速启动
-
-需要 Node.js 22.13+，建议使用 Node.js 24。
+需要 Node.js 22.13+（建议 24）及单独准备的 PostgreSQL 数据库；本轮验证使用 PostgreSQL 17。应用账号需有目标数据库的建表权限。Windows 命令统一用 PowerShell 7。
 
 ```powershell
 npm ci --omit=dev --ignore-scripts
+$env:DATABASE_URL = 'postgresql://labos@127.0.0.1:5432/labos_development'
 npm run check
-npm test
-npm start
+npm run dev
 ```
 
-日常运行地址为 `http://127.0.0.1:3000`，数据保存在 `var/`。空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位并需确认；没有默认密码。设置成功后自动登录，之后使用该账号登录；已有账号保持原密码。
+连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发使用 `npm run dev`，默认地址为 `http://127.0.0.1:3001`，本版本的独立数据保存在 `var/development/0.5.1/`。切换版本不会自动复制旧数据。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.6.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
-## 物资管理
+空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
-沿用 0.4.0 已有的物资与批次账及“一瓶／一件一个独立编号”，保留包装商品码和批次码。单件管理物资在合格验收、期初和盘盈时按整数数量生成独立编号，发放和盘亏须选择具体在库单件；编号规则支持日期、流水号及补零位数，改规则保留旧码及全局序号。旧物资默认继续按数量管理，有业务历史不能切换管理方式；新增编号不重复增加库存。具体业务规则与验收结果见[版本说明](docs/CHANGELOG.md)。以下现有申报、验收、批次库存及领用流程继续保留。
+测试另需专用 PostgreSQL 实例及可创建临时数据库的测试账号：
 
-0.5.1 沿用 0.5.0 候选新增的独立期初单据、XLSX 导入导出和逐件标签模板；验收可填写存放位置，库存行可直接申请领用。物资页包含“物资申报 / 验收 / 库存 / 期初库存 / 领用”五个入口，支持历史查询、真正的 Excel 导出、分类与归属区域、受控修订、分批验收入库及期初流水。
+```powershell
+$env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
+npm test
+```
 
-首次使用先由系统管理员建立分类和区域，再在“管理 → 人员账号管理”给业务负责人添加 **MATERIAL（物资管理员）** 角色。全员可新建申报单、添加物资；新物资可先提交，验收前由管理员维护规范主档，再由物资管理员在原单“修订”中匹配并填写原因；普通人员仅编辑本人草稿行，物资管理员可提交和说明原因修订已提交单。ADMIN 未兼任 MATERIAL 时可维护字典与主档，办理入库仍需添加物资管理员角色。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.6.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
-验收填写本批合格数量和含税总金额；库存按物资主档、仓库和区域合并，保留批次与来源。期初在首次合格入库或主动关闭后结束；入口持续保留历史单据，物资管理员可填写原因创建存量补录单，补录作为调整流水入库，不重新开放期初。旧物资台账只读，不自动变成期初；升级前先备份原运行目录，在副本核对。规则见 [开发说明](docs/DEVELOPMENT.md) 与 [物资 API](docs/MATERIAL_API.md)。
+## 物资信息与库存
 
-库存详情可查看批次余额、存放位置及精确来源流水。存放位置是独立于仓库和归属区域的文字，例如“2号柜／第3层”，由具有对应权限的 ADMIN/MATERIAL 维护；同一物资、仓库、区域、批号和有效期首期共用一个位置。
+“物资主档”就是同种物资的标准信息，在页面中称为**物资信息库**，保存编码、名称、规格、单位、分类和管理方式。它不代表已经有库存；库存数量由期初、验收、调整和领用流水累计。相同名称但规格或单位不同的物资分别保留。
 
-人员在具体库存批次上提交领用申请，申请不预占库存；本人可取消待发放申请，物资管理员可确认发放或说明原因驳回。确认时才检查实时库存并扣减数量，系统按该批次当前账面金额分摊费用，领完时精确扣完余额。普通人员只查看本人领用，ADMIN/MATERIAL 可查看全部；发放仍要求 MATERIAL 角色和独立动作权限。
+申报时先选择区域和仓库，按编码、名称或规格检索，所选范围有库存的物资优先显示；已有物资用完后仍复用原信息，不因零库存重复建档。确认没有匹配项时可以填写新物资并提交，验收前由具有维护权限的管理员确认建档或关联已有信息。已提交单的关联仍由物资管理员填写原因修订，保留原提交与修改历史。
 
-验收页增加“扫码入库”，库存与领用页增加“扫码领用”。外包装条码由有主档维护权限的 ADMIN/MATERIAL 在主档内首次绑定；一码对应一个物资，一个物资可绑定多个码。库存批次可打印系统二维码，精确定位物资、仓库、区域、批号及有效期。包装码只定位物资，多个来源或批次须手动选择，再填写数量等信息；扫码本身不记账、不扣库。未知包装码先找管理员绑定，扫码得到的 URL 不会自动打开。
+物资信息库支持下载 XLSX 模板、导入和导出。**导入物资信息只建立标准信息，不增加库存、不生成实物条码。** 带数量、金额和存放位置的旧有实物，从“期初库存”或期初关闭后的“存量补录”导入草稿，核对并确认入库后才记库存；补录必须原因并保留流水。逐件管理物资按实际入库整数数量生成一瓶／一件一个固定码。
 
-扫码提供后置相机、拍照/选图、手输三种方式，图像在设备本地解析。手机实时相机需通过受浏览器信任的 HTTPS 地址访问并授权摄像头；普通 NAS IP 的 HTTP 地址可使用拍照/选图或手输，见[群晖 HTTPS 配置](docs/SYNOLOGY.md#手机扫码与-https)。EAN/UPC 等价码可能以13位表示，绑定时以扫码结果为准，手输保持精确匹配。
+物资页保留“申报 / 验收 / 库存 / 期初库存 / 领用”五个入口。全员可建申报单、添加本人草稿明细；提交、验收、已提交单修订及领用发放需要 **MATERIAL（物资管理员）** 角色及对应动作权限，只有 ADMIN 角色不能代办。分类、归属区域和物资信息由有对应维护权限的 ADMIN/MATERIAL 管理。
 
-扫码依赖及许可见[第三方组件](docs/THIRD_PARTY.md)，完整许可随源码和镜像保留。
+库存按物资、仓库和区域合并，保留批次、有效期、存放位置和来源；领用由人员申请，物资管理员确认发放才扣库存。逐件管理发放时选择具体在库实物；申请不预占库存，不支持开瓶余量或同一申请部分发放。接口与 Excel 规则见[物资 API](docs/MATERIAL_API.md)。
 
 ## Docker 与群晖
 
-**可以原地升级，账号、设置和历史数据应继续保留。** 已有部署先停服完整备份，继续用原 YML、项目、数据挂载及 UID/GID，只在原 `.env` 更新 `LABOS_IMAGE=ghcr.io/hotll233/labmg:0.5.1`，再执行 `docker compose pull` 和 `docker compose up -d`。不需要每次换 YML 或重新设置管理员；首次设置只会在当前连接的数据库没有用户时开放。
+0.6.0 使用 [deploy/docker-compose.yml](deploy/docker-compose.yml) 和[环境示例](deploy/.env.example)，包含三个服务：一次性目录初始化 `labos-init`、数据库 `postgres` 和应用 `labos`。在线部署使用 `ghcr.io/hotll233/labmg:0.6.0`；源码本地构建或离线导入后可设置 `LABOS_IMAGE=labos:0.6.0`。发布状态与镜像验证结果以 Release 为准。
 
-仓库当前部署模板将数据默认放在 **YML 所在目录的 `runtime/`**，启动时自动创建 `runtime/data/`、`runtime/uploads/`、`runtime/logs/`。镜像更新沿用这个目录，不随业务版本另建数据位置；可在同目录 `.env` 用 `LABOS_DATA_DIR` 指定已有绝对路径。应用仍按非 root UID/GID 运行，一次性初始化服务只准备目录与权限。模板使用绑定目录自动创建功能，部署前需检查 Compose 支持情况。
+全新项目默认将数据放在 **YML 同目录的 `runtime/`**，由部署自动准备。`runtime/postgres/` 保存 PostgreSQL 数据，`runtime/uploads/` 保存附件，`runtime/secrets/postgres-password` 保存自动生成的数据库口令，`runtime/logs/` 为日志预留目录。管理员登录密码仍由首次网页设置，和数据库连接口令分开。
 
-**历史 0.4.0 及更早 Release 附件保持原样**，其中 rc.5 起的旧 YML 默认采用版本命名卷，例如 `<项目名>_labos-runtime-0.4.0`；0.5.1 新模板改用固定 runtime/，不会自动迁移旧卷。换用新模板前，须把实际旧数据停服完整复制或恢复到项目 `runtime/`，核验后才切换，不能直接接一个空目录。具体步骤见[群晖部署](docs/SYNOLOGY.md#将旧命名卷迁移到-yml-同目录)。
+后续 PostgreSQL 版本更新沿用原 YML、项目、整个 `runtime/` 和 UID/GID。保留数据库目录与秘密文件，不能只留下附件，也不能删除秘密文件后重新生成口令。移动 YML 时一并移动完整数据目录，或让 `LABOS_DATA_DIR` 保持指向原绝对路径。备份、恢复与启用 HTTPS 见[群晖部署](docs/SYNOLOGY.md)。
 
-升级后又出现“首次设置管理员”时，先停止写入，核对原容器 `/var/lib/labos` 的实际挂载源；接错目录或卷不等于旧数据已删除。保留旧卷与新目录，按[排查步骤](docs/SYNOLOGY.md#更新后又出现首次设置管理员)接回旧数据。账号、权限、系统设置、历史记录及附件均依赖同一运行挂载；保留容器名称或 YML 文件本身不能代替保留数据。
+0.5.1 及更早的 SQLite 部署不能仅替换镜像变成 PostgreSQL；本轮按用户确认使用新的部署目录，旧目录与历史附件原样保留。应用镜像 TAR 不包含 PostgreSQL 镜像，完整离线部署还需准备目标架构的 `postgres:17-bookworm` 镜像。
 
-首次安装使用仓库 [deploy/docker-compose.yml](deploy/docker-compose.yml) 与 [环境示例](deploy/.env.example)，或下载 [0.5.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 的配套文件，在群晖 Container Manager 创建项目；保留 `LABOS_DATA_DIR` 未设置即可使用同目录 `runtime/`。公开镜像为 `ghcr.io/hotll233/labmg:0.5.1`，支持 amd64/arm64。容器端口 `3000`，`labos-init` 成功退出是正常状态；只在全新数据库设置管理员。
+## 打印与手机扫码
 
-离线部署仍可导入同架构 TAR，在 `.env` 设置 `LABOS_IMAGE=labos:0.5.1`，跳过拉取后启动。升级和回退须保留完整数据备份；旧版本不能识别新版所有数据，回退不能只切旧镜像。普通 `docker compose down` 保留数据；旧命名卷配置不要用 `down -v`，绑定目录也不要手工删除。完整步骤、备份与国内仓库同步方法见 [群晖部署](docs/SYNOLOGY.md)。
+网页标签支持毫米尺寸、字段布局、偏移与模板 JSON 导入导出；逐件 CSV 可交给现有 BarTender 设计器，使用 USB DL-886A（NEW）驱动打印，见[标签打印](docs/LABEL_PRINTING.md)。重印沿用原实物编码，不新增库存。
 
-## 目录
+手机实时相机需要受信任的 HTTPS、系统与浏览器相机授权；普通群晖 IP 的 HTTP 地址保留拍照／选图和手输。可按[扫码 HTTPS 配置](docs/SCANNING_HTTPS.md)启用 Caddy 并在手机信任证书。实际 NAS、手机及 USB 标签打印仍需现场确认。
+
+## 目录与版本管理
 
 | 路径 | 内容 |
 | --- | --- |
-| `src/` | 服务端和静态前端 |
-| `scripts/` | 检查与打包脚本 |
-| `tests/` | 隔离启动、权限/会话/冲突、前端状态与版本打包回归 |
-| `config/` | 环境变量示例 |
-| `deploy/` | Dockerfile、应用 Compose/环境示例，以及独立的旧基础服务配置 |
-| `docs/` | 开发约定和变更记录 |
-| `var/` | 本地数据库、附件和日志，不提交 |
-| `artifacts/` | 按版本隔离的本地发布包、构建清单和缓存，不提交 |
+| `src/` | PostgreSQL 数据库模块、服务端和静态前端 |
+| `scripts/` | 检查和打包脚本 |
+| `tests/` | 真实 PostgreSQL 隔离回归、前端与打包检查 |
+| `config/`、`deploy/` | 本地环境示例、Dockerfile 与正式 Compose |
+| `docs/` | 记忆、开发记录、版本说明与操作文档 |
+| `var/` | 本地附件与日志，不提交 |
+| `runtime/` | Compose 项目旁的数据库、附件和秘密文件，不提交 |
+| `artifacts/releases/<version>/` | 冻结交付产物，不提交 |
+| `artifacts/cache/<version>/` | 按版本隔离的构建与测试缓存，不提交 |
 
-应用当前仍使用 SQLite 与本地附件；旧 PostgreSQL/MinIO 示例保留为 `deploy/docker-compose.infrastructure.yml`，应用无需这些服务。普通 Node 启动不自动加载 `config/.env.example`；Docker Compose 则读取项目目录的 `.env` 并向容器传入变量。
+`main` 保存发布基线，`develop` 与 `feature/*` 用于开发；标签与旧产物保留。`npm run package:zip` 和 `npm run package:docker` 使用实际包版本生成产物；源码冻结后补文档不重打归档或移动旧标签。Docker 打包需要运行中的 Linux Docker 引擎与 Buildx。
 
-## 版本与发布
+开发约定见 [DEVELOPMENT](docs/DEVELOPMENT.md)，长期记录集中在 [MEMORY](docs/MEMORY.md)、[HISTORY](docs/HISTORY.md) 和同一份 [CHANGELOG](docs/CHANGELOG.md)。
 
-`main` 保存发布基线，`develop` 用于后续开发，`feature/*` 承载具体功能；Git 标签保留版本快照。切换分支不会自动隔离或回退数据。
+## 已发布历史
 
-```powershell
-npm run package:zip
-```
+[0.5.1](https://github.com/HotLL233/labmg/releases/tag/v0.5.1) 于 2026-10-19 公开为验证版，冻结提交 `60f9639` / `v0.5.1`。[镜像构建](https://github.com/HotLL233/labmg/actions/runs/39192642471)及[最终验证](https://github.com/HotLL233/labmg/actions/runs/39193510875)成功，涵盖双架构匿名拉取与正式 Compose、0.4.0 原配置同挂载 amd64 升级 18/18、双 TAR 检查和严格验证证书的无 SNI HTTPS 生命周期；ARM64 使用 QEMU。14 件附件摘要一致，12 个非 TAR 附件经官方 API 匿名完整下载；TAR 在云端验证上传，本机未全量下载。这些是 0.5.1 的 SQLite 交付结果，不是 0.6.0 验收。
 
-生成 `artifacts/releases/0.5.1/labos-0.5.1.zip` 及 `manifest.json`；构建和验证缓存使用 `artifacts/cache/0.5.1/`。先完成开发与检查，再冻结发布源码；发布后的文档记录不重新打包或移动标签。旧版本产物保留，相同版本只复用内容和校验一致的包；输入变化或已有包损坏时应使用新版本号。
-
-`npm run package:docker` 另构建并导出两个架构的镜像 TAR、镜像校验清单及独立的 YML/环境示例/群晖说明，仍位于同一版本目录。此命令需要运行中的 Linux Docker 引擎及 Buildx；层缓存按架构导出到 `artifacts/cache/<version>/`，后续版本可引用。
-
-GitHub Actions 在推送与 `package.json` 版本匹配的 `v*` 标签时构建并推送 GHCR 多架构镜像；镜像发布结果与匿名拉取验证以对应 Actions 运行和包状态为准，部署配置本身不代表发布已成功。`0.2.0-rc.2` 引入的本地 TAR 交付方式及历史版本继续保留。
-
-0.5.1 冻结于 `60f9639` / `v0.5.1`，[镜像构建](https://github.com/HotLL233/labmg/actions/runs/39192642471)与[最终验证](https://github.com/HotLL233/labmg/actions/runs/39193510875)成功。四项验证包括双架构匿名拉取及正式 Compose、原 0.4.0 配置同挂载的 amd64 升级 18/18、双架构离线 TAR 容器检查，以及无 SNI、仅信任隔离 CA 且严格验证证书的 HTTPS 生命周期检查；ARM64 使用 QEMU 模拟。14 件附件摘要一致，12 个非 TAR 附件经官方 API 匿名完整下载通过；两份 TAR 在云端验证并上传，本机未全量下载。
-
-Release 附件保留源码冻结时的文档，最新交付记录见本页和[版本说明](docs/CHANGELOG.md)，不重打已冻结归档。0.4.0 及更早验证记录继续保留。真实群晖 NAS、手机证书与实时相机、DL-886A USB 打印及 BarTender 流程尚未验收。
-
-解压后先执行 `npm ci --omit=dev --ignore-scripts` 再运行 `npm start`；`start-labos.cmd` 在首次缺少依赖时自动安装。源码 ZIP 不含 node_modules，首次安装需要 npm 网络或已有缓存；Docker 镜像已包含运行依赖，可用 TAR 离线部署。部署包不包含本地运行数据；后续引用版本时同时核对清单中的版本、源码摘要和 ZIP 校验值。
-
-具体操作见 [开发与版本管理](docs/DEVELOPMENT.md)。项目记录统一维护在 [项目记忆](docs/MEMORY.md)、[开发历程](docs/HISTORY.md) 和 [版本更新说明](docs/CHANGELOG.md) 中，后续版本说明在同一文件内新增。
-
-当前仍为单实例 SQLite 应用。验证范围与限制见版本说明；本机模拟并发不代表目标 NAS 性能或完整灾备验收。
-
-标签尺寸、布局与 BarTender CSV 数据连接步骤见[标签打印](docs/LABEL_PRINTING.md)。手机通过 HTTP 群晖 IP 无法直接开启实时摄像头，可按[扫码 HTTPS 部署](docs/SCANNING_HTTPS.md)启用并信任本地证书，保留拍照、选图和手输。
+0.5.0 因真实 IP 无 SNI 的 HTTPS 握手问题保留为未公开冻结候选，由 0.5.1 补丁替代，其标签、ZIP 与草稿 Release 不改。已公开的 0.4.0 及更早版本、原部署说明与验证边界继续保留在版本记录和[群晖文档的历史部分](docs/SYNOLOGY.md)。

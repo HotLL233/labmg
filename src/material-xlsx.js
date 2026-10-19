@@ -4,6 +4,7 @@ const { inflateRawSync, crc32 } = require('node:zlib');
 const { readSheet } = require('read-excel-file/universal');
 
 const OPENING_HEADERS = ['物资编码', '区域', '仓库编码', '数量', '总金额（元）', '批号', '有效期', '存放位置', '零金额原因'];
+const CATALOG_HEADERS = ['物资编码', '物资名称', '规格', '单位', '物资分类', '管理方式'];
 const FILE_LIMIT = 5 * 1024 * 1024;
 
 function invalid(message) {
@@ -65,7 +66,7 @@ function validateArchive(bytes) {
   if (cursor !== end || ranges.some((range, index) => index && range[0] < ranges[index - 1][1]) || !names.has('[Content_Types].xml') || !names.has('xl/workbook.xml')) invalid('Excel 文件结构无效');
 }
 
-async function readOpeningWorkbook(input) {
+async function readWorkbook(input, headers, label) {
   if (typeof input.name !== 'string' || !/^[^\\/]+\.xlsx$/i.test(input.name)) invalid('请选择 .xlsx 文件，旧版 .xls 请另存为 .xlsx');
   if (typeof input.content !== 'string' || input.content.length > Math.ceil(FILE_LIMIT / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.content)) invalid('Excel 文件编码无效或超过5 MiB');
   const bytes = Buffer.from(input.content, 'base64');
@@ -73,12 +74,12 @@ async function readOpeningWorkbook(input) {
   try {
     validateArchive(bytes);
     const data = await readSheet(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length), 1, { trim: true });
-    if (!Array.isArray(data) || !data.length || data[0].length !== OPENING_HEADERS.length || OPENING_HEADERS.some((header, index) => data[0][index] !== header)) invalid('Excel 表头不匹配，请下载期初模板填写');
+    if (!Array.isArray(data) || !data.length || data[0].length !== headers.length || headers.some((header, index) => data[0][index] !== header)) invalid(`Excel 表头不匹配，请下载${label}模板填写`);
     const rows = data.slice(1).filter(row => row.some(value => value !== null && value !== ''));
     if (!rows.length || rows.length > 200) invalid('每次导入须有1至200条明细');
     return rows.map((row, index) => {
-      if (row.length > OPENING_HEADERS.length || row.some(value => value !== null && !['string', 'number'].includes(typeof value))) invalid(`Excel 第${index + 2}行包含不支持的值；日期请使用YYYY-MM-DD文本`);
-      return Array.from({ length: OPENING_HEADERS.length }, (_, column) => row[column] ?? '');
+      if (row.length > headers.length || row.some(value => value !== null && !['string', 'number'].includes(typeof value))) invalid(`Excel 第${index + 2}行包含不支持的值；日期请使用YYYY-MM-DD文本`);
+      return Array.from({ length: headers.length }, (_, column) => row[column] ?? '');
     });
   } catch (failure) {
     if (failure.status) throw failure;
@@ -86,4 +87,7 @@ async function readOpeningWorkbook(input) {
   }
 }
 
-module.exports = { readOpeningWorkbook, OPENING_HEADERS };
+const readOpeningWorkbook = input => readWorkbook(input, OPENING_HEADERS, '期初');
+const readCatalogWorkbook = input => readWorkbook(input, CATALOG_HEADERS, '物资信息');
+
+module.exports = { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS };

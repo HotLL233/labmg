@@ -33,6 +33,7 @@ $cache = Get-ArtifactPath (Join-Path $cacheRoot $version) $cacheRoot
 $release = Get-ArtifactPath (Join-Path $artifacts "releases\$version") (Join-Path $artifacts 'releases')
 $sourceManifest = Get-Content -LiteralPath (Join-Path $release 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $imageTag = "labos:$version"
+$databaseImageTag = 'postgres:17-bookworm'
 $vcsRef = 'unknown'
 if ($sourceManifest.commit) { $vcsRef = $sourceManifest.commit }
 $stage = Get-ArtifactPath (Join-Path $cache ('docker-' + [guid]::NewGuid().ToString('N'))) $cache
@@ -76,6 +77,10 @@ try {
                     $existing.sourceSha256 -ne $sourceManifest.sourceSha256 -or $existing.imageTag -ne $imageTag -or
                     $existing.os -ne 'linux' -or $existing.architecture -ne $architecture -or
                     $existing.imageId -notmatch '^sha256:[a-f0-9]{64}$' -or $existing.archive -ne "$baseName.tar" -or
+                    $existing.databaseImage.imageTag -ne $databaseImageTag -or
+                    $existing.databaseImage.imageId -notmatch '^sha256:[a-f0-9]{64}$' -or
+                    $existing.databaseImage.digest -notmatch '^sha256:[a-f0-9]{64}$' -or
+                    $existing.databaseImage.os -ne 'linux' -or $existing.databaseImage.architecture -ne $architecture -or
                     $existing.size -ne (Get-Item -LiteralPath $archive).Length -or $existing.sha256 -ne (Get-Sha256 $archive)) { throw 'Image archive failed verification.' }
             } catch { throw 'Image archive is incomplete, differs or is damaged; preserve it and use a new package version.' }
             Write-Host "Reused verified $archive"
@@ -102,9 +107,18 @@ try {
             $inspection[0].Config.Labels.'org.opencontainers.image.revision' -ne $vcsRef) {
             throw 'Built image platform, ID or source labels do not match the release.'
         }
+        $pull = (Invoke-Docker @('pull', '--platform', "linux/$architecture", $databaseImageTag)) -join [Environment]::NewLine
+        $pullDigest = [regex]::Match($pull, '(?m)^Digest:\s+(sha256:[a-f0-9]{64})\s*$').Groups[1].Value
+        $databaseInspection = @(((Invoke-Docker @('image', 'inspect', $databaseImageTag)) -join [Environment]::NewLine) | ConvertFrom-Json)
+        $databaseDigests = @($databaseInspection[0].RepoDigests | Where-Object { $_ -match '^(?:docker\.io/)?(?:library/)?postgres@sha256:[a-f0-9]{64}$' } | ForEach-Object { ($_ -split '@', 2)[1] })
+        if ($databaseInspection.Count -ne 1 -or $databaseInspection[0].Os -ne 'linux' -or
+            $databaseInspection[0].Architecture -ne $architecture -or $databaseInspection[0].Id -notmatch '^sha256:[a-f0-9]{64}$' -or
+            !$pullDigest -or $databaseDigests -notcontains $pullDigest) {
+            throw 'PostgreSQL image platform, ID or pulled registry digest does not match the release.'
+        }
         $temporaryArchive = Join-Path $stage "$baseName.tar"
         $temporaryMetadata = Join-Path $stage "$baseName.json"
-        Invoke-Docker @('save', '--output', $temporaryArchive, $imageTag)
+        Invoke-Docker @('save', '--output', $temporaryArchive, $imageTag, $databaseImageTag)
         [ordered]@{
             version = $version
             commit = $sourceManifest.commit
@@ -113,6 +127,13 @@ try {
             imageId = $inspection[0].Id
             os = 'linux'
             architecture = $architecture
+            databaseImage = [ordered]@{
+                imageTag = $databaseImageTag
+                imageId = $databaseInspection[0].Id
+                digest = $pullDigest
+                os = 'linux'
+                architecture = $architecture
+            }
             archive = "$baseName.tar"
             size = (Get-Item -LiteralPath $temporaryArchive).Length
             sha256 = Get-Sha256 $temporaryArchive

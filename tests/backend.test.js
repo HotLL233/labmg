@@ -4,8 +4,8 @@ const path = require('node:path');
 const net = require('node:net');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
-const { DatabaseSync } = require('node:sqlite');
 const { test } = require('node:test');
+const { createTestDatabase } = require('./helpers/postgres');
 
 const root = path.resolve(__dirname, '..');
 
@@ -16,49 +16,9 @@ async function fixture(t, legacy = false, options = {}) {
   fs.cpSync(path.join(root, 'src'), path.join(directory, 'src'), { recursive: true });
   fs.copyFileSync(path.join(root, 'package.json'), path.join(directory, 'package.json'));
   const runtime = path.join(directory, 'runtime');
-  const database = path.join(runtime, 'data/labos.db');
-  const sql = action => {
-    const db = new DatabaseSync(database);
-    try { return action(db); } finally { db.close(); }
-  };
-  if (legacy) {
-    fs.mkdirSync(path.dirname(database), { recursive: true });
-    fs.mkdirSync(path.join(runtime, 'uploads'), { recursive: true });
-    sql(db => {
-      db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE,password TEXT,display_name TEXT,role TEXT);
-        CREATE TABLE records(id INTEGER PRIMARY KEY AUTOINCREMENT,module TEXT,title TEXT NOT NULL,code TEXT,status TEXT,category TEXT,owner TEXT,due_date TEXT,amount REAL DEFAULT 0,quantity REAL DEFAULT 0,data TEXT DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE files(id INTEGER PRIMARY KEY AUTOINCREMENT,record_id INTEGER,original_name TEXT,stored_name TEXT,mime_type TEXT,size INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE role_permissions(role TEXT PRIMARY KEY,permissions TEXT NOT NULL);`);
-      db.prepare('INSERT INTO users(username,password,display_name,role) VALUES(?,?,?,?)').run('legacy-admin', 'legacy-password', 'Legacy', 'ADMIN');
-      db.prepare('INSERT INTO users(username,password,display_name,role) VALUES(?,?,?,?)').run('idle-user', 'idle-password', 'Idle', 'TESTER');
-      db.prepare('INSERT INTO records(module,title,data) VALUES(?,?,?)').run('samples', 'legacy sample fixture', '{}');
-      db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(1, 'sample.txt', 'sample.txt', 'text/plain', 6);
-      db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('LEGACY', '["samples.read"]');
-      db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('MATERIAL', JSON.stringify(options.materialPermissions || ['materials.read', 'materials.reagent.read']));
-      if (options.materialMigrations) {
-        db.exec('CREATE TABLE schema_migrations(name TEXT PRIMARY KEY,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
-        for (const name of options.materialMigrations) db.prepare('INSERT INTO schema_migrations(name) VALUES(?)').run(name);
-      }
-    });
-    fs.writeFileSync(path.join(runtime, 'uploads/sample.txt'), 'sample');
-  }
-  const reservation = net.createServer().listen(0, '127.0.0.1');
-  await once(reservation, 'listening');
-  const port = reservation.address().port;
-  await new Promise(resolve => reservation.close(resolve));
-  const environment = { ...process.env, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'test-admin', LABOS_ADMIN_PASSWORD: 'test-password', ...options.environment };
   let child;
-  const start = async () => {
-    child = spawn(process.execPath, [path.join(directory, 'src/server.js')], {
-      cwd: directory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: environment
-    });
-    let stderr = '';
-    child.stderr.on('data', data => { stderr += data; });
-    const [output] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) });
-    assert.match(String(output), /LabOS:/, stderr);
-  };
   const stop = async () => {
-    if (child.exitCode === null && child.signalCode === null) {
+    if (child?.exitCode === null && child.signalCode === null) {
       const stopped = once(child, 'exit');
       child.kill();
       await stopped;
@@ -70,6 +30,37 @@ async function fixture(t, legacy = false, options = {}) {
     assert.ok(path.basename(directory).startsWith('run-'));
     fs.rmSync(directory, { recursive: true, force: true });
   });
+  const database = await createTestDatabase(t), db = await database.open();
+  const sql = action => action(db);
+  if (legacy) {
+    fs.mkdirSync(path.join(runtime, 'uploads'), { recursive: true });
+    await db.transaction(async () => {
+      await db.prepare('INSERT INTO users(username,password,display_name,role) VALUES(?,?,?,?)').run('legacy-admin', 'legacy-password', 'Legacy', 'ADMIN');
+      await db.prepare('INSERT INTO users(username,password,display_name,role) VALUES(?,?,?,?)').run('idle-user', 'idle-password', 'Idle', 'TESTER');
+      const record = await db.prepare('INSERT INTO records(module,title,data) VALUES(?,?,?)').run('samples', 'legacy sample fixture', '{}');
+      await db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(record.lastInsertRowid, 'sample.txt', 'sample.txt', 'text/plain', 6);
+      await db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('LEGACY', '["samples.read"]');
+      await db.prepare('INSERT INTO role_permissions(role,permissions) VALUES(?,?)').run('MATERIAL', JSON.stringify(options.materialPermissions || ['materials.read', 'materials.reagent.read']));
+      if (options.materialMigrations) {
+        for (const name of options.materialMigrations) await db.prepare('INSERT INTO schema_migrations(name) VALUES(?)').run(name);
+      }
+    });
+    fs.writeFileSync(path.join(runtime, 'uploads/sample.txt'), 'sample');
+  }
+  const reservation = net.createServer().listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const port = reservation.address().port;
+  await new Promise(resolve => reservation.close(resolve));
+  const environment = { ...process.env, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'test-admin', LABOS_ADMIN_PASSWORD: 'test-password', ...options.environment, DATABASE_URL: database.url };
+  const start = async () => {
+    child = spawn(process.execPath, [path.join(directory, 'src/server.js')], {
+      cwd: directory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: environment
+    });
+    let stderr = '';
+    child.stderr.on('data', data => { stderr += data; });
+    const [output] = await once(child.stdout, 'data', { signal: AbortSignal.timeout(10000) });
+    assert.match(String(output), /LabOS:/, stderr);
+  };
   await start();
   const restart = async (overrides = {}) => { await stop(); Object.assign(environment, overrides); await start(); };
   const base = `http://127.0.0.1:${port}`;
@@ -114,10 +105,10 @@ test('empty databases require validated same-origin administrator setup without 
   for (const origin of ['https://other.example', 'null', '', 'not-an-origin', 'http://127.0.0.1:1']) {
     await f.request('POST', '/api/auth/setup', null, valid, 403, { Origin: origin });
   }
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM users').get().n), 0);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM users').get()).n), 0);
   const username = 'u'.repeat(64), password = 'p'.repeat(1024);
   const result = await f.request('POST', '/api/auth/setup', null, { username: ` ${username} `, password, passwordConfirm: password }, 201, { Origin: f.base, 'Content-Type': 'application/json; charset=utf-8' });
-  assert.equal(f.sql(db => db.prepare('SELECT username FROM users').get().username), username);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT username FROM users').get()).username), username);
   assert.equal(result.data.user.role, 'ADMIN');
   assert.deepEqual(result.data.user.permissions, ['*']);
   assert.equal(result.data.user.password, undefined);
@@ -127,8 +118,8 @@ test('empty databases require validated same-origin administrator setup without 
   assert.equal(me.setupRequired, false);
   assert.equal(me.setupUsername, undefined);
   assert.equal(me.user.id, result.data.user.id);
-  assert.match(f.sql(db => db.prepare('SELECT password FROM users').get().password), /^scrypt\$/);
-  const logs = f.sql(db => db.prepare('SELECT * FROM audit_logs').all());
+  assert.match(await f.sql(async db => (await db.prepare('SELECT password FROM users').get()).password), /^scrypt\$/);
+  const logs = await f.sql(async db => (await db.prepare('SELECT * FROM audit_logs').all()));
   assert.equal(logs.length, 1);
   assert.equal(logs[0].action, 'SETUP');
   assert.ok(!JSON.stringify(logs).includes(password));
@@ -143,16 +134,16 @@ test('concurrent first setup creates one administrator and remains closed after 
   const results = await Promise.all(attempts.map(input => f.request('POST', '/api/auth/setup', null, input, [201, 409])));
   assert.deepEqual(results.map(result => result.status).sort(), [201, 409]);
   const winner = results.find(result => result.status === 201);
-  const original = f.sql(db => db.prepare('SELECT * FROM users').get());
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM users').get().n), 1);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM sessions').get().n), 1);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM audit_logs WHERE action=?').get('SETUP').n), 1);
+  const original = await f.sql(async db => (await db.prepare('SELECT * FROM users').get()));
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM users').get()).n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM sessions').get()).n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM audit_logs WHERE action=?').get('SETUP')).n), 1);
   await f.restart({ LABOS_ADMIN_USER: 'replacement-admin', LABOS_ADMIN_PASSWORD: 'replacement-password' });
   const cookie = winner.headers.get('set-cookie').split(';')[0];
   const me = (await f.request('GET', '/api/auth/me', cookie)).data;
   assert.equal(me.setupRequired, false);
   assert.equal(me.user.id, original.id);
-  assert.deepEqual(f.sql(db => db.prepare('SELECT * FROM users').all()), [original]);
+  assert.deepEqual(await f.sql(async db => (await db.prepare('SELECT * FROM users').all())), [original]);
   await f.request('POST', '/api/auth/setup', null, attempts[0], 409);
   await f.request('POST', '/api/auth/login', null, { username: 'replacement-admin', password: 'replacement-password' }, 401);
   await f.login(original.username, 'setup123');
@@ -160,31 +151,31 @@ test('concurrent first setup creates one administrator and remains closed after 
 
 test('any existing user disables setup and explicit initialization never overwrites an existing database', { timeout: 30000 }, async t => {
   const f = await fixture(t, true, { setup: true, environment: { LABOS_ADMIN_PASSWORD: '' } });
-  f.sql(db => db.prepare('DELETE FROM users WHERE username=?').run('legacy-admin'));
-  const original = f.sql(db => db.prepare('SELECT * FROM users').get());
+  await f.sql(async db => await db.prepare('DELETE FROM users WHERE username=?').run('legacy-admin'));
+  const original = await f.sql(async db => (await db.prepare('SELECT * FROM users').get()));
   await f.restart({ LABOS_ADMIN_USER: 'new-admin', LABOS_ADMIN_PASSWORD: 'new-password' });
   assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: false });
   await f.request('POST', '/api/auth/setup', null, { username: 'new-admin', password: 'setup123', passwordConfirm: 'setup123' }, 409);
-  assert.deepEqual(f.sql(db => db.prepare('SELECT * FROM users').all()), [original]);
+  assert.deepEqual(await f.sql(async db => (await db.prepare('SELECT * FROM users').all())), [original]);
 });
 
 test('legacy passwords upgrade, backups hash idle passwords, startup preserves old samples', { timeout: 30000 }, async t => {
   const f = await fixture(t, true);
-  assert.match(f.sql(db => db.prepare('SELECT password FROM users WHERE username=?').get('legacy-admin').password), /^scrypt\$/);
-  assert.equal(f.sql(db => db.prepare('SELECT password FROM users WHERE username=?').get('idle-user').password), 'idle-password');
-  assert.equal(f.sql(db => db.prepare('SELECT version FROM records WHERE module=?').get('samples').version), 1);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM files WHERE record_id=1').get().n), 1);
-  assert.equal(f.sql(db => db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('LEGACY').permissions), '["samples.read"]');
-  assert.equal(f.sql(db => db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL').permissions), '["materials.read","materials.reagent.read"]', 'custom existing MATERIAL permissions must not be silently expanded');
+  assert.match(await f.sql(async db => (await db.prepare('SELECT password FROM users WHERE username=?').get('legacy-admin')).password), /^scrypt\$/);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT password FROM users WHERE username=?').get('idle-user')).password), 'idle-password');
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT version FROM records WHERE module=?').get('samples')).version), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM files WHERE record_id=1').get()).n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('LEGACY')).permissions), '["samples.read"]');
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL')).permissions), '["materials.read","materials.reagent.read"]', 'custom existing MATERIAL permissions must not be silently expanded');
   assert.equal(fs.readFileSync(path.join(f.runtime, 'uploads/sample.txt'), 'utf8'), 'sample');
   const backup = (await f.request('GET', '/api/backup', f.admin.cookie)).data;
   assert.ok(backup.users.every(user => /^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(user.password)));
   assert.ok(!JSON.stringify(backup).includes('idle-password'));
   await f.request('POST', '/api/auth/login', null, { username: 'idle-user', password: 'wrong' }, 401);
   await f.login('idle-user', 'idle-password');
-  assert.match(f.sql(db => db.prepare('SELECT password FROM users WHERE username=?').get('idle-user').password), /^scrypt\$/);
+  assert.match(await f.sql(async db => (await db.prepare('SELECT password FROM users WHERE username=?').get('idle-user')).password), /^scrypt\$/);
   await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [], users: [{ username: 'restored', password: 'old-backup-password', display_name: 'Restored', role: 'TESTER' }] });
-  assert.match(f.sql(db => db.prepare('SELECT password FROM users WHERE username=?').get('restored').password), /^scrypt\$/);
+  assert.match(await f.sql(async db => (await db.prepare('SELECT password FROM users WHERE username=?').get('restored')).password), /^scrypt\$/);
   await f.login('restored', 'old-backup-password');
 });
 
@@ -199,8 +190,8 @@ test('unchanged legacy MATERIAL defaults gain workflow permissions once and expl
   await f.restart();
   assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, previous);
   assert.equal((await f.request('GET', '/api/materials/meta', material.cookie)).data.capabilities.submitRequest, false);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.0-material-permissions').n), 1);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.0-material-permissions')).n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions')).n), 1);
 });
 
 const materialDefaults031 = ['dashboard.read', 'materials.read', 'materials.write',
@@ -220,18 +211,18 @@ test('unchanged 0.3.1 MATERIAL defaults gain issue and location permissions once
   await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin.cookie, { permissions: previous });
   await f.restart();
   assert.deepEqual((await f.request('GET', '/api/auth/me', material.cookie)).data.user.permissions, previous, 'revoked 0.3.2 permissions must stay revoked');
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions')).n), 1);
 });
 
 test('0.3.2 leaves customized or previously revoked MATERIAL grants unchanged and new databases use new defaults', { timeout: 30000 }, async t => {
   for (const previous of [materialDefaults031.filter(permission => permission !== 'materials.stock.adjust'),
     [...materialDefaults031, 'audit.read'], ['dashboard.read', 'materials.read', 'materials.write']]) {
     const f = await fixture(t, true, { materialPermissions: previous, materialMigrations: ['0.3.0-material-permissions'] });
-    const permissions = () => f.sql(db => JSON.parse(db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL').permissions));
-    assert.deepEqual(permissions(), previous);
+    const permissions = async () => await f.sql(async db => JSON.parse((await db.prepare('SELECT permissions FROM role_permissions WHERE role=?').get('MATERIAL')).permissions));
+    assert.deepEqual(await permissions(), previous);
     await f.restart();
-    assert.deepEqual(permissions(), previous);
-    assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions').n), 1);
+    assert.deepEqual(await permissions(), previous);
+    assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM schema_migrations WHERE name=?').get('0.3.2-material-permissions')).n), 1);
   }
   const f = await fixture(t);
   const material = await f.user('new-issue-material', ['MATERIAL']);
@@ -374,10 +365,10 @@ test('record versions reject missing/stale saves and track quality trigger chang
   const changed = results.find(result => result.status === 200).data;
   assert.equal(changed.version, 2);
   await f.request('PUT', `/api/records/${record.id}`, second.cookie, { version: record.version, quantity: 8 }, 409);
-  assert.equal(f.sql(db => db.prepare('SELECT quantity FROM records WHERE id=?').get(record.id).quantity), changed.quantity);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT quantity FROM records WHERE id=?').get(record.id)).quantity), changed.quantity);
   const oldQuality = await f.create({ module: 'quality', title: 'controlled fixture', data: { quality_section: '质量手册', is_current: '是' } });
   await f.create({ module: 'quality', title: oldQuality.title, data: { quality_section: '质量手册', is_current: '是' } });
-  const demoted = f.sql(db => db.prepare('SELECT data,version FROM records WHERE id=?').get(oldQuality.id));
+  const demoted = await f.sql(async db => (await db.prepare('SELECT data,version FROM records WHERE id=?').get(oldQuality.id)));
   assert.equal(JSON.parse(demoted.data).is_current, '否');
   assert.equal(demoted.version, oldQuality.version + 1);
   await f.request('PUT', `/api/records/${oldQuality.id}`, first.cookie, { version: oldQuality.version, title: 'stale trigger save' }, 409);
@@ -387,14 +378,14 @@ test('legacy material flows retain section-filtered read access and reject write
   const f = await fixture(t);
   await f.role('STOCK', ['materials.read', 'materials.write', 'materials.inbound.read', 'materials.inbound.write', 'materials.reagent.read', 'finance.read', 'finance.income.read']);
   const actor = await f.user('stock', ['STOCK']);
-  const legacyMaterial = (title, data, category = '') => f.sql(db => {
-    const added = db.prepare('INSERT INTO records(module,title,category,data) VALUES(?,?,?,?)').run('materials', title, category, JSON.stringify(data));
+  const legacyMaterial = async (title, data, category = '') => await f.sql(async db => {
+    const added = await db.prepare('INSERT INTO records(module,title,category,data) VALUES(?,?,?,?)').run('materials', title, category, JSON.stringify(data));
     return { id: Number(added.lastInsertRowid), version: 1 };
   });
-  const inbound = legacyMaterial('inbound fixture', { flow: '入库管理', material_type: '试剂' });
-  const reagent = legacyMaterial('ledger fixture', { flow: '库存台账' }, '试剂');
-  const outbound = legacyMaterial('outbound fixture', { flow: '出库管理', material_type: '试剂' });
-  legacyMaterial('uncatalogued fixture', { flow: '采购申请', section: 'inbound', material_type: '试剂' });
+  const inbound = await legacyMaterial('inbound fixture', { flow: '入库管理', material_type: '试剂' });
+  const reagent = await legacyMaterial('ledger fixture', { flow: '库存台账' }, '试剂');
+  const outbound = await legacyMaterial('outbound fixture', { flow: '出库管理', material_type: '试剂' });
+  await legacyMaterial('uncatalogued fixture', { flow: '采购申请', section: 'inbound', material_type: '试剂' });
   const income = await f.create({ module: 'finance', title: 'income fixture', data: { direction: '收入' } });
   await f.create({ module: 'finance', title: 'expense fixture', data: { direction: '支出' } });
   assert.deepEqual((await f.request('GET', '/api/records?module=materials', actor.cookie)).data.filter(record => record.title.endsWith('fixture')).map(record => record.id).sort((a, b) => a - b), [inbound.id, reagent.id]);
@@ -421,7 +412,7 @@ test('legacy materials stay read-only through generic files and trash, and gener
   assert.deepEqual((await f.request('GET', '/api/materials/stock', f.admin.cookie)).data, stockBefore);
   const businessBackup = (await f.request('GET', '/api/materials/backup', f.admin.cookie)).data;
   await f.request('POST', '/api/restore', f.admin.cookie, businessBackup, 400);
-  f.sql(db => db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(restored.id));
+  await f.sql(async db => await db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP::text WHERE id=?').run(restored.id));
   await f.request('POST', `/api/trash/${restored.id}/restore`, f.admin.cookie, {}, 403);
   await f.request('DELETE', `/api/trash/${restored.id}`, f.admin.cookie, undefined, 403);
 });
@@ -432,9 +423,9 @@ test('legacy material money and unstructured data are hidden in records, exports
   const reader = await f.user('old-material-reader', ['OLD_READER']);
   const legacy = (await f.request('GET', '/api/records?module=materials', f.admin.cookie)).data[0];
   const data = { unit: '瓶', material_type: '试剂', nested: { customMonetaryLabel: 987.65 } };
-  const fileId = f.sql(db => {
-    db.prepare('UPDATE records SET amount=?,data=? WHERE id=?').run(123.45, JSON.stringify(data), legacy.id);
-    return Number(db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(legacy.id, 'receipt.txt', 'legacy-receipt.txt', 'text/plain', 7).lastInsertRowid);
+  const fileId = await f.sql(async db => {
+    await db.prepare('UPDATE records SET amount=?,data=? WHERE id=?').run(123.45, JSON.stringify(data), legacy.id);
+    return Number((await db.prepare('INSERT INTO files(record_id,original_name,stored_name,mime_type,size) VALUES(?,?,?,?,?)').run(legacy.id, 'receipt.txt', 'legacy-receipt.txt', 'text/plain', 7)).lastInsertRowid);
   });
   fs.writeFileSync(path.join(f.runtime, 'uploads/legacy-receipt.txt'), '123.45!');
   const assertRedacted = record => { assert.ok(record); assert.equal(record.amount, undefined); assert.deepEqual(record.data, {}); };
@@ -447,7 +438,7 @@ test('legacy material money and unstructured data are hidden in records, exports
   assert.equal(full.records.find(row => row.id === legacy.id).amount, 123.45);
   assert.deepEqual(full.records.find(row => row.id === legacy.id).data, data);
   assert.equal((await f.request('GET', `/api/files/${fileId}/download`, f.admin.cookie)).data, '123.45!');
-  f.sql(db => db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(legacy.id));
+  await f.sql(async db => await db.prepare('UPDATE records SET deleted_at=CURRENT_TIMESTAMP::text WHERE id=?').run(legacy.id));
   assertRedacted((await f.request('GET', '/api/trash', reader.cookie)).data.find(row => row.id === legacy.id));
 });
 
@@ -455,11 +446,13 @@ test('restore validates system identities and rolls back record/file changes tog
   const f = await fixture(t);
   await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [], role_permissions: [{ role: 'BAD', permissions: '["invented.permission"]' }] }, 400);
   await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [], users: [{ username: 'bad', role: 'UNKNOWN', password: 'fixture' }] }, 400);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM users WHERE username=?').get('bad').n), 0);
-  const count = f.sql(db => db.prepare('SELECT COUNT(*) n FROM records').get().n);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM users WHERE username=?').get('bad')).n), 0);
+  const count = await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM records').get()).n);
   const files = fs.readdirSync(path.join(f.runtime, 'uploads'));
-  f.sql(db => db.exec("CREATE TRIGGER fail_fixture_file BEFORE INSERT ON files BEGIN SELECT RAISE(ABORT,'fixture failure'); END"));
+  await f.sql(async db => await db.exec(`CREATE FUNCTION fail_fixture_file() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'fixture failure'; END $$;
+    CREATE TRIGGER fail_fixture_file BEFORE INSERT ON files FOR EACH ROW EXECUTE FUNCTION fail_fixture_file();`));
   await f.request('POST', '/api/restore', f.admin.cookie, { type: 'backup', records: [{ id: 888, module: 'assets', title: 'rollback fixture', data: {} }], files: [{ record_id: 888, original_name: 'restored.txt', mime_type: 'text/plain', content: 'YQ==' }] }, 400);
-  assert.equal(f.sql(db => db.prepare('SELECT COUNT(*) n FROM records').get().n), count);
+  assert.equal(await f.sql(async db => (await db.prepare('SELECT COUNT(*) n FROM records').get()).n), count);
   assert.deepEqual(fs.readdirSync(path.join(f.runtime, 'uploads')), files);
 });

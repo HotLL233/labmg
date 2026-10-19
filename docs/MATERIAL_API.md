@@ -1,6 +1,6 @@
-# 0.5.0 物资 API 合同
+# 0.6.0 物资 API 合同
 
-实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，返回 `{handle, backup, restore}`。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`。新业务只使用专表，不写旧 `records`。以下合同供前端与 HTTP 回归共同使用。
+实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，三个方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。本轮全新部署，不读取 SQLite；物资 JSON 备份兼容合同继续保留。以下合同供前端与真实 PostgreSQL HTTP 回归共同使用，不代表本版镜像已发布。
 
 所有接口需要登录。错误为 `{error, code?}`；400 输入错误，403 无权，404 不存在，409 版本/状态/幂等冲突。`quantity`、`amount` 写入必须是非指数十进制**字符串**，最多三位/两位小数；读取为整数 `qtyM`、`amountCents`。金额无权限时所有响应、历史快照均省略金额字段。
 
@@ -13,10 +13,27 @@
 - warehouses 固定为 `{code,name}`：`MAIN` 默认仓库、`REAGENT` 试剂库、`CONSUMABLE` 耗材库、`SPARE` 备用库。
 - `GET /categories`、`GET /regions` → 分页；行 `{id,name,createdBy,createdAt}`。
 - `POST /categories`、`POST /regions`，正文 `{name}` → 201 创建行。ADMIN 或 MATERIAL + 对应动作权限；首期只新增，不删历史选项。
-- `GET /catalog` → 分页；支持 `categoryId`。行 `{id,code,name,spec,unit,categoryId,categoryName,version}`。
-- `POST /catalog`，正文 `{code,name,spec,unit,categoryId}` → 201 主档；ADMIN/MATERIAL + `materials.catalog.write`。编码唯一，已有编码不能改规格/单位。
+- `GET /catalog` → 分页；支持 `q,categoryId,trackingMode,regionId,warehouse`。行 `{id,code,name,spec,unit,trackingMode,categoryId,categoryName,version,stockQtyM,localQtyM?}`。
+- `POST /catalog`，正文 `{code,name,spec,unit,categoryId,trackingMode?}` → 201 物资信息；ADMIN/MATERIAL + `materials.catalog.write`。编码唯一；规范化后同编码或同名称＋规格＋单位重复返回 409，不另建重复身份。
 
 下文省略共同前缀 `/api/materials`。
+
+## 物资信息库与库存匹配（0.6.0）
+
+“主档”在页面称为“物资信息库”，保存标准身份信息，不代表库存。`stockQtyM` 为该物资所有区域／仓库的库存毫单位总量；传 `regionId` 或 `warehouse` 时另含筛选范围的 `localQtyM`。检索先按所选范围正库存、其他范围正库存、零库存排序；不传范围时全局正库存优先。`q` 对编码、名称、规格进行规范化包含搜索，只帮助选项查找，不能据此自动合并物资。
+
+新增申报行或明确解除已有匹配时，服务端用 NFKC、首尾去空白、转小写后的精确身份自动复用：编码命中已有记录时校验名称／规格／单位一致；编码未命中时只接受唯一的名称＋规格＋单位匹配，并采用已有记录的编码。零库存记录仍可复用。编码与身份矛盾返回 409；未匹配保留未建档行，不按同名、相似词或模糊搜索结果自动建档。选定 `catalogId` 时身份由服务器现有信息确定。
+
+| 接口 | 合同 |
+| --- | --- |
+| `GET /catalog/template` | 下载 XLSX 空模板和分类参考，需 `materials.export`；路径没有 `.xlsx` 后缀 |
+| `GET /catalog/export.xlsx` | 导出全部符合 catalog 检索条件的标准信息，需 `materials.export`；最多 5000 条，超限 413 |
+| `POST /catalog/import` | `{name,content}`，`content` 是 XLSX canonical base64；ADMIN/MATERIAL + `materials.catalog.write`；201 `{created,skipped}` |
+| `POST /requests/:requestId/items/:itemId/catalog` | `{requestVersion,itemVersion,requestIdempotencyKey,code,name,spec,unit,categoryId,trackingMode?,reason}`；复用或创建物资信息并原子关联；首次 201 `{request}`，幂等重试 200 |
+
+信息库模板和导出列严格为：**物资编码、物资名称、规格、单位、物资分类、管理方式**。管理方式填写“逐件”或“数量”，分类必须已存在；编码必须使用文本单元格，保留前导零。每次导入 1–200 行、文件不超过 5 MiB，复用期初 XLSX 的压缩结构、公式／宏／外链及解压大小限制。解析后重新验证登录会话及维护权限，全批校验并在同一事务写入；同规范化编码且名称、规格、单位、分类、管理方式均一致的记录跳过，其他编码或身份冲突整批回滚。**导入不增加库存、不生成单件码**；数量金额与位置从期初／补录单导入并确认入库。
+
+原单建档关联需要 ADMIN/MATERIAL + `materials.catalog.write` 以及该行 `mayEdit` 资格；只有未关联、没有历史验收／拒收／结案事件的行可用。已提交单另须 MATERIAL + `materials.request.edit_submitted`，原因、父单及行版本必填。创建信息、关联、版本递增、审计及修订快照处于同一事务，保留原提交版，不直接增加库存；同幂等键异文或版本过期返回 409。已有信息可在普通修订中直接选择关联。
 
 ## 独立单件与条码规则（0.4.0）
 
@@ -79,7 +96,7 @@
 
 明细含 `{id,requestId,catalogId,code,name,spec,unit,categoryId,categoryName,regionId,regionName,warehouse,qtyM,purpose,authorId,authorName,version,identityLocked,acceptedQtyM,closedQtyM,remainingQtyM,receiptStatus,canEdit,canDelete}`。`receiptStatus` 为 `pending|partial|done|closed`；identityLocked 表示存在任何历史验收/拒收/结案事件，冲正后也不解除身份保护。
 
-未匹配主档的草稿行允许普通用户先填写名称/规格/单位，catalogId 可为空；0.3.1 起允许先提交；验收、拒收或结案前由 MATERIAL/ADMIN 维护主档，再由 MATERIAL 在原单受控修订中匹配 catalogId 并说明原因。0.3.0 的提交前匹配限制由此替代。有 catalogId 时名称/规格/单位由服务端主档确定。
+未匹配的草稿行允许普通用户先填写名称/规格/单位，catalogId 可为空；0.3.1 起允许先提交，0.6.0 补充上述精确自动复用和原单建档关联。验收、拒收或结案前必须关联物资信息，已提交单由 MATERIAL 受控修订并说明原因。0.3.0 的提交前匹配限制由此替代。有 catalogId 时名称/规格/单位由服务端物资信息确定。
 
 草稿本人改本人行，MATERIAL 可改全部；仅创建者/MATERIAL 可改草稿表头。提交后仅 MATERIAL + `materials.request.edit_submitted` 可改表头/已有行，必须 reason；不能新增/删行。原提交快照不覆盖。已有任何验收/结案记录的行保护 catalogId/code/name/spec/unit/warehouse/regionId；qtyM 不得小于有效已验收+结案量。分类、用途、合法数量仍可修订。修改申报不改变库存。
 
@@ -170,7 +187,7 @@
 - `GET /export.xlsx?type=requests|stock|issues` → 真正 XLSX；需要 `materials.export`，金额列另看 amount 权限。`type` 省略时默认 `requests`。申报导出支持 `q,from,to,status=draft|submitted,requestId,version=current|original`，日期按申报创建日期筛选，筛选命中的单据包含全部明细；`version` 默认 current，original 先按当前单据筛选，再使用原提交快照，未提交草稿仍用当前内容。库存导出支持 `q,regionId,warehouse,catalogId`，含库存汇总及按相同条件筛选的批次库存、存放位置。领用导出支持 `q,status` 并遵守本人/管理员可见范围，含申请时位置和当前位置或发放时位置；未发放金额留空。导出全部筛选结果，不受列表页码限制；一次最多 1000 张申报单，明细、验收流水和修订记录各不超过 5000 条；库存、批次或领用各最多 5000 条，超限返回 413。
 - 页面申报列表导出沿用已查询的 `q,status,from,to`，库存列表沿用 `q,regionId,warehouse`，领用列表沿用 `q,status`；单据详情按 `requestId,version` 导出，不携带列表筛选。验收列表不提供按验收进度导出，通过每行“原单”进入来源申报后导出；`pending|partial|done|closed` 不是申报导出的 status 值。
 - 用户文本按文本单元格写，不识别公式。原版/当前申报明细完整导出；验收流水及修订记录仍保留所选单据的完整历史。修订记录的“修改前/后快照摘要”单元格最多32767字符，超长时明确加注“完整快照见修订历史/物资备份”，完整历史仍保留于系统及业务备份。
-- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十五张物资业务及辅助表（含单件、包装码映射、存放位置、领用）、编号规则与序号、附件内容、稳定用户映射与所有快照，不含用户密码。既有 Excel 导出保持原有数量金额及筛选口径。
+- `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十七张物资业务及辅助表（含期初单及明细、单件、包装码映射、存放位置、领用）、编号规则与序号、附件内容、稳定用户映射与所有快照，不含用户密码。既有 Excel 导出保持原有数量金额及筛选口径。
 - `POST /restore`，正文为上述完整备份对象 → `{restored:true,counts}`，需 backup.restore + materials.amount.read；只允许空的新业务库，验证格式、用户 username→当前ID 映射、外键、库存及来源唯一性，事务恢复；同份重放与追加恢复均拒绝。
 
 物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=5`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表、schema 4 原十五表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
@@ -181,4 +198,4 @@ schema 5 新增 material_openings 与 material_opening_items，严格检查草�
 
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 
-`backup(user)` 返回与 GET 相同对象；`restore(payload,user)` 同步、独立事务恢复并返回结果，不能嵌入外层事务。根层通用台账/系统备份明确排除新版物资，物资须使用专用备份；组合包不会被旧恢复静默忽略。单个JSON最多25 MiB、附件原始总量最多20 MiB，超过时拒绝生成无法在线恢复的包，并提示停服备份完整运行目录。业务备份不是整个运行目录的灾备替代。
+`backup(user)`、`restore(payload,user)` 均返回 Promise；备份在事务锁内一致读取，恢复完整校验并事务写入，调用方必须等待提交成功后再响应。根层通用台账/系统备份明确排除新版物资，物资须使用专用备份；组合包不会被旧恢复静默忽略。单个 JSON 最多25 MiB、附件原始总量最多20 MiB，超过时拒绝生成无法在线恢复的包。业务备份不是 PostgreSQL、附件及部署秘密文件的灾备替代，部署级备份按 [群晖说明](SYNOLOGY.md)停服完整保存，不在线复制正在写入的 PostgreSQL 目录。

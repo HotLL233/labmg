@@ -31,6 +31,20 @@
 - 2026-10-17 用户要求物资管理下新增申报、验收、库存三个入口：全员在新建申报表中增加物资，物资管理员提交后整单禁止编辑，保留历史及 Excel 导出；验收录入数量金额、标记并入库，库存有期初且同类合并。要求先给可行方案和 HTML UI 示例，未要求直接完成生产业务或发布新版镜像。初稿提交后全员只读的规则由下条同日新指令替代，保留本条作为需求历史。
 - 同日用户补充：管理员可创建物资分类，其他人员添加时可选分类和归属；异步确认归属指“区域”。提交后改为**仅物资管理员可进行修改编辑**，替代此前所有角色永久禁止编辑的要求。
 
+## 0.6.0：PostgreSQL 与库存优先匹配（开发中，2026-10-19）
+
+用户要求数据库改用 PostgreSQL，并明确“现在还没开始正式使用，不用考虑旧库的问题”。本版按全新 PostgreSQL 项目部署，取消旧 SQLite 数据迁移、旧库检测拦截及自动搬迁计划；此决定替代本轮最初拟兼容旧库的实施方向。旧版源码、归档及本地运行文件保留，未访问真实 `var/` 或修改 Downloads 中旧 YML。以后 PostgreSQL 版本继续保留同一 `runtime/`，不按版本重建业务数据。
+
+用户问“物资主档是什么”，页面统一称“物资信息库”：它保存编码、名称、规格、单位、分类和管理方式，是申报、库存与条码共用的物资身份；库存数量和金额来自出入库流水。申报优先展示所选区域/仓库有库存的候选，其次其他位置库存，再次零库存信息；零库存也复用，不能因库存清零重复建档。自动关联仅使用忽略大小写的 NFKC/首尾空格规范化精确编码（同时核对身份），或唯一的名称+规格+单位；同名不同规格不自动合并，有歧义要求明确选择。
+
+开发分支 `feature/v0.6.0-postgresql-material-catalog` 从已同步的 `5374fd8` 创建，版本设为0.6.0；缓存、隔离 PostgreSQL 与合成数据均位于 `artifacts/cache/0.6.0/`，交付目录为 `artifacts/releases/0.6.0/`。新增锁定 `pg@8.23.1`，服务和物资调用链异步化，连接池配合同连接事务、提交后响应与统一写锁，保留权限、版本、幂等、整件码及附件回滚保护。写锁用于当前10–30人需求，不代表已测得NAS容量。
+
+配套Compose新增内部PostgreSQL17服务、自动生成并保留数据库口令；YML旁 `runtime/postgres`、`runtime/secrets` 与附件目录整体持久化，不公开数据库端口。不再创建SQLite文件。物资信息库支持XLSX模板、导入和筛选导出；导入只建信息，不增加库存，带数量金额的库存Excel继续走期初/存量补录单。申报新增“新建物资信息并关联”，需建档权限、明细编辑权限、版本和原因，已提交单还须MATERIAL修订权限，保留原提交和完整修订。
+
+源码阶段：真实PG全量136项中135通过、1个Docker条件跳过、0失败；随后新增双镜像打包Mock专项1/1及部署配置/初始化专项5/5通过。33个JS语法通过，11份文档的98个相对链接有效；规范化自动匹配逐件小数拒绝和新报错文案各有专项复验通过。第三方记录补齐14个新增锁定依赖的原许可正文，其中pg-types/pgpass来自原包README许可段。浏览器、镜像和GitHub交付的最终结果完成后追加，不能把源码验证写成已发布。旧版发布事实仍见下文。
+
+真实隔离headless Edge + 独立PG数据库的目录UI检查28/28通过：ADMIN/MATERIAL/普通用户权限、XLSX新增及复用/筛选导出、库存不变、区域库存排序、零库存复用、未建档申报提交、原因必填、受控关联revision2及原版保留；10张桌面/390px截图已目视，长表单内部可滚动，并在390px下实际点击保存成功。6个相关源码摘要与最终工作区一致，临时数据库、runtime和浏览器profile已清理。报告在 `artifacts/cache/0.6.0/validation/ui/catalog-ui-report.json`；390px只是视口模拟，不等于手机、相机、NAS或打印验收。
+
 ## 物资模块开源参考调研（2026-10-17）
 
 用户要求检索能参考、能实现当前全部物资功能的开源项目。本轮在独立分支只读联网核查 ERPNext、InvenTree、OpenBoxes、jshERP、Odoo Community+OCA、Dolibarr、Part-DB，结论与官方依据见[开源项目对照](research/MATERIAL_OPEN_SOURCE.md)。本轮候选没有确认可开箱原样覆盖全部规则：共同填报/本人行权限、未建档先提交、带原因且完整原版保留、批次实际总金额、拒收/结案/唯一整笔冲正、区域数量金额合并等仍需适配或开发。不能将常规采购审批或操作日志当作等价功能。
@@ -195,7 +209,7 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 | 在线部署版 | `0.2.0-rc.3`，源码提交 `46f2a3c`，公开镜像 `ghcr.io/hotll233/labmg:0.2.0-rc.3`，匿名双架构拉取与正式 Compose 验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.3) 已发布 |
 | 首次设置密码版 | `0.2.0-rc.4`，冻结提交 `8ed6ea4`，公开镜像及正式 YML 首设/登录验证通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.4) 已发布并核验 10 附件；已有账号保持原样 |
 | 自动部署存储版 | `0.2.0-rc.5`，冻结提交 `b067c8c`，默认自动创建命名卷及目录权限；正式双架构 TAR、公开镜像匿名拉取和配套 YML 验收通过，[候选 Release](https://github.com/HotLL233/labmg/releases/tag/v0.2.0-rc.5) 已公开并核验 10 附件 |
-| 当前工作流 | 0.5.1 已公开为验证版，冻结 `60f9639` / `v0.5.1`，完整镜像／离线包／YML及四项云端门禁通过；发布记录在 `feature/v0.5.1-https-ip` 与 develop 同步。0.5.0 冻结 `372069c` / `v0.5.0`，Release 保留未公开草稿；main、旧标签及归档保留 |
+| 当前工作流 | 0.6.0 正在 `feature/v0.6.0-postgresql-material-catalog` 开发，尚未冻结发布；0.5.1 已公开为验证版，冻结 `60f9639` / `v0.5.1`，完整镜像／离线包／YML及四项云端门禁通过；发布记录已在 develop 同步。0.5.0 Release 保留未公开草稿；main、旧标签及归档保留 |
 | 默认分支 | `develop`，2026-10-16 设置并经 API 核验，以提供当前开发文档及手动发布入口；`main` 提交仍为 `2672321` |
 | Node.js | 要求 `>=22.13`，建议 24；此前本机检查为 Node `24.18.0`、npm `11.16.0` |
 
@@ -203,17 +217,18 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 
 ## 技术结构与目录
 
-- 后端使用 `node:http`、`node:sqlite` 的 `DatabaseSync`、`node:fs` 和 `node:crypto`，至0.2.0-rc.5没有第三方 npm 依赖；0.3.0为真正XLSX引入锁定的write-excel-file 4.1.1及其fflate依赖。
+- 0.6.0后端使用 `node:http`、`pg` 异步连接池、`node:fs` 和 `node:crypto`；此前至0.5.1使用 `node:sqlite` 的 `DatabaseSync`。至0.2.0-rc.5没有第三方 npm 依赖；0.3.0为真正XLSX引入锁定的write-excel-file 4.1.1及其fflate依赖。
 - 前端为原生 HTML/CSS/JavaScript 单页应用。历史脚本通过动态加载和全局导航包装扩展页面，本轮统一公共导航与记录状态，业务脚本保留渲染职责。
 - 8 个业务模块：档案、电子模板、财务、设备、物资、体系文件、人员和合同。
 - 旧模块共用 `records` 表，扩展业务字段存 JSON，其通用数量金额仍使用 `REAL`；0.3.0物资新业务独立十一张专表，整数数量金额、流水汇总，0.3.2 加位置和领用后为十三张；另有用户、会话、附件索引、审计、角色权限、导航和工作台配置表。
-- 附件存本地文件，元数据存 SQLite。原 `deploy/docker-compose.yml` 仅有 PostgreSQL/MinIO，Docker 轮次原样保留为 `deploy/docker-compose.infrastructure.yml`；主 Compose 改为单应用容器。应用没有接入这些外部数据服务，`DATABASE_URL` 尚未使用。
+- 附件存本地文件，0.6.0元数据存PostgreSQL并实际使用 `DATABASE_URL` 或完整PG连接/口令文件配置。此前至0.5.1元数据存SQLite，原基础设施示例 `deploy/docker-compose.infrastructure.yml` 的PostgreSQL/MinIO未接入；该旧示例仍保留作历史，0.6.0主Compose已包含需要的PG服务，无需启动第二套基础设施。
 
 | 路径 | 职责 |
 | --- | --- |
 | `src/server.js` | 公共数据库初始化、登录、通用 API、文件、权限、台账备份恢复与审计 |
 | `src/materials.js` | 物资专表、业务角色、修订、记账事务/幂等、库存、XLSX及完整物资备份恢复 |
-| `src/init-runtime.js` | Compose 一次性 root 初始化，校验 UID/GID、拒绝符号链接并只设置四个运行目录权限，不启动业务或递归改已有文件 |
+| `src/init-runtime.js` | Compose 一次性 root 初始化，校验 UID/GID、拒绝符号链接，设置运行目录和秘密文件权限，不递归改业务文件；0.6.0生成且保留数据库口令 |
+| `src/database.js`、`src/schema.js` | PostgreSQL连接、事务、序列与独立schema初始化，无SQLite回退 |
 | `src/public/app.js` | 公共状态、导航、通用记录表单、详情、上传、导出与打印 |
 | `src/public/archive.js`、`asset.js`、`material.js`、`quality.js`、`contract.js` | 各业务页面 |
 | `src/public/permission.js`、`audit.js`、`datahub.js` | 账号角色、菜单、审计、导出备份和回收站等页面 |

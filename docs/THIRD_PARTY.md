@@ -1,12 +1,26 @@
 # 第三方组件与许可
 
-本清单对应 0.5.0 的 `package-lock.json`。版本及下载完整性以锁文件为准；安装包内的第三方文件保持原样，本项目没有复制上游业务代码。完整许可正文保留在 [licenses/](licenses/)，源码包包含该目录，Docker 镜像也应包含本文件与该目录。第三方组件的许可不等于对本项目作相同许可授权。
+本清单对应 0.6.0 的 `package-lock.json`。版本及下载完整性以锁文件为准；安装包内的第三方文件保持原样，本项目没有复制上游业务代码。完整许可正文保留在 [licenses/](licenses/)，源码包包含该目录，Docker 镜像也应包含本文件与该目录。第三方组件的许可不等于对本项目作相同许可授权。
 
 ## npm 依赖
 
 | 组件 | 固定版本 | 用途 | 许可与完整正文 |
 | --- | --- | --- | --- |
-| read-excel-file | 9.3.12 | 服务端期初 XLSX 导入（universal 入口） | [MIT](licenses/npm/read-excel-file-9.3.12-MIT.txt) |
+| pg | 8.23.1 | PostgreSQL 异步客户端 | [MIT](licenses/npm/pg-8.23.1-MIT.txt) |
+| pg-cloudflare | 1.4.1 | pg 传递依赖 | [MIT](licenses/npm/pg-cloudflare-1.4.1-MIT.txt) |
+| pg-connection-string | 2.14.1 | pg 传递依赖 | [MIT](licenses/npm/pg-connection-string-2.14.1-MIT.txt) |
+| pg-int8 | 1.0.1 | pg 传递依赖 | [ISC](licenses/npm/pg-int8-1.0.1-ISC.txt) |
+| pg-pool | 3.14.0 | pg 传递依赖 | [MIT](licenses/npm/pg-pool-3.14.0-MIT.txt) |
+| pg-protocol | 1.16.1 | pg 传递依赖 | [MIT](licenses/npm/pg-protocol-1.16.1-MIT.txt) |
+| pg-types | 2.2.0 | pg 传递依赖 | [MIT](licenses/npm/pg-types-2.2.0-MIT.txt)（原包 README 许可段） |
+| pgpass | 1.0.5 | pg 传递依赖 | [MIT](licenses/npm/pgpass-1.0.5-MIT.txt)（原包 README 许可段） |
+| postgres-array | 2.0.0 | pg 传递依赖 | [MIT](licenses/npm/postgres-array-2.0.0-MIT.txt) |
+| postgres-bytea | 1.0.1 | pg 传递依赖 | [MIT](licenses/npm/postgres-bytea-1.0.1-MIT.txt) |
+| postgres-date | 1.0.7 | pg 传递依赖 | [MIT](licenses/npm/postgres-date-1.0.7-MIT.txt) |
+| postgres-interval | 1.2.0 | pg 传递依赖 | [MIT](licenses/npm/postgres-interval-1.2.0-MIT.txt) |
+| split2 | 4.2.0 | pg 传递依赖 | [ISC](licenses/npm/split2-4.2.0-ISC.txt) |
+| xtend | 4.0.2 | pg 传递依赖 | [MIT](licenses/npm/xtend-4.0.2-MIT.txt) |
+| read-excel-file | 9.3.12 | 服务端期初及物资信息 XLSX 导入（universal 入口） | [MIT](licenses/npm/read-excel-file-9.3.12-MIT.txt) |
 | saxen | 11.2.0 | XML 解析，导入传递依赖 | [MIT](licenses/npm/saxen-11.2.0-MIT.txt) |
 | unzipper-esm | 0.13.3 | read-excel-file 的传递依赖，当前 universal 入口不加载 | [MIT](licenses/npm/unzipper-esm-0.13.3-MIT.txt) |
 | graceful-fs | 4.2.11 | 传递依赖 | [ISC](licenses/npm/graceful-fs-4.2.11-ISC.txt) |
@@ -21,7 +35,7 @@
 
 worker-f 0.1.20 的锁定 npm 发布包未附 LICENSE；作者 GitHub 镜像根树亦未找到 LICENSE，npm gitHead 在该镜像不可用，GitLab 原仓本轮连接超时。这里只记录 package.json 的 MIT 声明，不补造版权或许可正文。其余新增许可均从锁定安装包原样复制。
 
-以上随附正文逐字节复制自对应已安装锁定包的许可文件，保留原版权声明。zxing-wasm npm 包仅附包装层 `LICENSE`；其 README 还明确列出 ZXing-C++、C++ 桥接代码与 Zint 的不同许可，不能仅凭包元数据中的 MIT 忽略内含组件。
+以上随附正文逐字节复制自对应已安装锁定包的许可文件或 README 许可段，保留原版权声明。zxing-wasm npm 包仅附包装层 `LICENSE`；其 README 还明确列出 ZXing-C++、C++ 桥接代码与 Zint 的不同许可，不能仅凭包元数据中的 MIT 忽略内含组件。
 
 ## zxing-wasm 内含组件
 
@@ -47,3 +61,7 @@ zxing-wasm 的[官方许可清单](https://github.com/Sec-ant/zxing-wasm/blob/v3
 ## 可选 HTTPS 容器
 
 可选部署使用官方 Caddy 2.11.7 Alpine 镜像（amd64 / arm64），未拷贝其代码或二进制进本应用镜像／离线 TAR。Caddy 项目采用 Apache-2.0，容器和基础系统还含各自组件；具体许可与来源以官方镜像和 [Caddy 源仓库](https://github.com/caddyserver/caddy/tree/v2.11.7)为准。首次部署需另外拉取该可选镜像。
+
+## PostgreSQL 容器
+
+0.6.0 主 Compose 使用官方 `postgres:17-bookworm` 镜像，离线 TAR 同时包含对应架构的原样数据库镜像和应用镜像；实际摘要与配置 ID 写入交付清单。PostgreSQL 数据库不被复制到应用镜像中，官方镜像内的数据库、Debian 及各组件保留各自许可和版权。数据库项目许可与镜像构建来源以官方 [PostgreSQL 许可](https://www.postgresql.org/about/licence/)及 [docker-library/postgres](https://github.com/docker-library/postgres) 为准。

@@ -18,7 +18,7 @@ test('Compose keeps runtime beside the YML across image and project changes and 
   const composeFile = path.join(directory, 'docker-compose.yml');
   const envFile = path.join(directory, 'compose.env');
   fs.copyFileSync(path.join(root, 'deploy/docker-compose.yml'), composeFile);
-  assert.equal((fs.readFileSync(composeFile, 'utf8').match(/create_host_path: true/g) || []).length, 2);
+  assert.equal((fs.readFileSync(composeFile, 'utf8').match(/create_host_path: true/g) || []).length, 4);
   fs.writeFileSync(envFile, '');
   t.after(() => {
     assert.equal(path.dirname(directory), cache);
@@ -47,6 +47,14 @@ test('Compose keeps runtime beside the YML across image and project changes and 
       assert.notEqual(mounts[0].bind?.create_host_path, false);
     }
     assert.deepEqual(Object.keys(configuration.volumes || {}), []);
+    const postgres = configuration.services.postgres;
+    assert.equal(postgres.image, 'postgres:17-bookworm');
+    assert.equal(postgres.ports, undefined, 'Database must stay on the internal Compose network');
+    assert.equal(postgres.environment.POSTGRES_PASSWORD_FILE, '/run/labos-secrets/postgres-password');
+    assert.equal(path.resolve(postgres.volumes[0].source), path.join(source, 'postgres'));
+    assert.equal(path.resolve(postgres.volumes[1].source), path.join(source, 'secrets'));
+    assert.equal(postgres.volumes[1].read_only, true);
+    assert.equal(configuration.services.labos.depends_on.postgres.condition, 'service_healthy');
   };
   const first = config('labos-config-first');
   check(first, path.join(directory, 'runtime'));

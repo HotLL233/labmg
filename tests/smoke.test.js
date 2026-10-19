@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const { test } = require('node:test');
+const { createTestDatabase } = require('./helpers/postgres');
 
 test('moved entry serves assets and isolates normal, development and custom data', { timeout: 30000 }, async t => {
   const root = path.resolve(__dirname, '..');
@@ -27,11 +28,12 @@ test('moved entry serves assets and isolates normal, development and custom data
     { name: 'development', args: ['--dev'], runtime: `var/development/${version}` },
     { name: 'custom', args: ['--dev'], runtime: 'custom-runtime', override: true }
   ]) {
+    const database = await createTestDatabase(t);
     const reservation = net.createServer().listen(0, '127.0.0.1');
     await once(reservation, 'listening');
     const port = reservation.address().port;
     await new Promise(resolve => reservation.close(resolve));
-    const env = { ...process.env, PORT: String(port), LABOS_ADMIN_USER: 'smoke-admin', LABOS_ADMIN_PASSWORD: 'smoke-password' };
+    const env = { ...process.env, PORT: String(port), LABOS_ADMIN_USER: 'smoke-admin', LABOS_ADMIN_PASSWORD: 'smoke-password', DATABASE_URL: database.url };
     delete env.LABOS_RUNTIME_DIR;
     if (mode.override) env.LABOS_RUNTIME_DIR = mode.runtime;
     const child = spawn(process.execPath, [path.join(fixture, 'src/server.js'), ...mode.args], {
@@ -85,7 +87,7 @@ test('moved entry serves assets and isolates normal, development and custom data
       for (const directory of ['data', 'uploads', 'logs']) {
         assert.ok(fs.statSync(path.join(fixture, mode.runtime, directory)).isDirectory());
       }
-      assert.ok(fs.existsSync(path.join(fixture, mode.runtime, 'data/labos.db')));
+      assert.equal(fs.existsSync(path.join(fixture, mode.runtime, 'data/labos.db')), false, 'PostgreSQL mode must not create a SQLite database');
       assert.equal(fs.existsSync(path.join(fixture, 'src/data')), false);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {

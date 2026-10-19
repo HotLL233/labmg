@@ -7,13 +7,15 @@ const { inflateRawSync } = require('node:zlib');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const { test } = require('node:test');
-const { DatabaseSync } = require('node:sqlite');
 const createMaterials = require('../src/materials');
+const { createTestDatabase } = require('./helpers/postgres');
 
 const root = path.resolve(__dirname, '..');
 const key = () => crypto.randomUUID();
 
 async function fixture(t) {
+  const postgres = await createTestDatabase(t);
+  const db = await postgres.open();
   const cache = path.join(root, 'artifacts/cache', require('../package.json').version, 'materials-tests');
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'run-'));
@@ -26,7 +28,7 @@ async function fixture(t) {
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, [path.join(directory, 'src/server.js')], {
     cwd: directory, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'materials-admin', LABOS_ADMIN_PASSWORD: 'materials-test-password' }
+    env: { ...process.env, DATABASE_URL: postgres.url, PORT: String(port), LABOS_RUNTIME_DIR: runtime, LABOS_ADMIN_USER: 'materials-admin', LABOS_ADMIN_PASSWORD: 'materials-test-password' }
   });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
@@ -71,7 +73,7 @@ async function fixture(t) {
   };
   const get = async (id, actor) => (await request('GET', '/api/materials/requests/' + id, actor || await account('MATERIAL'))).data;
   const dictionary = async (kind, name, actor = admin) => (await request('POST', '/api/materials/' + kind, actor, { name }, 201)).data;
-  const catalog = async (categoryId, extra = {}) => (await request('POST', '/api/materials/catalog', admin, { code: 'MAT-HTTP-A', name: 'HTTP reagent', spec: '500 mL', unit: '瓶', categoryId, ...extra }, 201)).data;
+  const catalog = async (categoryId, extra = {}) => (await request('POST', '/api/materials/catalog', admin, { code: 'MAT-HTTP-A', name: extra.code ? 'HTTP reagent ' + extra.code : 'HTTP reagent', spec: '500 mL', unit: '瓶', categoryId, ...extra }, 201)).data;
   const seed = async () => {
     const material = await account('MATERIAL');
     const category = await dictionary('categories', 'HTTP分类');
@@ -93,7 +95,7 @@ async function fixture(t) {
     requestIdempotencyKey: key(), quantity: '1', amount: '12.34', ...extra
   });
   const item = (seed, extra = {}) => ({ catalogId: seed.catalog.id, categoryId: seed.category.id, regionId: seed.region.id, warehouse: 'REAGENT', quantity: '10', purpose: 'HTTP fixture', ...extra });
-  return { directory, runtime, request, account, customAccount, admin, get, dictionary, catalog, seed, add, order, submit, receiptBody, item };
+  return { directory, runtime, db, request, account, customAccount, admin, get, dictionary, catalog, seed, add, order, submit, receiptBody, item };
 }
 
 function assertNoMoney(value) {
@@ -149,6 +151,12 @@ async function openingExcel(rows) {
   return require('write-excel-file/node').default([{ sheet: '期初明细', data: [OPENING_HEADERS.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
 }
 
+async function catalogExcel(rows) {
+  const { CATALOG_HEADERS } = require('../src/material-xlsx');
+  const cell = value => value && typeof value === 'object' ? value : ({ type: String, value: String(value ?? '') });
+  return require('write-excel-file/node').default([{ sheet: '物资信息', data: [CATALOG_HEADERS.map(cell), ...rows.map(row => row.map(cell))] }]).toBuffer();
+}
+
 test('materials dictionaries require administrator roles while all authenticated roles can declare and own their draft rows', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
   await f.request('GET', '/api/materials/meta', null, undefined, 401);
@@ -178,6 +186,113 @@ test('materials dictionaries require administrator roles while all authenticated
   assert.equal(submitted.status, 'submitted'); assert.equal(submitted.items[0].catalogId, null);
 });
 
+test('catalog candidates prioritize selected stock and reuse exact material identity even at zero stock without merging different specifications', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const stocked = await f.catalog(s.category.id, { code: 'STOCKED', name: 'AAA elsewhere' });
+  const zero = await f.catalog(s.category.id, { code: 'ZERO', name: 'AAA zero' });
+  await f.request('POST', '/api/materials/stock/opening', s.material, { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', quantity: '2', amount: '3', requestIdempotencyKey: key() }, 201);
+  await f.request('POST', '/api/materials/stock/opening', s.material, { catalogId: stocked.id, regionId: s.otherRegion.id, warehouse: 'MAIN', quantity: '9', amount: '10', requestIdempotencyKey: key() }, 201);
+  const query = `/api/materials/catalog?regionId=${s.region.id}&warehouse=MAIN`;
+  const candidates = (await f.request('GET', query, ordinary)).data;
+  assert.deepEqual(candidates.items.map(row => row.id), [s.catalog.id, stocked.id, zero.id]);
+  assert.deepEqual(candidates.items.map(row => [row.stockQtyM, row.localQtyM]), [[2000, 2000], [9000, 0], [0, 0]]);
+  assertNoMoney(candidates);
+  const second = (await f.request('GET', query + '&pageSize=1&page=2', ordinary)).data;
+  assert.equal(second.total, 3); assert.equal(second.items[0].id, stocked.id);
+  assert.equal((await f.request('GET', '/api/materials/catalog?trackingMode=unit', ordinary)).data.total, 0);
+  let order = await f.order(ordinary, { ...f.item(s), catalogId: null, name: '  ＨＴＴＰ reagent ', spec: '500 mL', unit: '瓶', code: '' });
+  assert.equal(order.items[0].catalogId, s.catalog.id);
+  order = await f.order(ordinary, { ...f.item(s), catalogId: null, name: zero.name.toUpperCase(), spec: zero.spec, unit: zero.unit, code: '' });
+  assert.equal(order.items[0].catalogId, zero.id, 'zero balance must still reuse material information');
+  order = await f.order(ordinary, { ...f.item(s), catalogId: null, name: s.catalog.name, spec: '1 L', unit: '瓶', code: '' });
+  assert.equal(order.items[0].catalogId, null, 'same name with a different specification is new');
+  await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary, { requestVersion: order.version, ...f.item(s), catalogId: null, code: s.catalog.code, name: 'another material', spec: s.catalog.spec, unit: s.catalog.unit }, 409);
+  await f.request('POST', '/api/materials/catalog', f.admin, { ...s.catalog, code: 'DUPLICATE-IDENTITY', name: 'ＨＴＴＰ reagent', trackingMode: 'quantity' }, 409);
+  const unit = await f.catalog(s.category.id, { code: 'AUTO-UNIT', name: 'Integer-only unit', trackingMode: 'unit' });
+  const before = await f.get(order.id, ordinary);
+  await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary, { requestVersion: before.version, ...f.item(s), catalogId: null, code: '', name: unit.name, spec: unit.spec, unit: unit.unit, quantity: '1.5' }, 400);
+  assert.deepEqual(await f.get(order.id, ordinary), before, 'invalid automatically matched unit quantity must leave the request unchanged');
+  await f.db.prepare('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by) VALUES(?,?,?,?,?,?)').run('SYNTHETIC-AMBIGUITY', s.catalog.name, s.catalog.spec, s.catalog.unit, s.category.id, f.admin.id);
+  await f.request('POST', `/api/materials/requests/${order.id}/items`, ordinary, { requestVersion: order.version, ...f.item(s), catalogId: null, code: '', name: s.catalog.name, spec: s.catalog.spec, unit: s.catalog.unit }, 409);
+});
+
+test('creating and linking new material information is atomic, controlled, versioned and idempotent while preserving the submitted original', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const free = { ...f.item(s), catalogId: null, name: 'new unit material', code: '', spec: '250 mL', unit: '瓶', quantity: '2' };
+  let order = await f.submit(await f.order(ordinary, free), s.material);
+  const route = `/api/materials/requests/${order.id}/items/${order.items[0].id}/catalog`;
+  const original = (await f.request('GET', `/api/materials/requests/${order.id}/revisions`, s.material)).data.originalSnapshot;
+  const payload = { code: 'NEW-LINKED', name: free.name, spec: free.spec, unit: free.unit, categoryId: s.category.id, trackingMode: 'unit',
+    requestVersion: order.version, itemVersion: order.items[0].version, reason: '核对规格后建立信息', requestIdempotencyKey: key() };
+  for (const actor of [ordinary, f.admin]) await f.request('POST', route, actor, payload, 403);
+  await f.request('POST', route, s.material, { ...payload, reason: '' }, 400);
+  await f.request('POST', route, s.material, { ...payload, requestVersion: 1 }, 409);
+  const responses = await Promise.all([f.request('POST', route, s.material, payload, [200, 201]), f.request('POST', route, s.material, payload, [200, 201])]);
+  assert.deepEqual(responses.map(row => row.status).sort(), [200, 201]);
+  assert.deepEqual(responses[0].data, responses[1].data);
+  order = responses[0].data.request;
+  assert.equal(order.revision, 2); assert.ok(order.items[0].catalogId); assert.equal(order.items[0].version, payload.itemVersion + 1);
+  const revisions = (await f.request('GET', `/api/materials/requests/${order.id}/revisions`, s.material)).data;
+  assert.deepEqual(revisions.originalSnapshot, original); assert.equal(revisions.revisions.length, 1);
+  assert.equal(revisions.revisions[0].reason, payload.reason);
+  assert.equal(revisions.revisions[0].before.items[0].catalogId, null);
+  assert.equal(revisions.revisions[0].after.items[0].catalogId, order.items[0].catalogId);
+  await f.request('POST', route, s.material, { ...payload, reason: 'changed' }, 409);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
+  const fractional = await f.submit(await f.order(ordinary, { ...free, name: 'fractional new', quantity: '1.5' }), s.material);
+  await f.request('POST', `/api/materials/requests/${fractional.id}/items/${fractional.items[0].id}/catalog`, s.material,
+    { ...payload, code: 'FRACTION-ROLLBACK', name: 'fractional new', requestVersion: fractional.version, itemVersion: fractional.items[0].version, requestIdempotencyKey: key() }, 400);
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=FRACTION-ROLLBACK', s.material)).data.total, 0, 'failed unit validation must roll back newly created information');
+  assert.equal((await f.get(fractional.id)).items[0].catalogId, null);
+});
+
+test('catalog XLSX template import and export round-trip literal codes, skip identical rows and roll back the entire conflicting batch', { timeout: 30000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const noExport = await f.customAccount('CATALOG_READER', ['materials.read']);
+  await f.request('GET', '/api/materials/catalog/template', noExport, undefined, 403);
+  const template = await f.request('GET', '/api/materials/catalog/template', f.admin);
+  assert.match([...workbookXml(template.bytes).values()].join(''), /物资信息/);
+  const bytes = await catalogExcel([['00000123', '=literal name', '250 mL', '瓶', s.category.name, '逐件'], ['BULK-XLSX', 'bulk new', '1 kg', '袋', s.category.name, '数量']]);
+  const payload = { name: 'materials.xlsx', content: bytes.toString('base64') };
+  await f.request('POST', '/api/materials/catalog/import', ordinary, payload, 403);
+  const numericCode = await catalogExcel([[{ type: Number, value: 123, format: '00000000' }, 'numeric code', '1', '瓶', s.category.name, '逐件']]);
+  const numericFailure = await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'numeric.xlsx', content: numericCode.toString('base64') }, 400);
+  assert.match(numericFailure.data.error, /物资编码须为文本/);
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, payload, 201)).data, { created: 2, skipped: 0 });
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, payload, 201)).data, { created: 0, skipped: 2 });
+  const exported = await f.request('GET', '/api/materials/catalog/export.xlsx?q=00000123', f.admin);
+  const roundTrip = await require('../src/material-xlsx').readCatalogWorkbook({ name: 'round-trip.xlsx', content: exported.bytes.toString('base64') });
+  assert.deepEqual(roundTrip, [['00000123', '=literal name', '250 mL', '瓶', s.category.name, '逐件']]);
+  const conflictBytes = await catalogExcel([['ROLLBACK-XLSX', 'must disappear', 'x', '盒', s.category.name, '数量'], ['00000123', 'different identity', '250 mL', '瓶', s.category.name, '逐件']]);
+  const failure = await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'bad.xlsx', content: conflictBytes.toString('base64') }, 409);
+  assert.match(failure.data.error, /第2条/);
+  assert.equal((await f.request('GET', '/api/materials/catalog?q=ROLLBACK-XLSX', ordinary)).data.total, 0);
+  const alias = await catalogExcel([['ALIAS', '＝literal name', '250 mL', '瓶', s.category.name, '逐件']]);
+  await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'alias.xlsx', content: alias.toString('base64') }, 409);
+  assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
+  assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 0);
+  assertNoMoney((await f.request('GET', '/api/materials/catalog', ordinary)).data);
+});
+
+test('catalog import rechecks session and maintenance grants after parsing before opening its write transaction', async t => {
+  const postgres = await createTestDatabase(t), db = await postgres.open();
+  await db.exec("INSERT INTO users(id,username,display_name) VALUES(1,'catalog-import','Synthetic'); INSERT INTO material_categories(id,name,created_by) VALUES(1,'分类',1)");
+  const authorized = { id: 1, role: 'MATERIAL', permissions: ['materials.read', 'materials.catalog.write'] };
+  const bytes = await catalogExcel([['SESSION-IMPORT', '物资', '规格', '瓶', '分类', '逐件']]);
+  let reads = 0, fresh = authorized, response;
+  const materials = createMaterials({ db, body: async () => ({ name: 'race.xlsx', content: bytes.toString('base64') }), send: (_res, status, data) => { response = { status, data }; },
+    fail: (status, message) => Object.assign(new Error(message), { status }), log() {}, hasPermission: (user, permission) => user.permissions.includes(permission),
+    tokenUser: () => ++reads === 1 ? authorized : fresh, uploads: path.join(root, 'artifacts/cache', require('../package.json').version, 'unused-catalog-import-test') });
+  for (const [current, status] of [[null, 401], [{ ...authorized, permissions: ['materials.read'] }, 403], [{ ...authorized, role: 'TESTER' }, 403]]) {
+    reads = 0; fresh = current;
+    await assert.rejects(materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/catalog/import')), { status });
+    assert.equal(reads, 2); assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM material_catalog').get()).total, 0);
+  }
+  reads = 0; fresh = authorized;
+  await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/catalog/import'));
+  assert.deepEqual(response, { status: 201, data: { created: 1, skipped: 0 } });
+});
+
 test('new free-text materials submit without a catalog but require explicit controlled matching before receipt events', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
   let order = await f.order(ordinary, null, '新物资申报');
@@ -205,7 +320,7 @@ test('new free-text materials submit without a catalog but require explicit cont
   const close = { requestVersion: order.version, version: order.items[0].version, requestIdempotencyKey: key(), reason: '取消采购' };
   for (const payload of [receipt, reject]) {
     const response = await f.request('POST', '/api/materials/receipts', s.material, payload, 409);
-    assert.match(response.data.error, /先匹配物资主档/);
+    assert.match(response.data.error, /先匹配物资信息/);
   }
   await f.request('POST', `/api/materials/requests/${order.id}/items/${order.items[0].id}/close`, s.material, close, 409);
   assert.deepEqual(await f.get(order.id), order, 'failed events must not change versions, identity locks or progress');
@@ -761,42 +876,7 @@ test('issue cost calculation preserves safe integers when multiplication exceeds
   assert.equal((await f.request('POST', `/api/materials/issues/${halfIssue.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue.amountCents, 1);
 });
 
-test('materials upgrade expands the stock CHECK atomically while retaining rows, foreign keys, indices, triggers and sequence high water', () => {
-  const db = new DatabaseSync(':memory:');
-  try {
-    db.exec('CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT); INSERT INTO users VALUES(1,\'upgrade-user\',\'Upgrade user\')');
-    const options = { db, body: async () => ({}), send() {}, fail: (status, message) => Object.assign(new Error(message), { status }),
-      log() {}, hasPermission: () => true, tokenUser: () => null, uploads: root };
-    createMaterials(options);
-    const schema = db.prepare("SELECT sql FROM sqlite_master WHERE name='material_stock_movements'").get().sql;
-    db.exec('DROP TABLE material_stock_movements');
-    db.exec(schema.replace(",'issue'", ''));
-    db.exec(`INSERT INTO material_categories(id,name,created_by) VALUES(1,'Category',1);
-      INSERT INTO material_regions(id,name,created_by) VALUES(1,'Region',1);
-      INSERT INTO material_catalog(id,code,name,spec,unit,category_id,created_by) VALUES(1,'UP','Upgrade','1','piece',1,1);
-      CREATE INDEX material_upgrade_extra ON material_stock_movements(batch,expiry_date);
-      CREATE TRIGGER material_upgrade_trigger AFTER INSERT ON material_stock_movements BEGIN SELECT 1; END;`);
-    const snapshot = JSON.stringify({ catalogId: 1, regionId: 1, warehouse: 'MAIN', code: 'UP', name: 'Upgrade', spec: '1', unit: 'piece' });
-    const insert = db.prepare(`INSERT INTO material_stock_movements(id,type,catalog_id,region_id,warehouse,qty_m,amount_cents,source_key,snapshot,date,actor_id)
-      VALUES(?,'opening',1,1,'MAIN',1000,100,?,?,'2026-10-17',1)`);
-    insert.run(1, 'opening:kept', snapshot); insert.run(100, 'opening:deleted', snapshot);
-    db.exec('DELETE FROM material_stock_movements WHERE id=100');
-    const before = db.prepare('SELECT * FROM material_stock_movements').all();
-    assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
-    createMaterials(options);
-    assert.deepEqual(db.prepare('SELECT * FROM material_stock_movements').all(), before);
-    assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
-    assert.match(db.prepare("SELECT sql FROM sqlite_master WHERE name='material_stock_movements'").get().sql, /'issue'/);
-    for (const name of ['material_stock_key', 'material_upgrade_extra', 'material_upgrade_trigger']) assert.ok(db.prepare('SELECT 1 FROM sqlite_master WHERE name=?').get(name));
-    assert.equal(db.prepare("SELECT seq FROM sqlite_sequence WHERE name='material_stock_movements'").get().seq, 100);
-    const added = db.prepare(`INSERT INTO material_stock_movements(type,catalog_id,region_id,warehouse,qty_m,amount_cents,source_key,snapshot,date,actor_id)
-      VALUES('issue',1,1,'MAIN',-1000,-100,'issue:1',?,'2026-10-17',1)`).run(snapshot);
-    assert.equal(added.lastInsertRowid, 101);
-    createMaterials(options);
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM material_stock_movements').get().n, 2);
-    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
-  } finally { db.close(); }
-});
+
 
 test('schema 5 backups restore issue sources, locations and user mapping; damaged ledger states fail atomically and strict schema 1 remains compatible', { timeout: 45000 }, async t => {
   const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER'), other = await f.account('FINANCE');
@@ -1365,17 +1445,17 @@ test('opening posting rolls back locations, stock, generated codes and retry tok
 });
 
 test('opening import rechecks login and current grants after asynchronous parsing before writing or returning amounts', async t => {
-  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
-  db.exec("CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT); INSERT INTO users VALUES(1,'synthetic','Synthetic');");
+  const postgres = await createTestDatabase(t), db = await postgres.open();
+  await db.exec("INSERT INTO users(id,username,display_name) VALUES(1,'synthetic','Synthetic');");
   const authorized = { id: 1, role: 'MATERIAL', permissions: ['materials.read', 'materials.stock.initialize', 'materials.amount.read', 'materials.stock.location'] };
   let reads = 0, fresh = authorized, payload, response;
   const materials = createMaterials({ db, body: async () => payload, send: (_res, status, data) => { response = { status, data }; },
     fail: (status, message) => Object.assign(new Error(message), { status }), log() {}, hasPermission: (user, permission) => user.permissions.includes(permission),
     tokenUser: () => ++reads === 1 ? authorized : fresh, uploads: path.join(root, 'artifacts/cache', require('../package.json').version, 'unused-import-test') });
-  db.exec(`INSERT INTO material_categories(id,name,created_by) VALUES(1,'分类',1);
+  (await db.exec(`INSERT INTO material_categories(id,name,created_by) VALUES(1,'分类',1);
     INSERT INTO material_regions(id,name,created_by) VALUES(1,'区域',1);
     INSERT INTO material_catalog(id,code,name,spec,unit,category_id,created_by) VALUES(1,'RACE-IMPORT','物资','规格','瓶',1,1);
-    INSERT INTO material_openings(id,no,title,date,kind,created_by,created_at) VALUES(1,'QC-20261019-1234567890','草稿','2026-10-19','opening',1,'2026-10-19T00:00:00.000Z');`);
+    INSERT INTO material_openings(id,no,title,date,kind,created_by,created_at) VALUES(1,'QC-20261019-1234567890','草稿','2026-10-19','opening',1,'2026-10-19T00:00:00.000Z');`));
   const bytes = await openingExcel([['RACE-IMPORT', '区域', 'MAIN', 1, 3.25, '', '', '异步柜', '']]);
   payload = { version: 1, name: 'race.xlsx', content: bytes.toString('base64') };
   for (const [current, expected] of [
@@ -1385,10 +1465,10 @@ test('opening import rechecks login and current grants after asynchronous parsin
     [{ ...authorized, permissions: authorized.permissions.filter(permission => permission !== 'materials.stock.location') }, 403]
   ]) {
     reads = 0; fresh = current;
-    await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import'));
-    assert.equal(reads, 2); assert.equal(response.status, expected);
-    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM material_opening_items').get().total, 0);
-    assert.equal(db.prepare('SELECT version FROM material_openings WHERE id=1').get().version, 1);
+    await assert.rejects(materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import')), { status: expected });
+    assert.equal(reads, 2);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM material_opening_items').get()).total, 0);
+    assert.equal((await db.prepare('SELECT version FROM material_openings WHERE id=1').get()).version, 1);
   }
   reads = 0; fresh = authorized;
   await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import'));
@@ -1444,19 +1524,4 @@ test('schema 5 restores opening and supplement documents, exact labels and draft
   await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, old);
   assert.equal((await oldTarget.request('GET', '/api/materials/openings', oldMaterial)).data.total, 0);
   assert.equal((await oldTarget.request('GET', '/api/materials/stock/movements?type=opening', oldMaterial)).data.total, 1);
-});
-
-test('legacy SQLite catalogs migrate to quantity mode without inventing unit stock', () => {
-  const db = new DatabaseSync(':memory:');
-  try {
-    db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT);
-      INSERT INTO users VALUES(1,'legacy','Legacy');
-      CREATE TABLE material_catalog(id INTEGER PRIMARY KEY AUTOINCREMENT,code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,
-        spec TEXT NOT NULL,unit TEXT NOT NULL,category_id INTEGER NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-      INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by) VALUES('OLD','Legacy bottle','500mL','瓶',1,1);`);
-    createMaterials({ db });
-    assert.equal(db.prepare('SELECT tracking_mode FROM material_catalog WHERE id=1').get().tracking_mode, 'quantity');
-    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM material_stock_units').get().total, 0);
-    assert.equal(db.prepare("SELECT value FROM material_state WHERE key='unit_sequence'").get().value, '0');
-  } finally { db.close(); }
 });
