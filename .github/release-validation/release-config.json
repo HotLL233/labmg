@@ -1,0 +1,9 @@
+{
+  "version": "0.6.0",
+  "commit": "26b13d619dcba7076ddbfcadd7e1c5d937dfccbe",
+  "indexDigest": "sha256:90312a310a7d77d7e420c06285b193f247ca9ba285c2f448c9e368b0b16c019f",
+  "baseParent": "5374fd847dc22125d29f85c2e3f96f131c1ef5cb",
+  "featureBranch": "feature/v0.6.0-postgresql-material-catalog",
+  "status": "source-frozen",
+  "buildRunId": 39204945366
+}
