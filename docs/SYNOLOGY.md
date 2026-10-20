@@ -1,6 +1,6 @@
 # 群晖 Docker 部署
 
-当前源码版本为 **0.8.0（开发中）**，继续使用 PostgreSQL 18。当前两份完整 YML 指向0.8.0，配套镜像与离线包仍待本轮验证发布，不能套用0.7.0的CI结果；实际交付以[版本说明](CHANGELOG.md)和同版本Release为准。同一 PG18 项目升级保留原数据与证书，不需要重新设置管理员。旧部署资料保留在本页历史部分，本轮不提供 PG17／SQLite 迁移。
+当前源码版本为 **0.8.0（已公开验证版）**，继续使用 PostgreSQL 18。[同版本Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.0) 已交付GHCR双架构镜像、两份完整YML、双架构三镜像离线包和Windows打印助手；本轮CI与部署门禁结果见[版本说明](CHANGELOG.md)。同一 PG18 项目升级保留原数据与证书，不需要重新设置管理员。旧部署资料保留在本页历史部分，本轮不提供 PG17／SQLite 迁移，云端容器结果不代替群晖或打印机实机验收。
 
 本版增加的 BarTender 助手在连接 USB 打印机的 Windows 电脑运行，不是群晖容器。模板、站点和任务存入原 PostgreSQL；无需公开数据库端口。Windows 侧保留固定运行目录及同一用户，更新脚本不删除配置和待回执；见[打印助手指南](BARTENDER_AGENT.md)。本轮未进行真实群晖、BarTender 或 USB 输出验收。
 
@@ -17,7 +17,7 @@
 
 1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。在 File Station 先创建 YML 旁的 `runtime/`、`https/` 两个父目录，避免 DSM 拒绝不存在的 bind 路径；已有部署保留原目录内容。
 2. 编辑 YML，将唯一配置行 LABOS_HTTPS_HOST 内的 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10；不要填协议、端口、路径。建议为群晖保留固定 IP。默认 HTTP 3000、HTTPS 8443；端口已占用时调整对应映射。
-3. 在线版创建项目并拉取镜像；本地版先在群晖导入同版本相应 amd64 或 arm64 TAR。本版交付目标为每包包含 labos:0.8.0、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。先按随包 SHA256SUMS 核对 TAR，架构须与群晖匹配。
+3. 在线版创建项目并拉取镜像；本地版先在群晖导入同版本相应 amd64 或 arm64 TAR。本版每包均包含 labos:0.8.0、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。先按随包 SHA256SUMS 核对 TAR，架构须与群晖匹配。
 4. 启动项目。labos-init 正常退出为 0，PostgreSQL 初始化后应用启动；labos-https 提供 HTTPS。空数据库首次打开网页设置管理员账号和密码。
 5. 按[手机 HTTPS 与扫码](SCANNING_HTTPS.md)将本项目根证书安装到手机并信任，再通过 https://群晖实际IP:8443 使用实时相机。
 

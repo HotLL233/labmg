@@ -1,8 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.8.0（开发中）**，增加原生 BarTender `.btw` 模板管理、打印站、逐件打印任务和 Windows PowerShell 7 打印助手，支持基于已有母版另存派生模板。网页标签、CSV 和物资流程继续可用。当前仍在验证与发布准备，实际结果见[版本说明](docs/CHANGELOG.md)，上一版为 [0.7.0](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)。历史版本的镜像、部署文件与记录保留。
+本源码版本：**0.8.0（已公开验证版）**，增加原生 BarTender `.btw` 模板管理、打印站、逐件打印任务和 Windows PowerShell 7 打印助手，支持基于已有母版另存派生模板。网页标签、CSV 和物资流程继续可用。[0.8.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.0) 已公开为 prerelease，实际验证与边界见[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
 
-本轮交付目标为两份完整 YML、amd64／arm64 三镜像 TAR、Windows 打印脚本、指南及校验清单，生成物集中在 `artifacts/releases/0.8.0/`。不能将旧版 CI 或容器结果作为本轮验证；本轮未在群晖、真手机或 USB 打印机验收。
+本轮已交付两份完整 YML、amd64／arm64 三镜像 TAR、Windows 打印脚本、指南及校验清单，本机 `artifacts/releases/0.8.0/` 全部14件文件及摘要核对通过。真实PG18 CI 188/188及四项部署门禁通过，ARM64容器使用QEMU；本轮未在群晖、真手机或 USB 打印机验收。打印设置见[操作指南](docs/BARTENDER_AGENT.md)。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 

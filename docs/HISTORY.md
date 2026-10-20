@@ -485,3 +485,25 @@ amd64 TAR 为 247920640 字节，SHA-256 `77694734e026115dae7020a36df30fd9b9f74b
 ### 后续：本机回归与范围补足
 
 完整本机回归187/187、0失败和跳过，41JS语法通过。范围补充后打印专项15/15、联合前端与标签71/71；真实Edge合成API45项、三种视口12图已目视，替代上文补范围前33项／9图的当前状态。新增起始／结束张、范围首件试打及重试保持原请求号，历史重印仍锁原完整顺序。尚未冻结／发布，PG18与容器门禁继续执行。
+
+## 2026-10-20：0.8.0 源码冻结、真实 CI 与部署门禁
+
+源码冻结为 `b4d0df5dbca039fa32795c4b30c6fa89281e74b8`，父提交 `fb9cf1c74319a7fb7f9b51cea46e8e8fc7de1b24`；注解标签 `v0.8.0` 的对象为 `0fe996d4ff2de64c39cb9572b7e63e55f8aa215f`。功能分支与 develop 已同步，稳定 main、旧标签及0.7.0交付保留。源码ZIP为629217字节，SHA-256 `bf8be38e488dcfa25c2f073691c5a19fcf05324102a0c2dd22b8dfdb85a5778d`；冻结后不重打归档或移动标签。
+
+构建 Actions `39363826155` 成功，Linux 作业 `118436026743` 的真实 PostgreSQL 18 回归188/188通过，0失败、0跳过，41个JS语法通过。Windows作业 `118435920898` 原始日志独立核对为Node2/2、0失败／跳过；COM与打印机仍为替身。正式应用索引 `sha256:136c1ce392ae5cdb994bf319157d54bc988dc1aaf05070dfc7077da9210a58e6` 与原始构建日志一致；本机独立匿名registry仅核对5份JSON元数据，不等于本机运行容器。专用localhost PG17.11已精确关闭，原测试数据目录保留，未连接NAS业务库。
+
+首次验证 Actions `39364160950`／运维提交 `36c7e5c95e4f81b273d0cc37c3aba8cc03326821` 在离线门禁失败：发布helper创建冻结测试目录时漏复制新增的 `scripts/bartender-agent.ps1`，原始TAP为ENOENT；在线镜像内脚本下载已通过。仅修正 ignored 的本轮helper复制清单，并增加防遗漏自检，冻结应用与测试、镜像、标签未改。首次失败日志及官方诊断artifact `12238517659`（22347字节，SHA-256 `d7cfe92d45bf920e3fc2f7415ea546295de64a568a3a2ffcb068ab49a16111d4`）保留，不能记为初次全通过。
+
+重跑 Actions `39364865931`／运维提交 `cbc61c78f0cc32e7e25f8be39041e59391c205ad` 四门禁全部通过：三镜像双架构匿名拉取与冻结在线Compose；绑定在线同次执行的PG18六项持久化证据；实际本地YML且四服务禁止拉取的双架构三镜像TAR容器；无SNI并严格校验本实例CA的HTTPS生命周期。PG证据不是第二次独立执行，ARM64为QEMU。小证据artifact `12239355773`（14045字节，SHA-256 `606a0a6353433193d8144003569c562b1f0c08b99f17d3ac1ea41e364dcda9f6`）下载核对并导入六项通过。
+
+诊断artifact `12239325924`（28320字节，SHA-256 `5cf850af976ccb2460555f1bf5b25d55fa00328ecdf77745057c2ca4ce9daafa`）独立复核三份原始TAP：在线amd64与离线amd64／arm64各1通过、0失败／跳过，均有真实root初始化预检标记。PG captured日志的583字节及SHA-256精确绑定在线原TAP；报告为 `artifacts/cache/0.8.0/independent-raw-tap-verification-39364865931-20261020T034012Z.json`。这是同次执行的日志复核，不新增容器或物理设备验收。此时完整本地TAR下载及公开发布仍在收尾，实际结果后续追加。
+
+## 2026-10-20：0.8.0 本地完整交付与公开发布
+
+按同次成功门禁的官方14资产报告绑定下载输入。官方Release单连接下载很慢；精确核对下载器及两个curl子进程后主动停止，旧 `.part` 与失败报告保留。独立Range探测4/4通过，分段下载每块核对206与Content-Range并记录SHA，整包只在官方完整SHA通过后原子创建目标，不覆盖已有交付。首次分段任务amd64某块超时，已核验片段保留；第二次复用并补齐，ARM64已有目标重新核对后复用，最终报告 `artifacts/cache/0.8.0/range-download-301d1821aae12e3c0310/attempt-Haefnk/report.json` 为passed。此为网络交付重试，不修改冻结应用或门禁结论。
+
+本机独立全文件核验 `local-delivery-verification.json`：14件、493423897字节、13条SHA256SUMS通过，7份独立源附件与冻结ZIP逐字节一致。amd64 TAR为247962112字节，SHA-256 `61cd471f3f7fb80903bdab578e687a5d120c80f6410154afe54b20cb47a22a25`；arm64 TAR为244676096字节，SHA-256 `2886b6bda986d1474f691dddb77eda0e35a8dcdf5bd54716d9481d788ab7e0a1`。最初结构核验因仍要求被中止的旧下载器报告而拒绝，未产生通过报告；随后仅将ignored核验helper绑定已通过的独立全文件摘要报告，重新自检与真实结构检查通过。`local-image-archive-verification.json` 确认每包应用、PG18和Caddy三镜像及六config平台／摘要，不逐层解包或运行本机Docker。
+
+公开前同run／ops门禁及14件草稿核验通过；现有Release `417966517` 公开为 [0.8.0 prerelease](https://github.com/HotLL233/labmg/releases/tag/v0.8.0)。公开官方API核对仓库、固定标签、14件资产和13条摘要；12件非TAR附件均匿名完整下载通过，共785689字节，报告 `artifacts/cache/0.8.0/github-release-verification.json`。没有API额度失败或启用备用下载路径，不将API下载写成浏览器UI验收，也不把已认证的本地TAR下载称为匿名完整下载。
+
+README、部署与开发指南、记忆及统一版本说明同步实际结果；0.8.0条目归入2026-10-20，原未发布纯文档与旧版历史保留。后补仅为文档，不重建源码ZIP／镜像、不更换Release附件或移动标签。本轮未访问NAS／业务库、启动真实BarTender、核实自动化许可、生成校准母版、打开系统打印窗口或执行USB出纸；纸张尺寸、真实手机、目标NAS与长期容量仍待设备验收。
