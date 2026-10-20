@@ -1,6 +1,6 @@
 # 群晖 Docker 部署
 
-当前源码版本为**0.8.2（打印修复开发中）**，继续PostgreSQL18。两份YML、双架构三镜像包及Windows打印助手仍需本轮构建与门禁，尚未公开，状态以[版本说明](CHANGELOG.md)及同版本Release为准。同一PG18项目升级保留原runtime/、https/、项目名及UID/GID，不需要重新设置管理员；本轮不提供PG17／SQLite迁移。云端容器与网页预览不代替群晖、手机或USB实机验收。
+当前源码版本为**0.8.2（已公开验证版）**，继续PostgreSQL18。[同版本Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.2) 已提供两份完整YML、amd64／arm64三镜像TAR、Windows打印助手和指南等14件附件；本机位于`artifacts/releases/0.8.2/`，完整大小、SHA-256及架构核验通过。正式PG18回归208/208和四项容器门禁通过，ARM64为QEMU，详见[版本说明](CHANGELOG.md)。同一PG18项目升级保留原runtime/、https/、项目名及UID/GID，不需要重新设置管理员；本轮不提供PG17／SQLite迁移。云端容器与网页预览不代替群晖、手机或USB实机验收。
 
 本版增加的 BarTender 助手在连接 USB 打印机的 Windows 电脑运行，不是群晖容器。模板、站点和任务存入原 PostgreSQL；无需公开数据库端口。Windows 侧保留固定运行目录及同一用户，更新脚本不删除配置和待回执；见[打印助手指南](BARTENDER_AGENT.md)。本轮未进行真实群晖、BarTender 或 USB 输出验收。
 

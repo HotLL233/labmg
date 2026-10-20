@@ -1,8 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.8.2（打印修复开发中）**，针对纸张、横纵方向、预览和Windows助手启动修复，增加可选的登录后台方式。当前尚未冻结发布；0.8.0已公开为验证版，历史镜像、部署文件与记录保留。实际验证与边界见[版本说明](docs/CHANGELOG.md)。
+本源码版本：**0.8.2（已公开验证版）**，针对纸张、横纵方向、预览和Windows助手启动修复，增加可选的登录后台方式。[0.8.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.2) 已公开为 prerelease；0.8.1保留为未通过部署门禁的候选，历史镜像、部署文件与记录保留。实际验证与边界见[版本说明](docs/CHANGELOG.md)。
 
-本轮交付目标继续包含两份完整YML、amd64／arm64三镜像TAR、Windows打印脚本、指南和摘要，使用独立`artifacts/releases/0.8.2/`。构建与硬件状态按真实结果补记；不以替身COM或网页预览代替BarTender许可、纸张送料与USB验收。打印设置见[操作指南](docs/BARTENDER_AGENT.md)。
+本轮已交付两份完整YML、amd64／arm64三镜像TAR、Windows打印脚本、指南和摘要，共14件；本机完整文件位于`artifacts/releases/0.8.2/`，大小、SHA-256及镜像架构核验通过。正式PG18回归208/208及四项容器门禁通过，ARM64为QEMU。打印采用“网页任务 → Windows后台助手 → 本机BarTender → USB打印机”；电脑及同一Windows用户须保持登录，实际许可、纸张送料与USB输出仍待现场验收。安装与菜单步骤见[操作指南](docs/BARTENDER_AGENT.md)。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 

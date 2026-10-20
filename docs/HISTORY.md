@@ -547,3 +547,21 @@ README、部署与开发指南、记忆及统一版本说明同步实际结果�
 发布helper离线总检查通过：26份JS语法、3段workflow内联、27份0.8.1旧源摘要保护、14资产／13摘要／9初始清单和含CMD的冻结fixture、合成三镜像TAR与缺依赖拒绝；sync及Range下载器纯自检通过。这些不访问凭据或网络，不能当作镜像／发布已完成。指南当前使用入口同步0.8.2，0.8.1最低协议与历史QA／COM副作用保留。
 
 冻结前按核对后的精确data目录fast停止本轮专用PG54882，退出码0，报告`artifacts/cache/0.8.2/postgres-stop-report.json`。保留所有测试证据与缓存，不关闭其他实例，不触及NAS；接续真实构建、四门禁与完整镜像交付。
+
+## 2026-10-20：0.8.2 冻结、真实门禁与完整公开交付
+
+上述阶段状态由本节实际结果补充。源码冻结为`7298bd7d2ab5df2184c2f8eb518428adf0fef5ee`，单父`b69b564e57847675af59ede3817e8253f3c8cfda`；`v0.8.2`注解标签对象`ec27ab4860852d0c918ff1c62283e9f3a38a35b8`。源ZIP为679703字节，SHA256 `b7c66b684b453b334680f9a9c1a02bcc2d3a41167f8a2c7d0c2f2cb4e01c222f`；manifest sourceSha256 `6285ed6908edbc94fd5c5e637c191fd5946fe6fd694e0b9f2d5752945a3055db`，110源文件／111 ZIP项，含CMD。首次源同步fetch失败，尚未更新目标refs，原`sync-7298bd7-failed-attempt1.json`及`source-sync-failed-attempt1.txt`保留；重跑后develop与feature源提交及标签已同步，main和旧标签保留。
+
+构建Actions`39383264290`成功。Linux job`118497184636`原日志确认PostgreSQL18回归208/208、0失败／跳过、41JS通过，日志SHA256 `a9c9cb1d8076910acf925f9017ae658cef3e947a02e442092e0877e78df740da`，报告`build-log-review.json`。Windows job`118497027977`官方元数据成功，未取得该job原始日志，不能将本机Node3/3及内部87项算为云端计数。应用索引`sha256:e093dc33d84868732d78ebd2f97bfd1bf6f82349bc1bdd5a2a14830df9c03e48`已从成功原日志及独立匿名5份registry JSON核对；后者不下载层或运行本机Docker。
+
+验证Actions`39383653140`／运维提交`25240aa88739757b7d56153c01ef27c6f8f106c1`／job`118498302189`四门禁通过：双架构匿名镜像与冻结在线Compose；绑定在线同次PG18六项持久化证据；每架构三镜像TAR与本地YML四服务禁止拉取的容器生命周期；严格校验本实例CA的无SNI真实Caddy HTTPS。ARM64使用QEMU，PG captured不是额外一次独立生命周期。小证据artifact`12247185291`为14114字节，SHA256 `b00bf4a43886fba9040ba613c4815b7c0d5ebe341f988229bbbb04d4d6a4db95`。首次import漏传`--zip`被拒，失败记录保留在`remote-validation/import-evidence-failed-missing-zip.json`；独立下载ZIP核对后补参数，6项证据导入通过，不是部署门禁重跑或源码修复。
+
+诊断artifact`12246069458`为28494字节，SHA256 `c7c531f47fdb60f5fa62660ab197bee91c372fdccb814e02597ec7bffec5e936`。独立只读ZIP内三份原始TAP各1通过、0失败／跳过／取消，每份均有一个root初始化标记；PG captured的size及SHA精确绑定在线TAP，冻结ZIP的`tests/docker.test.js`逐字节相同，报告`independent-raw-tap-verification-39383653140.json`。此为同run日志复核，不新增执行或物理设备验收。
+
+官方资产下载在本机网络很慢。最初4MiB分块、多路下载出现120秒超时和重试耗尽，ARM64失败后AMD64仍运行；核对Node15320及curl子进程后精确停止，`range-download-stop-report.json`、失败片段及原report保留，不把被停止的任务记作通过。随后新建独立ignored缓存复用helper，91行最终SHA256 `63b5e6490314a7878a4ff27f2ae23905d085a4ce96566fc20326bc041e19b517`，两轮只读审查无阻断，语法及12组合成自检通过。只复用经官方整包SHA、逐blob SHA及复制时再SHA核验的0.8.0正文；新header、metadata、padding、尾部从官方严格206 Range取得。两包最终整包官方size／SHA通过、fsync后原子新建，不覆盖交付；成功报告`blob-reuse-download-yIbmKx/report.json`。amd64复用243756571字节、官方下载4226021字节；arm64复用240467858字节、官方下载4228718字节。
+
+本机独立全文件报告`local-delivery-verification.json`为passed：14件共493548986字节、13条SHA256SUMS、7份独立源附件与冻结ZIP逐字节一致。amd64 TAR为247982592字节，SHA256 `8ddd23c30cb0fd44c63ef3a2e94716cf0adc6f10816e51c0ee170482fbe664d5`；arm64 TAR为244696576字节，SHA256 `d76663ffedb15fe6dbf583cd1c138de27d1792370542ccfc1ceab5362a07d997`。`local-image-archive-verification.json`确认每包应用、PG18及Caddy三镜像，两包共六份config的架构与摘要，不逐层解包或运行本机Docker。旧publisher本身的`localArchiveDownloads:false`只说明它未传输TAR，本机完整交付以这两份独立报告为准。
+
+本机全文件及结构校验完成后，依次核对同run／ops本地证据、草稿14件及官方标签；Release`418092209`公开为[0.8.2 prerelease](https://github.com/HotLL233/labmg/releases/tag/v0.8.2)。官方公开API匿名核对仓库、固定tag、14件元数据及13条摘要，12份非TAR附件共869818字节均匿名完整下载通过，`github-release-verification.json`为passed；没有API额度失败或启用备用路径。实际本机TAR来自经核验的官方资产及相同SHA的旧blob复用，不称匿名完整下载TAR；API下载不等于真实浏览器Release页面或附件点击检查。
+
+README、开发与部署说明、三份打印指南、MEMORY及统一CHANGELOG按本次真实结果补充；纯文档未发布项和所有旧版保留，0.8.2业务说明归入2026-10-20。本次后补只改文档，不更换Release附件、重打ZIP／镜像或移动标签。打印执行采用同一Windows用户的登录后台助手，菜单4只登记，下次登录生效，立即处理选3并保持窗口。0.8.2未再次启动真实COM、登记任务或打印，未访问NAS业务库；早先0.8.1的PID35992副作用记录保留。许可、真实SaveAs／PNG输出、登录后台、USB送料及小纸扫码效果仍需现场验收。

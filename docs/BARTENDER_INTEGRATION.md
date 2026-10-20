@@ -4,13 +4,19 @@
 
 后续用户已授权实施，0.8.0源码新增原生模板、打印站和任务、Windows COM打印助手及已有对象母版派生，见[打印助手操作指南](BARTENDER_AGENT.md)。0.8.0该轮未启动真实COM或执行USB打印；0.8.1新增纸张设置、模板图预览、CMD入口和当前用户登录后台。下文保留初次调研的结论与建议，“当时没有／尚未实现”的部分由下面的实施补充替代。实际许可、原生导出与USB仍未验，不能把源码、文档或替身测试当作硬件验收。
 
-## 当前0.8.2续发状态与验证边界
+## 0.8.2交付与验证边界
 
-当前安装与操作使用同版0.8.2应用、`bartender-agent.ps1`和`bartender-agent.cmd`，具体入口见[打印助手指南](BARTENDER_AGENT.md)。0.8.1已冻结，但随后真实Docker生命周期门禁的打印站断言遗漏动态`busy:false`字段而失败，候选Release未公开；保留0.8.1标签、镜像、源码ZIP及失败证据。0.8.2仅修正测试断言并同步版本后继续发布，当前不把续发计划写成已公开交付，实际发布状态见[版本说明](CHANGELOG.md)。纸张覆盖和原生模板图预览的最低助手协议仍为0.8.1，补丁未提高协议门槛。
+0.8.2已公开为验证版（prerelease），双架构离线镜像包已完成本机下载与完整核验；交付入口见[版本说明](CHANGELOG.md)。
+
+当前安装与操作使用同版0.8.2应用、`bartender-agent.ps1`和`bartender-agent.cmd`，具体入口见[打印助手指南](BARTENDER_AGENT.md)。菜单1检查本机、2保存初始化配置、4登记下次登录后台，均不向LabOS通信或领取；3才立即持续处理网页队列，包含打印和预览，需保持窗口打开。后台要求该Windows用户登录，安装4本身不启动。0.8.1已冻结，但随后真实Docker生命周期门禁的打印站断言遗漏动态`busy:false`字段而失败，候选Release未公开；保留0.8.1标签、镜像、源码ZIP及失败证据。0.8.2仅修正测试断言并同步版本，实际发布状态见[版本说明](CHANGELOG.md)。纸张覆盖和原生模板图预览的最低助手协议仍为0.8.1，补丁未提高协议门槛。
+
+0.8.2冻结提交为`7298bd7d2ab5df2184c2f8eb518428adf0fef5ee`／`v0.8.2`。构建`39383264290`成功，真实PG18回归208/208、41份JavaScript语法检查通过。验证`39383653140`／运维提交`25240aa88739757b7d56153c01ef27c6f8f106c1`四门禁成功：匿名双架构拉取与在线Compose、绑定同次执行的PG18持久化证据、本地YML禁止拉取的双架构离线TAR容器、严格可信且无SNI的HTTPS生命周期。PG证据不算第二次独立执行，ARM64容器使用QEMU；云端容器运行与本机离线包完整性分别核验，不代表真实USB输出通过。Windows云端作业仅取得官方成功元数据，未取得原始日志，不报告云端精确项数。
+
+Release `418092209`已公开为0.8.2验证版。本机`artifacts/releases/0.8.2/`共14件、493548986字节，13条摘要及7份独立源附件与冻结ZIP逐字节核对通过；双TAR各含应用、PG18、Caddy三镜像，六份config架构核对通过。公开API核对14件资产，12份非TAR附件匿名完整下载通过，报告为`artifacts/cache/0.8.2/github-release-verification.json`；这不等于匿名完整TAR下载、本机Docker运行或浏览器Release页面验收。冻结后只更新仓库文档，不改源码ZIP、镜像、附件或标签，完整发布记录见[版本说明](CHANGELOG.md)。
 
 2026-10-20，0.8.2 Windows本机重跑Node 3/3（0失败、0跳过）及内部87项，两份PowerShell与一份Node测试文件语法检查通过；Node首项包含内部87项，不相加。HTTP传输使用当前助手实际版本，受保护副本的`-Check`核对0.8.2。证据为`artifacts/cache/0.8.2/windows-agent-node-output.txt`、`windows-agent-mock-report.json`、`windows-agent-syntax-report.json`及`windows-agent-verification.json`；COM、打印机和任务计划仍用替身，没有真实引擎、打印或登录任务登记。
 
-标签、原生任务页面源文件及关联测试共6份已与0.8.1冻结manifest同字节核对，报告为`artifacts/cache/0.8.2/unchanged-ui-source-verification.json`。沿用原0.8.1网页证据，不称为网页重跑；原QA计数、截图、PDF和报告目录保留，详见[标签打印说明](LABEL_PRINTING.md)。
+标签、原生任务页面源文件及关联测试共6份已与0.8.1冻结manifest同字节核对，报告为`artifacts/cache/0.8.2/unchanged-ui-source-verification.json`。沿用0.8.1标签与原生任务两项Edge专项的证据，不称为这两项专项重跑；0.8.2全量回归中的Edge全站布局另有新执行。原QA计数、截图、PDF和报告目录保留，详见[标签打印说明](LABEL_PRINTING.md)。
 
 ## 0.8.1实施补充与验证边界（历史记录）
 

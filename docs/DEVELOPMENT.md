@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.8.2（打印修复发布验证中）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为 PostgreSQL 18。0.8.0已公开为prerelease；0.8.1已冻结但Docker门禁因动态busy字段的测试期望遗漏而失败，未公开。0.8.2修正断言后重新验证，不移动0.8.1标签或改写其镜像；发布状态以[版本说明](CHANGELOG.md)及 GitHub Release 为准。
+本源码版本为 **0.8.2（已公开验证版）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为 PostgreSQL 18。[0.8.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.2) 已公开为prerelease；0.8.1已冻结但Docker门禁因动态busy字段的测试期望遗漏而失败，未公开。0.8.2修正断言后完成重新验证，不移动0.8.1标签或改写其镜像；发布状态及实机边界见[版本说明](CHANGELOG.md)。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -51,7 +51,9 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.8.2：打印发布验证（进行中）
+## 0.8.2：打印发布验证（已公开）
+
+下文先保留冻结前阶段记录，实际公开交付结果在本节后部补充；早期“尚未”不表示当前发布状态。
 
 从冻结的`b69b564e57847675af59ede3817e8253f3c8cfda`建立`feature/v0.8.2-printing-release-verification`，版本、助手及部署配置同步0.8.2，缓存统一`artifacts/cache/0.8.2/`，交付目标`artifacts/releases/0.8.2/`。0.8.1保留为未通过部署验证的候选版，不公开为可部署版；0.8.0及更早交付保留。0.8.2仅修正站点持久化测试对`busy:false`的期望并更新版本，后端动态忙闲状态行为不变，新纸张／预览的最低助手协议仍为0.8.1。
 
@@ -60,6 +62,14 @@ artifacts/             唯一构建产物与缓存目录，不提交
 上述完整本机回归随后完成：218项、217通过、0失败、1条件跳过（本机未配置Docker镜像），退出码0；真实Edge全站布局已在这次执行中通过，41JS语法通过。六份标签／打印UI及其测试文件与0.8.1冻结manifest逐字节一致，报告`unchanged-ui-source-verification.json`，不算重跑旧专项。26份发布helper语法、3段workflow内联、27份旧helper保护及14/13/9清单自检通过；这些不是正式PG18或容器门禁结果。
 
 冻结前本轮PG54882按精确data目录fast停止，退出码0，报告`postgres-stop-report.json`；测试缓存保留，没有触及其他实例。下面继续正式构建和交付，早期阶段状态保留，由后续真实结果补充。
+
+上述阶段记录现由真实交付补充：冻结提交`7298bd7d2ab5df2184c2f8eb518428adf0fef5ee`／`v0.8.2`，注解标签对象`ec27ab4860852d0c918ff1c62283e9f3a38a35b8`；构建`39383264290`成功，Linux原日志确认真实PG18回归208/208、0失败／跳过、41JS语法通过。Windows作业只有官方成功元数据，原日志未取得，不将本机3/3及内部87项写成云端计数。应用索引`sha256:e093dc33d84868732d78ebd2f97bfd1bf6f82349bc1bdd5a2a14830df9c03e48`已独立匿名核对。
+
+验证`39383653140`／运维提交`25240aa88739757b7d56153c01ef27c6f8f106c1`四门禁通过：匿名双架构与在线Compose、绑定同次PG18六项持久化证据、本地YML禁止拉取的双TAR容器、严格可信无SNI真实Caddy HTTPS。三份原TAP独立复核各1通过且均有root初始化标记，0失败／跳过；PG captured不是额外一次独立生命周期，ARM64为QEMU。本机独立registry仅读取5份JSON，不把云端容器写成本机Docker执行。
+
+Release`418092209`已公开为prerelease；本机`artifacts/releases/0.8.2/`实际保存14件共493548986字节，13条摘要、7份独立源附件与冻结ZIP逐字节一致，双TAR每包三镜像，两包共六份config的架构及摘要通过。报告为`local-delivery-verification.json`、`local-image-archive-verification.json`。普通分块下载超时后精确停止，失败缓存保留；独立缓存复用只复制重新核验SHA的旧blob正文，其他字节取官方Range，最终两包完整官方SHA通过后才创建交付文件，成功报告为`blob-reuse-download-yIbmKx/report.json`。不重打ZIP、镜像或移动标签。
+
+公开后14份官方资产元数据及13条摘要一致，12份非TAR附件经官方公开API匿名完整下载通过，报告`github-release-verification.json`；本机TAR完整校验单独记载，不称匿名完整下载TAR或浏览器Release UI验收。打印集成由Windows同用户登录助手执行，不包含群晖Linux中的商业BarTender引擎。安装后台仅登记下次登录启动，立即处理选菜单3；许可、真实SaveAs／PNG、登录后台与USB送料仍待现场验证。0.8.1的两项Edge专项沿用原证据，0.8.2全站布局为本轮独立执行；完整发布核验与摘要详见[开发历程](HISTORY.md)。
 
 ## 0.8.1：纸张、预览与后台打印（历史候选版，未公开）
 
