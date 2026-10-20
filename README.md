@@ -1,8 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.7.0（已公开验证版）**，本轮完善中文 Excel 模板与引用下拉、详细导入错误、库存和物资信息回导、手机布局及内置 DL-886A（NEW）打印面板。真实 PostgreSQL 18 CI 159/159、36 个 JS 语法检查和四项云端部署门禁通过。发布状态、下载和实际验证记录见 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)与[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
+本源码版本：**0.8.0（开发中）**，增加原生 BarTender `.btw` 模板管理、打印站、逐件打印任务和 Windows PowerShell 7 打印助手，支持基于已有母版另存派生模板。网页标签、CSV 和物资流程继续可用。当前仍在验证与发布准备，实际结果见[版本说明](docs/CHANGELOG.md)，上一版为 [0.7.0](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)。历史版本的镜像、部署文件与记录保留。
 
-本版附两份完整 YML、amd64／arm64 三镜像 TAR 及校验清单，两 TAR 已实际保存在本机 `artifacts/releases/0.7.0/` 并核对大小、摘要与镜像架构。在线与本地容器、严格证书校验的 HTTPS 验证通过；ARM64 使用 QEMU。标签真实 Edge 37/37 为拦截打印的有限检查；本轮未在群晖、真手机或 USB 打印机验收。
+本轮交付目标为两份完整 YML、amd64／arm64 三镜像 TAR、Windows 打印脚本、指南及校验清单，生成物集中在 `artifacts/releases/0.8.0/`。不能将旧版 CI 或容器结果作为本轮验证；本轮未在群晖、真手机或 USB 打印机验收。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
@@ -19,7 +19,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.7.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.8.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -30,7 +30,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.7.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.8.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -57,7 +57,7 @@ npm test
 | 在线拉取 | [docker-compose.yml](deploy/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
 | 本地导入 | [docker-compose.local.yml](deploy/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-从 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0) 下载同版本配套文件，在所选 YML 中把 `CHANGE_ME` 改成群晖实际 IPv4 或主机名，例如 `192.168.1.10`，不带协议、端口或路径。首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
+发布后从同版本 Release 下载配套文件，在所选 YML 中把 `CHANGE_ME` 改成群晖实际 IPv4 或主机名，例如 `192.168.1.10`，不带协议、端口或路径。首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
 
 数据自动保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令。HTTPS 证书保存在旁边的 `https/data/`，代理自动创建内部目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 
@@ -65,7 +65,7 @@ npm test
 
 ## 打印与手机扫码
 
-网页标签支持毫米尺寸、字段布局、偏移与模板 JSON 导入导出；0.7.0 增加内置 DL-886A（NEW）打印面板，可选起止张、试打首张并打开系统打印窗口。用户在连接 USB 打印机的 Windows 电脑中选择已有驱动；网页不静默指定打印机，也不嵌入 BarTender。逐件 CSV 仍可交给现有 BarTender 设计器，见[标签打印](docs/LABEL_PRINTING.md)。重印沿用原实物编码，不新增库存；本轮尚未进行物理打印。
+网页标签支持毫米尺寸、字段布局、偏移与模板 JSON 导入导出；内置 DL-886A（NEW）面板可选起止张、试打首张并打开系统打印窗口。0.8.0 另增“BarTender 打印”：手机或电脑选择实物与母版，由 USB 所在 Windows 的助手领取任务，调用已授权的本机引擎。重印沿用固定码并记录原因，断线结果不明时不会自动重印。安装与母版派生见[打印助手指南](docs/BARTENDER_AGENT.md)，原网页与 CSV 见[标签打印](docs/LABEL_PRINTING.md)。真实授权、纸张校准与 USB 出纸尚未验收。
 
 手机实时相机需要受信任的 HTTPS、系统与浏览器相机授权；普通群晖 IP 的 HTTP 地址保留拍照／选图和手输。可按[扫码 HTTPS 配置](docs/SCANNING_HTTPS.md)启用 Caddy 并在手机信任证书。实际 NAS、手机及 USB 标签打印仍需现场确认。
 

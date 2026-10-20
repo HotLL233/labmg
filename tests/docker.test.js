@@ -223,6 +223,12 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     assert.ok(Number.isSafeInteger(administrator.id));
     assert.ok(setup.headers.get('set-cookie'), 'setup must create a session');
     const cookie = await login(first.base);
+    const agentScript = await request(first.base, '/api/printing/agent-script', { headers: { Cookie: cookie } });
+    assert.deepEqual(Buffer.from(await agentScript.arrayBuffer()), fs.readFileSync(path.join(root, 'scripts/bartender-agent.ps1')),
+      'the deployed application must serve the exact frozen Windows printing agent');
+    const printingConfig = await (await request(first.base, '/api/printing/config', { headers: { Cookie: cookie } })).json();
+    assert.deepEqual(printingConfig.templates, []);
+    assert.deepEqual(printingConfig.stations, []);
     for (const [route, mime] of [['/vendor/zxing-wasm/3.1.5/index.js', /javascript/], ['/vendor/zxing-wasm/3.1.5/zxing_full.wasm', /^application\/wasm$/]]) {
       const asset = await request(first.base, route);
       assert.match(asset.headers.get('content-type'), mime);
@@ -356,6 +362,18 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const unitRoute = `/api/materials/stock/units?catalogId=${unitCatalog.id}`;
     const expectedUnits = (await (await request(first.base, unitRoute, { headers: { Cookie: cookie } })).json()).items;
     assert.equal(expectedUnits.length, 3); assert.equal(expectedUnits.filter(unit => unit.status === 'in_stock').length, 2);
+    const printTemplateBytes = Buffer.from('synthetic-docker-test-template; never executed');
+    const printTemplate = await post('/api/printing/templates', {
+      name: '隔离容器测试母版', fileName: 'fixture.btw', contentBase64: printTemplateBytes.toString('base64'), fields: ['Code', 'Name']
+    });
+    const printStation = await post('/api/printing/stations', { name: '隔离测试站（不运行）', printerName: 'fixture-printer-no-output' });
+    const printJob = await post('/api/printing/jobs', {
+      templateId: printTemplate.id, stationId: printStation.station.id,
+      unitIds: expectedUnits.map(unit => unit.id), idempotencyKey: crypto.randomUUID()
+    });
+    const printSnapshot = await (await request(first.base, `/api/printing/jobs/${printJob.id}`, { headers: { Cookie: cookie } })).json();
+    assert.equal(printSnapshot.status, 'queued');
+    assert.deepEqual(printSnapshot.rows.map(row => row.Code), expectedUnits.map(unit => unit.code));
     const expectedRule = await (await request(first.base, '/api/materials/unit-label-rule', { headers: { Cookie: cookie } })).json();
     assert.equal(expectedRule.nextSequence, 4);
     const workbook = await request(first.base, `/api/materials/export.xlsx?type=requests&requestId=${materialRequest.id}`, { headers: { Cookie: cookie } });
@@ -388,6 +406,12 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     assert.equal((await (await request(second.base, '/api/auth/me')).json()).setupRequired, false, 'container recreation must not reopen setup');
     await request(second.base, '/api/auth/setup', setupOptions, 409);
     const secondCookie = await login(second.base);
+    const persistedPrint = await (await request(second.base, `/api/printing/jobs/${printJob.id}`, { headers: { Cookie: secondCookie } })).json();
+    assert.deepEqual(persistedPrint, printSnapshot, 'recreation must preserve the print task and fixed-code snapshot without executing it');
+    const persistedTemplate = await (await request(second.base, `/api/printing/templates/${printTemplate.id}`, { headers: { Cookie: secondCookie } })).json();
+    assert.deepEqual(Buffer.from(persistedTemplate.contentBase64, 'base64'), printTemplateBytes);
+    const persistedPrintConfig = await (await request(second.base, '/api/printing/config', { headers: { Cookie: secondCookie } })).json();
+    assert.deepEqual(persistedPrintConfig.stations, [printStation.station]);
     const materialStock = await request(second.base, '/api/materials/stock', { headers: { Cookie: secondCookie } });
     const persistedMaterial = (await materialStock.json()).items.find(row => row.catalogId === catalog.id && row.regionId === region.id);
     assert.equal(persistedMaterial.qtyM, 750); assert.equal(persistedMaterial.amountCents, 925);

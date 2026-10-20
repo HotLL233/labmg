@@ -1,6 +1,6 @@
 {
   "name": "labos",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "实验室综合管理系统 MVP",
   "scripts": {

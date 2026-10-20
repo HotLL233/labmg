@@ -27,7 +27,10 @@ const TABLES = Object.freeze([
   "material_attachments",
   "material_state",
   "material_idempotency",
-  "material_stock_units"
+  "material_stock_units",
+  "printing_templates",
+  "printing_stations",
+  "printing_jobs"
 ]);
 const ID_TABLES = Object.freeze([
   "users",
@@ -198,6 +201,31 @@ CREATE TABLE IF NOT EXISTS material_stock_units(
   CREATE INDEX IF NOT EXISTS material_unit_batch ON material_stock_units(catalog_id,region_id,warehouse,batch,expiry_date,status);
   CREATE INDEX IF NOT EXISTS material_unit_source ON material_stock_units(source_movement_id);
   CREATE INDEX IF NOT EXISTS material_unit_exit ON material_stock_units(exit_movement_id);
+CREATE TABLE IF NOT EXISTS printing_templates(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL,
+  size BIGINT NOT NULL CHECK(size>0 AND size<=4194304), content_base64 TEXT NOT NULL, fields TEXT NOT NULL,
+  active BIGINT NOT NULL DEFAULT 1 CHECK(active IN (0,1)), created_by BIGINT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS printing_stations(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, printer_name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+  enabled BIGINT NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), created_by BIGINT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL, last_seen_at TEXT, agent_version TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS printing_jobs(
+  id TEXT PRIMARY KEY, station_id TEXT NOT NULL REFERENCES printing_stations(id), station_name TEXT NOT NULL, printer_name TEXT NOT NULL,
+  template_id TEXT NOT NULL REFERENCES printing_templates(id), template_name TEXT NOT NULL, template_file_name TEXT NOT NULL,
+  template_sha256 TEXT NOT NULL, template_content_base64 TEXT NOT NULL, template_fields TEXT NOT NULL,
+  unit_ids TEXT NOT NULL, rows_snapshot TEXT NOT NULL, row_count BIGINT NOT NULL CHECK(row_count>0 AND row_count<=1000),
+  status TEXT NOT NULL CHECK(status IN ('queued','claimed','printing','submitted','failed','unknown','cancelled','confirmed')),
+  created_by BIGINT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL, payload_digest TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', reprint_of TEXT REFERENCES printing_jobs(id),
+  lease_hash TEXT, lease_expires_at BIGINT, message TEXT NOT NULL DEFAULT '', result_status TEXT NOT NULL DEFAULT '', result_message TEXT NOT NULL DEFAULT '',
+  confirmed_by BIGINT REFERENCES users(id), confirmed_at TEXT, confirmation_reason TEXT NOT NULL DEFAULT '',
+  UNIQUE(created_by,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS printing_job_queue ON printing_jobs(station_id,status,created_at,id);
+CREATE INDEX IF NOT EXISTS printing_job_owner ON printing_jobs(created_by,created_at,id);
+CREATE UNIQUE INDEX IF NOT EXISTS printing_station_busy ON printing_jobs(station_id) WHERE status IN ('claimed','printing');
 CREATE OR REPLACE FUNCTION labos_quality_current() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.module='quality' AND NEW.data::jsonb->>'is_current'='是' AND COALESCE(NEW.deleted_at,'')='' THEN

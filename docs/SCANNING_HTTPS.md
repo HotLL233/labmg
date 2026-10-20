@@ -8,6 +8,8 @@
 
 ## 一个 YML 启用 HTTPS
 
+应用已经监听 `0.0.0.0:3000`，HTTPS 代理监听 `:443`，均不需要限定到某一张网卡。`LABOS_HTTPS_HOST` 配置手机实际访问的 IP／主机名，用于请求匹配和证书；它不是监听地址，不能用 `0.0.0.0` 代替实际访问地址。
+
 1. 在线选择 [docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择 [docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
 2. 在所选 YML 的 LABOS_HTTPS_HOST 行，将 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10。只填写地址本身，不带协议、端口或路径；默认 HTTPS 端口是 8443。未修改时 HTTPS 代理会明确报错，HTTP 应用仍可启动。
 3. 在 File Station 先创建 YML 旁的 `https/` 父目录，再启动项目。2026-10-19 的 DS918+ 实测缺少该父目录时拒绝 bind 挂载，不能依赖自动创建；已有目录保留。配置已内联生成，HTTPS 代理会创建内部 data/、config/，无需预建这两个子目录。保留整份 https/，其中包含当前实例的 CA 及私钥。PostgreSQL 与附件仍在单独的 runtime/。
@@ -27,6 +29,8 @@ YML所在目录/https/data/caddy/pki/authorities/local/root.crt
 准备父目录后，一份 YML 可以启动服务并生成证书；手机的根证书信任及首次相机授权需要在设备上操作。后续保留原 https/ 时沿用原 CA；更换 IP 或重新生成 CA 后需重新核对证书信任。不要在旧 HTTP 页面的内嵌框架里打开系统。
 
 ## 仍无法调用相机时
+
+若仅 `labos-https` 反复重启，先在 NAS 终端查看 `sudo docker logs --tail 30 labos-labos-https-1`（容器名按项目替换）。日志提示修改 `LABOS_HTTPS_HOST` 时，检查容器实际环境和 YML 的 `environment` 行；默认值仍为 `CHANGE_ME` 会退出并自动重启，应用／数据库可能正常。只修改配置行中的地址，保留脚本 `case` 中拒绝 `CHANGE_ME` 的检查；同目录 `.env` 或项目环境变量可能覆盖 YML 默认值。改好后校验配置并仅重建 `labos-https`，保留 `runtime/` 和 `https/`。2026-10-20 的 0.7.0 现场故障即为占位值未修改，修正后已恢复严格可信 HTTPS 200，不需要重打镜像。
 
 按顺序确认 HTTPS 地址及端口、证书无警告、当前根证书已完全信任，再检查浏览器和系统相机权限、其他应用占用。若提示扫码组件加载失败，检查本站 /vendor/zxing-wasm/3.1.5/index.js 和 WASM 的加载情况。群晖防火墙需允许局域网访问所选 HTTPS 端口。
 

@@ -1,6 +1,29 @@
-# 0.7.0 物资 API 合同（开发中）
+# 物资与打印 API 合同（0.8.0）
 
-实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，三个方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验、回导及中文仓库输出已集成到源码；本机物资完整回归 43/43 通过（隔离 PG17.11），正式 PG18 CI 尚待执行、镜像未发布，不能据本说明认定完整验收通过。旧发布合同与结果保留在版本说明。
+实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore, labelRowsForPrint}`，方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验与回导已经发布，其后实际 PG18 CI159/159及容器证据见[版本说明](CHANGELOG.md)，替代本页此前“CI尚待执行、镜像未发布”的过期状态。0.8.0 新增打印 API，验证结果单独记录，不复用旧版结论。
+
+## 0.8.0 打印任务
+
+打印入口为独立 `createPrinting(...)`，共同前缀 `/api/printing`；下列模板、站点、任务ID均为UUID字符串，物资单件ID仍为正整数。网页接口需登录及 `materials.read`；模板维护另需 ADMIN/MATERIAL 和 `materials.catalog.write`，打印站维护需 `permissions.write`。普通人员仅能查看和操作本人任务，任一上述管理权限可管理任务及填写人工确认。
+
+| 接口 | 输入／输出 |
+| --- | --- |
+| `GET /config` | `{templates,stations,capabilities:{manageTemplates,manageStations,submit}}`，不返回令牌或模板正文 |
+| `POST /templates` | `{name,fileName,contentBase64,fields}`；规范Base64、原文件1–4MiB、`.btw`；每上传生成新版本，字段为12列的子集且含Code或QRPayload |
+| `GET /templates/:id` | 管理人员下载原内容与元数据；`POST /templates/:id/disable {}` 停用新任务入口 |
+| `POST /stations` | `{name,printerName}` → `{station,token}`，令牌仅本次返回；`PUT /stations/:id` 更新名称、精确打印机名或enabled |
+| `POST /stations/:id/rotate-token` | `{}` → `{station,token}`；旧令牌撤销，已领取／执行任务转为unknown，队列保留 |
+| `POST /jobs` | `{stationId,templateId,unitIds,idempotencyKey,reason?,reprintOf?}`；1–1000个不重复单件，服务器按ID取12列快照，每件一张；同用户同请求号同内容复用，不同内容409 |
+| `GET /jobs?page=&pageSize=` | `{items,total,page,pageSize}`，默认20最大100；`GET /jobs/:id` 另含rows快照 |
+| `POST /jobs/:id/cancel` | `{}`，仅queued或claimed；已启动或结束409 |
+| `POST /jobs/:id/confirm` | `{reason}`，管理人员仅对submitted或unknown人工核对；不会触发打印 |
+| `GET /agent-script` | 登录及物资读取权限，下载同版 `bartender-agent.ps1` 精确字节 |
+
+重印是新任务，必须原因，同原站、原模板及原单件顺序，保留原快照；原任务须已结束，模板／打印站仍需可用。打印不改库存、单件身份或编码流水。领取120秒、启动后30分钟租约；超时变unknown，不自动重新排队。模板停用只阻止新建，不撤回已有任务快照。
+
+Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agentVersion?}` 返回 `{job:null}` 或任务、模板字节及leaseToken；`POST /agent/jobs/:id/start {leaseToken}` 提交成功后才允许调用引擎；`POST /agent/jobs/:id/result {leaseToken,status,message}` 接收submitted/failed/unknown，同结果重复回报幂等。claimed仅可回failed/unknown，不能跳过启动。站点令牌服务端只存摘要，不作为网页会话；无权、过期或状态冲突按401／409拒绝。
+
+打印表不加入物资JSON备份，应随完整PostgreSQL备份。具体字段与Windows操作见[打印助手指南](BARTENDER_AGENT.md)。以下继续是物资API，前缀与ID类型仍按各节约定。
 
 所有接口需要登录。普通错误为 `{error, code?}`；401 登录失效，400 输入错误，403 无权，404 不存在，409 版本/状态/幂等冲突。Excel 校验错误另含 `{code:'IMPORT_VALIDATION',errors:[{sheet,row,column,field,value,message}],totalErrors}`：`row` 是 Excel 实际行号、`column` 为 A/B/…列字母、`field` 是中文表头；一次最多返回前 200 个明细并给出错误总数，文件级错误可能没有工作表和坐标。页面以纯文本逐条显示，保留选中文件及表单。解析工作簿后重新验证会话和权限；401／403 直接返回，不伪装成单元格错误。`quantity`、`amount` 写入必须是非指数十进制**字符串**，最多三位/两位小数；读取为整数 `qtyM`、`amountCents`。金额无权限时所有响应、历史快照均省略金额字段。
 

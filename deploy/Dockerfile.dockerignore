@@ -3,6 +3,8 @@
 !package-lock.json
 !src
 !src/**
+!scripts
+!scripts/bartender-agent.ps1
 !docs
 !docs/licenses
 !docs/licenses/**

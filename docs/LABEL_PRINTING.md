@@ -50,9 +50,17 @@
 | Region / Warehouse / Location | 归属区域名称／仓库名称／存放位置（较早数据缺少仓库名称时保留原编码） |
 | Batch / ExpiryDate / Status | 批号／有效期／单件状态 |
 
-CSV 是导出时的快照，位置或状态变化后需重新导出。打印面板中的“导出 BarTender 数据”导出本窗口加载的全部实物，不受打印起止张范围影响。0.6.0 起继续用 CSV 提供打印数据，配套 Compose 不公开 PostgreSQL 端口给打印软件，也不让 BarTender 修改业务数据库；业务变更仍须经过系统的权限、事务及库存流水。0.5.1 及更早版本使用 `labos.db` 的限制属于历史 SQLite 部署，不能把旧文件连接方式套到当前数据库。本版没有后台常驻打印服务或自动调用 BarTender 命令行，也未生成专有 `.btw` 二进制文件。
+CSV 是导出时的快照，位置或状态变化后需重新导出。打印面板中的“导出 BarTender 数据”导出本窗口加载的全部实物，不受打印起止张范围影响。0.6.0 起继续用 CSV 提供打印数据，配套 Compose 不公开 PostgreSQL 端口给打印软件，也不让 BarTender 修改业务数据库；业务变更仍须经过系统的权限、事务及库存流水。0.5.1 及更早版本使用 `labos.db` 的限制属于历史 SQLite 部署，不能把旧文件连接方式套到当前数据库。0.7.0 仅有网页／CSV；0.8.0 新增下节的独立 Windows 打印助手，未实现 BarTender 命令行路线。
 
 官方参考：[数据库连接与字段拖放](https://help.seagullscientific.com/2022/en/subsystems/gsm/content/GS_User_Databases.htm)、[文本文件编码与分隔设置](https://help.seagullscientific.com/10.1/en/Content/HIDD_DB_WIZARD_ASCII_PAGE.htm)、[打印份数与序列化](https://help.seagullscientific.com/2021/en/Content/Printing_Label_Formats.htm)。官方在线帮助版本不同于本机 2016 R7，本文只复用数据源、字段绑定与记录打印逻辑，不将新版本界面当作本机实测。
+
+## 原生 `.btw` 与直接调用
+
+0.8.0 源码增加原生母版上传、打印站和任务，以及在已登录 Windows 用户会话运行的 PowerShell 7 助手。物资页“BarTender 打印”管理入口及单件列表选件入口按权限显示；手机可建立任务，由连接 USB 的 Windows 助手调用 COM。服务端重新取数建立快照，每件一张，不创建新编码或改变库存。引擎已提交与人工确认分开，超时／断线结果不明不自动重印。
+
+助手还提供 `-DeriveTemplate`：只修改母版已有对象的位置、尺寸、字号及打印开关，由 `SaveAs()` 生成新的 `.btw`；不是任意 HTML／JSON 转换，也不从零生成业务母版。具体命令、字段、权限和恢复操作见[打印助手指南](BARTENDER_AGENT.md)。模板为可信管理员制作的原生文件，实际授权、纸张与输出仍需现场校准；本轮未启动真实 COM 或执行物理打印。
+
+最初调研与官方 2016 依据保留在[BarTender 接入分析](BARTENDER_INTEGRATION.md)。其中“尚未接入”是开发前状态，由本节源码实现替代，不代表硬件验收已经通过。`Application.XMLScript()` 在2016要求 Enterprise Automation，本轮采用 COM `Format.Print()`／`SaveAs()`，仍需核实 Automation 或 Enterprise Automation 授权。
 
 ## 尚需现场确认
 

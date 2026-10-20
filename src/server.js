@@ -97,6 +97,7 @@ const recordInput=async (input,old={},knownRoles)=>{knownRoles??=await allRoles(
 const addRecord=async record=>(await db.prepare('INSERT INTO records(module,title,code,status,category,owner,due_date,amount,quantity,data) VALUES(?,?,?,?,?,?,?,?,?,?)').run(record.module,record.title,record.code||'',record.status||'草稿',record.category||'',record.owner||'',record.due_date||'',record.amount,record.quantity,JSON.stringify(record.data)));
 const queryRecords=async (module,from,to)=>{if(module)return (await db.prepare("SELECT * FROM records WHERE module=? AND (deleted_at='' OR deleted_at IS NULL) AND (?='' OR labos_date(created_at)>=labos_date(?)) AND (?='' OR labos_date(created_at)<=labos_date(?)) ORDER BY created_at DESC").all(module,from,from,to,to));return (await db.prepare("SELECT * FROM records WHERE (deleted_at='' OR deleted_at IS NULL) AND (?='' OR labos_date(created_at)>=labos_date(?)) AND (?='' OR labos_date(created_at)<=labos_date(?)) ORDER BY created_at DESC").all(from,from,to,to))};const downloadJson=(res,name,payload)=>{res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(name)}`);return send(res,200,payload)};const downloadText=(res,name,text,type='text/csv; charset=utf-8')=>{res.writeHead(200,{'Content-Type':type,'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(name)}`,'Content-Length':Buffer.byteLength(text)});res.end(text)};
 const materials=require('./materials').createMaterials({db,body,send,fail,log,hasPermission,tokenUser,uploads:UPLOADS,writeXlsx:require('write-excel-file/node').default});
+const printing=require('./printing').createPrinting({db,body,send,fail,log,hasPermission,tokenUser,labelRows:materials.labelRowsForPrint});
 async function api(req,res,url){
  if(url.pathname==='/api/auth/setup'&&req.method==='POST'){
   if(!(await setupRequired()))return send(res,409,{error:'管理员已初始化，请登录'});
@@ -117,6 +118,12 @@ async function api(req,res,url){
   return (await startSession(res,current))
  }
  if(url.pathname==='/api/auth/logout'){const token=sessionToken(req);if(token)(await db.prepare('DELETE FROM sessions WHERE token=?').run(token));res.setHeader('Set-Cookie','labos_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return send(res,200,{ok:true})}if(url.pathname==='/api/auth/me'){const required=(await setupRequired());return send(res,200,{user:publicUser((await tokenUser(req))),setupRequired:required,...(required?{setupUsername}:{})})}
+ if(url.pathname==='/api/printing/agent-script'&&req.method==='GET'){
+  const user=await tokenUser(req);if(!user)return send(res,401,{error:'请先登录'});if(!requirePermission(user,'materials.read',res))return;
+  const agentFile=path.join(ROOT,'scripts/bartender-agent.ps1');if(!fs.existsSync(agentFile))return send(res,503,{error:'打印端脚本尚未准备完成'});
+  res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':'attachment; filename="bartender-agent.ps1"','Cache-Control':'no-store'});return fs.createReadStream(agentFile).on('error',()=>res.destroy()).pipe(res);
+ }
+ if(await printing.handle(req,res,url))return;
  const u=(await tokenUser(req));if(url.pathname.startsWith('/api/')&&!u)return send(res,401,{error:'请先登录'});
  if(await materials.handle(req,res,url,u))return;
  if(url.pathname==='/api/dashboard'){if(!requirePermission(u,'dashboard.read',res))return;const rows=(await queryRecords('','','')).map(parse).filter(r=>hasRecordPermission(u,r,'read')),totals=Object.fromEntries(modules.map(m=>[m,0])),finance={income:0,expense:0},until=new Date();until.setUTCDate(until.getUTCDate()+30);const limit=until.toISOString().slice(0,10);let warnings=0;for(const r of rows){if(modules.includes(r.module))totals[r.module]++;if(r.module==='finance'&&r.data.direction==='收入')finance.income+=r.amount;if(r.module==='finance'&&r.data.direction==='支出')finance.expense+=r.amount;if(r.due_date&&r.due_date<limit)warnings++}return send(res,200,{totals,finance,warnings})}

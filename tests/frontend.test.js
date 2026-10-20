@@ -331,7 +331,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material-labels.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material-labels.js', 'material-printing.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -1080,11 +1080,14 @@ test('negative individual-stock adjustments require exactly the chosen distinct 
 test('unit labels and BarTender export reuse exact scoped rows and cancel after navigation',async()=>{
   const {app,row,click}=await materialApp();row.trackingMode='unit';const unit=singleUnit(row);app.state.materialLists['/stock/units']=[unit];const calls=[];
   app.context.MaterialLabels={printUnits(rows,options){calls.push({kind:'print',rows,options});},async exportData(provider,options){calls.push({kind:'export',rows:await provider(),options});},configure(){}};
+  let closed=0;app.context.MaterialPrinting={async send(provider,options){calls.push({kind:'bartender',rows:await provider(),options});},async open(options){calls.push({kind:'printing-history',options});},close(){closed++;}};
   await click({dataset:{mw:'page',page:'inventory'}});await click('[data-mw=batches]');await click('[data-mw=batch-units]');
   await click('[data-mw=unit-print]');assert.equal(calls[0].rows[0].code,unit.code);assert.equal(calls[0].options.isActive(),true);
   await click('[data-mw=unit-export]');assert.equal(calls[1].rows[0].code,unit.code);
+  await click('[data-mw=unit-bartender]');assert.equal(calls[2].rows[0].id,unit.id);assert.equal(calls[2].rows[0].code,unit.code);assert.equal(calls[2].options.isActive(),true);
   const query=app.requests.filter(r=>r.url.pathname==='/api/materials/stock/units').at(-1).url.searchParams;assert.equal(query.get('batch'),'');assert.equal(query.get('expiryDate'),'');assert.equal(query.get('catalogId'),'5');
-  await click({dataset:{mw:'page',page:'requests'}});assert.equal(calls[0].options.isActive(),false);assert.equal(calls[1].options.isActive(),false);
+  await click({dataset:{mw:'page',page:'requests'}});assert.equal(calls[0].options.isActive(),false);assert.equal(calls[1].options.isActive(),false);assert.equal(calls[2].options.isActive(),false);assert.ok(closed>0);
+  await click('[data-mw=bartender]');assert.equal(calls[3].kind,'printing-history');assert.equal(calls[3].options.isActive(),true);await app.run("currentUser.permissions.push('dashboard.read');go('dashboard')");assert.equal(calls[3].options.isActive(),false);
 });
 
 test('acceptance exposes storage location, guards the selected batch version and preserves input after a conflict',async()=>{
