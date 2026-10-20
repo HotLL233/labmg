@@ -1,0 +1,9 @@
+{
+  "version": "0.9.0",
+  "commit": "1a3b524d2f0549c7fceded191a3bddd9d9630e44",
+  "indexDigest": "sha256:d22f45b71ce19d5167815f93ca6ab959b239219ac327536464db5021f398174a",
+  "baseParent": "5464b65fb2c0397524f3b1451683b8467b0bc945",
+  "featureBranch": "feature/v0.9.0-system-print-qr",
+  "status": "source-frozen",
+  "buildRunId": 39393982319
+}
