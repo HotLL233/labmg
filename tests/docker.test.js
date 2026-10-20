@@ -427,7 +427,7 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const persistedTemplate = await (await request(second.base, `/api/printing/templates/${printTemplate.id}`, { headers: { Cookie: secondCookie } })).json();
     assert.deepEqual(Buffer.from(persistedTemplate.contentBase64, 'base64'), printTemplateBytes);
     const persistedPrintConfig = await (await request(second.base, '/api/printing/config', { headers: { Cookie: secondCookie } })).json();
-    assert.deepEqual(persistedPrintConfig.stations, [printStation.station]);
+    assert.deepEqual(persistedPrintConfig.stations, [{ ...printStation.station, busy: false }]);
     const materialStock = await request(second.base, '/api/materials/stock', { headers: { Cookie: secondCookie } });
     const persistedMaterial = (await materialStock.json()).items.find(row => row.catalogId === catalog.id && row.regionId === region.id);
     assert.equal(persistedMaterial.qtyM, 750); assert.equal(persistedMaterial.amountCents, 925);

@@ -87,7 +87,7 @@ function Get-BarTenderProcessMetadata([int]$EngineId) {
     foreach($key in $script:MockProcessOverrides.Keys){$value[$key]=$script:MockProcessOverrides[$key]}
     return $value
 }
-$cacheRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts/cache/0.8.1/bartender-agent-tests'))
+$cacheRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts/cache/0.8.2/bartender-agent-tests'))
 [void][IO.Directory]::CreateDirectory($cacheRoot)
 $testRoot=Join-Path $cacheRoot ([Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($testRoot)
@@ -254,7 +254,7 @@ try {
     try {
         if(-not $startupProcess.WaitForExit(20000)){$startupProcess.Kill($true);throw 'copied no-COM check timed out'}
         $startupText=$startupOut.GetAwaiter().GetResult()+$startupError.GetAwaiter().GetResult()
-        Assert-True ($startupText.Contains('AgentVersion') -and $startupText.Contains('0.8.1') -and -not $startupText.Contains('RuntimeDirectory must be a dedicated')) 'actual copied startup script can check its explicit runtime without weakening root directory protection'
+        Assert-True ($startupText.Contains('AgentVersion') -and $startupText.Contains('0.8.2') -and -not $startupText.Contains('RuntimeDirectory must be a dedicated')) 'actual copied startup script can check its explicit runtime without weakening root directory protection'
     } finally {$startupProcess.Dispose()}
     $taskState.task.Description='unrelated user task';Assert-Throws {Install-StationStartup $owned} 'startup refuses to replace unrelated task';Assert-Throws {Uninstall-StationStartup $owned} 'uninstall refuses unrelated task'
     $taskState.task.Description=$definition.description;Uninstall-StationStartup $owned | Out-Null

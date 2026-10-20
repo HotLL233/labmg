@@ -4,7 +4,15 @@
 
 后续用户已授权实施，0.8.0源码新增原生模板、打印站和任务、Windows COM打印助手及已有对象母版派生，见[打印助手操作指南](BARTENDER_AGENT.md)。0.8.0该轮未启动真实COM或执行USB打印；0.8.1新增纸张设置、模板图预览、CMD入口和当前用户登录后台。下文保留初次调研的结论与建议，“当时没有／尚未实现”的部分由下面的实施补充替代。实际许可、原生导出与USB仍未验，不能把源码、文档或替身测试当作硬件验收。
 
-## 0.8.1实施补充与验证边界
+## 当前0.8.2续发状态与验证边界
+
+当前安装与操作使用同版0.8.2应用、`bartender-agent.ps1`和`bartender-agent.cmd`，具体入口见[打印助手指南](BARTENDER_AGENT.md)。0.8.1已冻结，但随后真实Docker生命周期门禁的打印站断言遗漏动态`busy:false`字段而失败，候选Release未公开；保留0.8.1标签、镜像、源码ZIP及失败证据。0.8.2仅修正测试断言并同步版本后继续发布，当前不把续发计划写成已公开交付，实际发布状态见[版本说明](CHANGELOG.md)。纸张覆盖和原生模板图预览的最低助手协议仍为0.8.1，补丁未提高协议门槛。
+
+2026-10-20，0.8.2 Windows本机重跑Node 3/3（0失败、0跳过）及内部87项，两份PowerShell与一份Node测试文件语法检查通过；Node首项包含内部87项，不相加。HTTP传输使用当前助手实际版本，受保护副本的`-Check`核对0.8.2。证据为`artifacts/cache/0.8.2/windows-agent-node-output.txt`、`windows-agent-mock-report.json`、`windows-agent-syntax-report.json`及`windows-agent-verification.json`；COM、打印机和任务计划仍用替身，没有真实引擎、打印或登录任务登记。
+
+标签、原生任务页面源文件及关联测试共6份已与0.8.1冻结manifest同字节核对，报告为`artifacts/cache/0.8.2/unchanged-ui-source-verification.json`。沿用原0.8.1网页证据，不称为网页重跑；原QA计数、截图、PDF和报告目录保留，详见[标签打印说明](LABEL_PRINTING.md)。
+
+## 0.8.1实施补充与验证边界（历史记录）
 
 网页维护不可覆盖的原生模板、打印站及任务，Windows端通过可信HTTPS主动领取。用户从网页下载同版`bartender-agent.ps1`与`bartender-agent.cmd`，放在同一固定文件夹，双击CMD进入菜单；默认菜单不领取任务，缺少PowerShell 7、脚本或初始化配置时显示指引并保留窗口。CMD只从PATH调用`pwsh.exe`，不调用旧版`powershell.exe`。令牌隐藏输入并由同一Windows用户的DPAPI保护；HTTP 401／403／409、重定向与连接失败分别给受控诊断。
 
@@ -16,7 +24,7 @@
 
 0.8.1也补充COM归属核验：按类型库名称读取`ProcessId`，必要时由`Application.Window.Handle`通过Windows窗口API映射PID；两者有效时必须一致。排除创建前已有PID后，再核对注册EXE、进程名、当前用户SID、会话和启动时间。未证明独占身份时不隐藏、不Print、不Quit该进程，不凭进程差集猜测归属。[15] 对已注册官方EXE使用`LoadTypeLibEx(REGKIND_NONE)`只读核对，确认`Edition`为BSTR、`ProcessId`为I4、毫米枚举为3、24位颜色枚举为4；尺寸为`(BtUnits,Single)`索引属性。类型信息证明接口形态，不证明实际授权或运行成功。
 
-Windows专项完成PowerShell内部87项、Node 3/3及PowerShell语法检查；Node首项包含内部87项，不重复计数。检查用COM、打印机及任务计划替身，覆盖纸张索引反射和读回、缩小拒绝、预览不调用Print、PNG边界、回执复送、进程身份和后台任务登记／卸载。另实际运行了受保护副本的`-Check`入口，以及含空格目录内CMD的缺PS1错误暂停和默认菜单选择0退出，均未领取真实队列或启动COM。证据为`artifacts/cache/0.8.1/windows-agent-mock-report.json`、`launcher-error-final-report.json`和`launcher-console-report.json`；首次手写CMD包装引号的失败记录保留，正确参数调用后通过。
+0.8.1 Windows专项完成PowerShell内部87项、Node 3/3及PowerShell语法检查；Node首项包含内部87项，不重复计数。检查用COM、打印机及任务计划替身，覆盖纸张索引反射和读回、缩小拒绝、预览不调用Print、PNG边界、回执复送、进程身份和后台任务登记／卸载。另实际运行了受保护副本的`-Check`入口，以及含空格目录内CMD的缺PS1错误暂停和默认菜单选择0退出，均未领取真实队列或启动COM。证据为`artifacts/cache/0.8.1/windows-agent-mock-report.json`、`launcher-error-final-report.json`和`launcher-console-report.json`；首次手写CMD包装引号的失败记录保留，正确参数调用后通过。
 
 早先2026-10-20一次获准的只读COM诊断未取得可证明独占的进程ID便停止，检查后曾观察到新`bartend`进程PID 35992保留；没有打开模板、SaveAs、Export或Print，也未Quit或强杀该进程。此后的`ProcessId`／窗口回退补丁仅经替身验证，没有再次启动真实COM；不能将旧失败认定为已完成现场修复。实际BarTender许可、真实SaveAs／PNG输出、登录后台、USB出纸和标签校准仍待验收。其他业务和发布门禁由[版本说明](CHANGELOG.md)单独记录。
 

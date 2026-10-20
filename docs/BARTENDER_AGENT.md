@@ -1,8 +1,10 @@
 # BarTender Windows 打印助手
 
-0.8.0增加原生`.btw`模板、打印站和打印任务，0.8.1源码增加纸张覆盖、模板图预览与启动诊断。手机或电脑在网页选实物并建立任务，连接USB打印机的Windows电脑领取任务，再调用本机BarTender。群晖容器负责保存模板、任务及结果；Windows助手在已登录的同一用户会话运行，可安装为登录后隐藏窗口的后台任务。功能实现与现场验收边界见文末。
+当前使用说明面向0.8.2。0.8.0增加原生`.btw`模板、打印站和打印任务，0.8.1源码增加纸张覆盖、模板图预览与启动诊断，0.8.2沿用这些功能。手机或电脑在网页选实物并建立任务，连接USB打印机的Windows电脑领取任务，再调用本机BarTender。群晖容器负责保存模板、任务及结果；Windows助手在已登录的同一用户会话运行，可安装为登录后隐藏窗口的后台任务。功能实现与现场验收边界见文末。
 
-## 双击启动与后台方式（0.8.1）
+0.8.1冻结后的真实Docker生命周期门禁在打印站断言处失败：测试遗漏响应中的动态`busy:false`字段，候选Release未公开。其标签、镜像、源码ZIP及失败证据保留，不改写旧版本；0.8.2仅修正该测试断言并同步版本，继续发布流程，当前不声明发布已完成。最终交付状态见[版本说明](CHANGELOG.md)。
+
+## 双击启动与后台方式（0.8.2）
 
 在网页“BarTender 打印 → 打印站”同时下载`bartender-agent.ps1`和`bartender-agent.cmd`，保存到固定的同一文件夹。也可从源码ZIP取出`scripts/`中的这两个文件；Release独立脚本附件仍是PS1，CMD由网页或源码提供。双击**CMD**进入菜单，错误会保留窗口；不要直接双击PS1。菜单本身不会领取任务，选择0退出。先选1检查，再选2交互初始化；已有配置保留原Windows用户和运行目录，直接使用。CMD通过PATH查找`pwsh.exe`，缺少PowerShell 7或同目录PS1时显示错误并暂停，不调用旧版`powershell.exe`。
 
@@ -21,7 +23,7 @@ pwsh -NoProfile -File C:\LabOSPrint\bartender-agent.ps1 -StopBackground -Runtime
 pwsh -NoProfile -File C:\LabOSPrint\bartender-agent.ps1 -UninstallStartup -RuntimeDirectory C:\LabOSPrint\runtime
 ```
 
-网页显示打印站从未连接／在线／离线、助手版本、最后通信时间及队列等待原因；“在线”仅表示最近60秒有通信，不保证打印机、许可或物理出纸正常。0.8.0助手可继续处理沿用母版的旧式任务，但不能领取带纸张覆盖或预览的新任务；使用这些功能时将应用与助手一起更新到0.8.1。
+网页显示打印站从未连接／在线／离线、助手版本、最后通信时间及队列等待原因；“在线”仅表示最近60秒有通信，不保证打印机、许可或物理出纸正常。0.8.0助手可继续处理沿用母版的旧式任务，但不能领取带纸张覆盖或预览的新任务；这些新任务的最低助手协议仍为0.8.1，未随补丁提高。当前安装或升级请使用同版0.8.2应用与助手。
 
 ## 两种纸张、方向与原生模板图预览
 
@@ -144,7 +146,7 @@ pwsh -NoProfile -File C:\LabOSPrint\bartender-agent.ps1 -ArchivePending -JobId '
 }
 ```
 
-`X`、`Y`、`Width`、`Height`为毫米，`FontSize`为pt；对象仅接受这些属性和`DoNotPrint`。0.8.1可在同一JSON顶层另加`"paper":{"widthMm":60,"heightMm":40,"orientation":"landscape"}`，遵守前述尺寸、方向和不得缩小母版的限制；只调整纸张时仍提供`"objects":[]`。这不会自动缩放或移动其他对象。输出路径须为不存在的`.btw`文件，母版不保存修改：
+`X`、`Y`、`Width`、`Height`为毫米，`FontSize`为pt；对象仅接受这些属性和`DoNotPrint`。自0.8.1起，可在同一JSON顶层另加`"paper":{"widthMm":60,"heightMm":40,"orientation":"landscape"}`，当前0.8.2继续支持，遵守前述尺寸、方向和不得缩小母版的限制；只调整纸张时仍提供`"objects":[]`。这不会自动缩放或移动其他对象。输出路径须为不存在的`.btw`文件，母版不保存修改：
 
 ```powershell
 pwsh -NoProfile -File C:\LabOSPrint\bartender-agent.ps1 -DeriveTemplate -MasterTemplate C:\LabOSPrint\master.btw -Layout C:\LabOSPrint\layout.json -OutputTemplate C:\LabOSPrint\derived.btw -RuntimeDirectory C:\LabOSPrint\runtime
@@ -158,6 +160,8 @@ pwsh -NoProfile -File C:\LabOSPrint\bartender-agent.ps1 -DeriveTemplate -MasterT
 
 0.8.1 Windows专项的PowerShell内部87项、Node 3/3及PowerShell语法检查通过；Node首项包含这87项，不应重复相加。使用合成模板字节、COM／打印机和任务计划替身，覆盖带单位的实际索引反射、纸张读回、缩小拒绝、预览不调用Print、图片边界、回执复送、进程身份拒绝和后台安装／卸载行为。实际复制到`runtime/agent/bin/`的脚本通过子进程`-Check`入口检查，未启动COM。本机证据为`artifacts/cache/0.8.1/windows-agent-mock-report.json`。
 
-CMD也在含空格的目录实际执行：缺少PS1时显示错误并暂停、退出码1；PS1同目录时默认菜单选择0后暂停、退出码0。分别见同目录`launcher-error-final-report.json`和`launcher-console-report.json`。首次测试的手写CMD包装引号有误，失败记录保留；改用正确的原生命令参数后通过。这些检查没有领取真实队列、登记真实登录任务、运行原生模板导出或打印，不能替代任务计划登录后的现场验收。
+2026-10-20，0.8.2在本机Windows重新执行Node 3/3（0失败、0跳过）与PowerShell内部87项，另有两份PowerShell及一份Node测试文件语法检查通过；Node首项同样包含内部87项，不相加。HTTP传输检查发送当前脚本的实际版本，受保护副本的`-Check`精确核对0.8.2。报告为`artifacts/cache/0.8.2/windows-agent-node-output.txt`、`windows-agent-mock-report.json`、`windows-agent-syntax-report.json`和`windows-agent-verification.json`。这些仍使用相同模拟边界，没有启动真实COM、打印或登记真实登录任务；下段CMD实跑结果保留为0.8.1历史记录。
+
+0.8.1的CMD也在含空格的目录实际执行：缺少PS1时显示错误并暂停、退出码1；PS1同目录时默认菜单选择0后暂停、退出码0。分别见`artifacts/cache/0.8.1/launcher-error-final-report.json`和`artifacts/cache/0.8.1/launcher-console-report.json`。首次测试的手写CMD包装引号有误，失败记录保留；改用正确的原生命令参数后通过。这些检查没有领取真实队列、登记真实登录任务、运行原生模板导出或打印，不能替代任务计划登录后的现场验收。
 
 2026-10-20早先一次获准的只读COM诊断因`ProcessID`未取得可证明独占的ID而停止；检查后曾观察到新`bartend`进程PID 35992保留。没有打开模板或执行SaveAs／Export／Print，也没有Quit或强杀该进程。随后补了canonical `ProcessId`及窗口PID回退和身份核验，但补丁仅经替身验证，未再次启动真实COM；不能据此判定已解决本机许可或引擎兼容问题。实际授权、SaveAs／PNG原生输出、登录后台、USB出纸及热敏效果仍未验收。其他业务与发布验证见[版本说明](CHANGELOG.md)，原网页打印与CSV路线继续可用，见[标签打印](LABEL_PRINTING.md)及[官方接口分析](BARTENDER_INTEGRATION.md)。

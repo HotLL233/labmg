@@ -1,6 +1,6 @@
 # 群晖 Docker 部署
 
-当前源码版本为**0.8.1（打印修复开发中）**，继续PostgreSQL18。两份YML、双架构三镜像包及Windows打印助手仍需本轮构建与门禁，尚未公开，状态以[版本说明](CHANGELOG.md)及同版本Release为准。同一PG18项目升级保留原runtime/、https/、项目名及UID/GID，不需要重新设置管理员；本轮不提供PG17／SQLite迁移。云端容器与网页预览不代替群晖、手机或USB实机验收。
+当前源码版本为**0.8.2（打印修复开发中）**，继续PostgreSQL18。两份YML、双架构三镜像包及Windows打印助手仍需本轮构建与门禁，尚未公开，状态以[版本说明](CHANGELOG.md)及同版本Release为准。同一PG18项目升级保留原runtime/、https/、项目名及UID/GID，不需要重新设置管理员；本轮不提供PG17／SQLite迁移。云端容器与网页预览不代替群晖、手机或USB实机验收。
 
 本版增加的 BarTender 助手在连接 USB 打印机的 Windows 电脑运行，不是群晖容器。模板、站点和任务存入原 PostgreSQL；无需公开数据库端口。Windows 侧保留固定运行目录及同一用户，更新脚本不删除配置和待回执；见[打印助手指南](BARTENDER_AGENT.md)。本轮未进行真实群晖、BarTender 或 USB 输出验收。
 
@@ -17,7 +17,7 @@
 
 1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。在 File Station 先创建 YML 旁的 `runtime/`、`https/` 两个父目录，避免 DSM 拒绝不存在的 bind 路径；已有部署保留原目录内容。
 2. 编辑 YML，将唯一配置行 LABOS_HTTPS_HOST 内的 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10；不要填协议、端口、路径。建议为群晖保留固定 IP。默认 HTTP 3000、HTTPS 8443；端口已占用时调整对应映射。
-3. 在线版创建项目并拉取镜像；本地版先在群晖导入同版本相应 amd64 或 arm64 TAR。本版每包均包含 labos:0.8.1、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。先按随包 SHA256SUMS 核对 TAR，架构须与群晖匹配。
+3. 在线版创建项目并拉取镜像；本地版先在群晖导入同版本相应 amd64 或 arm64 TAR。本版每包均包含 labos:0.8.2、postgres:18-bookworm、caddy:2.11.7-alpine；三者都要存在，不能仅上传应用镜像。先按随包 SHA256SUMS 核对 TAR，架构须与群晖匹配。
 4. 启动项目。labos-init 正常退出为 0，PostgreSQL 初始化后应用启动；labos-https 提供 HTTPS。空数据库首次打开网页设置管理员账号和密码。
 5. 按[手机 HTTPS 与扫码](SCANNING_HTTPS.md)将本项目根证书安装到手机并信任，再通过 https://群晖实际IP:8443 使用实时相机。
 
@@ -32,7 +32,7 @@ docker compose -f docker-compose.yml logs --tail=100 labos-init postgres labos l
 本地版示例（目标为 amd64，ARM64 换对应包名）：
 
 ~~~text
-docker load -i labos-0.8.1-linux-amd64.tar
+docker load -i labos-0.8.2-linux-amd64.tar
 docker compose -f docker-compose.local.yml config --quiet
 docker compose -f docker-compose.local.yml up -d --pull never
 ~~~
@@ -65,13 +65,13 @@ docker compose -f docker-compose.local.yml up -d --pull never
 
 可先停应用，使用 PostgreSQL 18 的 pg_dump/pg_dumpall 做逻辑备份，并备份附件和证书；或停整个项目后保存完整目录。不要在数据库运行时直接复制物理数据目录当作一致备份。数据库主版本升级需要独立方案，本次按用户确认不提供旧版迁移，也不删除原来的任何数据目录。
 
-可选环境变量仍可覆盖端口、UID/GID 和数据路径；本版本地应用镜像固定为 labos:0.8.1，避免残留 LABOS_IMAGE 将其切回远程仓库。没有自定义需求时直接编辑所选 YML 的 IP 即可。既有 PG18 更新须保留原项目名及完整 runtime/、https/，核对数据路径后仅按新版说明更新镜像；首次设置页面意外出现时先检查是否接入了空库。
+可选环境变量仍可覆盖端口、UID/GID 和数据路径；本版本地应用镜像固定为 labos:0.8.2，避免残留 LABOS_IMAGE 将其切回远程仓库。没有自定义需求时直接编辑所选 YML 的 IP 即可。既有 PG18 更新须保留原项目名及完整 runtime/、https/，核对数据路径后仅按新版说明更新镜像；首次设置页面意外出现时先检查是否接入了空库。
 
 业务功能沿用物资信息、Excel、申报验收和逐件库存流程，见[物资 API](MATERIAL_API.md)及[标签打印](LABEL_PRINTING.md)。配置解析及自动化容器验证不能代替实际群晖、手机证书、物理相机和 USB 打印验收；实际结果以版本记录为准。
 
 ## PostgreSQL 不健康但界面没有日志
 
-镜像页只说明镜像标签已存在，不能确认容器正常启动。本地版需要与所选 YML 完全一致的应用标签（0.6.2 为 `labos:0.6.2`，本版为 `labos:0.8.1`），以及 `postgres:18-bookworm`、`caddy:2.11.7-alpine`；另有 `postgres:18` 不会改变该 YML 使用的标签。先到 Container Manager 左侧“容器”，选择实际的 PostgreSQL 容器查看状态、退出码和日志。
+镜像页只说明镜像标签已存在，不能确认容器正常启动。本地版需要与所选 YML 完全一致的应用标签（0.6.2 为 `labos:0.6.2`，本版为 `labos:0.8.2`），以及 `postgres:18-bookworm`、`caddy:2.11.7-alpine`；另有 `postgres:18` 不会改变该 YML 使用的标签。先到 Container Manager 左侧“容器”，选择实际的 PostgreSQL 容器查看状态、退出码和日志。
 
 若仍无可用日志，在 **NAS 的 SSH 终端**执行以下只读命令；`labos-postgres-1` 是本次反馈中的名称，其他项目应替换为自己的实际容器名：
 

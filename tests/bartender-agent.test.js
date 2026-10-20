@@ -41,7 +41,7 @@ test('station HTTP transport sends bearer only to its origin and refuses redirec
   const code = [
     `. '${script}' -Library`,
     `$configuration=@{serverUrl='http://127.0.0.1:${server.address().port}';token='MOCK-ONLY-TRANSPORT-KEY'}`,
-    `$response=Invoke-StationApi $configuration '/claim' @{agentVersion='0.8.1'}`,
+    `$response=Invoke-StationApi $configuration '/claim' @{agentVersion=$script:AgentVersion}`,
     `if($null -ne $response.job){throw 'unexpected response'}`,
     `$rejected=$false;try{Invoke-StationApi $configuration '/redirect' @{}|Out-Null}catch{$rejected=$true}`,
     `if(-not $rejected){throw 'redirect must be rejected'}`,
@@ -58,11 +58,11 @@ test('station HTTP transport sends bearer only to its origin and refuses redirec
   assert.equal(received.length, 6);
   assert.deepEqual(received.map(item => item.path), ['/api/printing/agent/claim', '/api/printing/agent/redirect', '/api/printing/agent/status/401', '/api/printing/agent/status/403', '/api/printing/agent/status/409', '/api/printing/agent/status/503']);
   assert.equal(received[0].authorization, 'Bearer MOCK-ONLY-TRANSPORT-KEY');
-  assert.equal(JSON.parse(received[0].body).agentVersion, '0.8.1');
+  assert.equal(JSON.parse(received[0].body).agentVersion, '0.8.2');
 });
 
 test('double-click console retains initialization errors and never claims before configuration', { skip: process.platform !== 'win32' }, t => {
-  const cache = path.join(__dirname, '../artifacts/cache/0.8.1');
+  const cache = path.join(__dirname, '../artifacts/cache/0.8.2');
   fs.mkdirSync(cache, { recursive: true });
   const fixture = fs.mkdtempSync(path.join(cache, 'console-'));
   t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));

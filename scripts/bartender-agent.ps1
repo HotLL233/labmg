@@ -32,7 +32,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:AgentVersion = '0.8.1'
+$script:AgentVersion = '0.8.2'
 $script:AgentScriptPath = $PSCommandPath
 $script:LabelFields = @('Code','QRPayload','Name','CatalogCode','Specification','Unit','Region','Warehouse','Location','Batch','ExpiryDate','Status')
 
