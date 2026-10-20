@@ -23,23 +23,8 @@ env:
   SOURCE: https://github.com/HotLL233/labmg
 
 jobs:
-  windows-printing:
-    if: github.repository == 'HotLL233/labmg'
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: node --test tests/bartender-agent.test.js
-
   publish:
     if: github.repository == 'HotLL233/labmg'
-    needs: windows-printing
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -90,7 +75,7 @@ jobs:
       - uses: docker/setup-compose-action@v1
         with:
           version: v5.5.1
-      - run: node --test tests/database.test.js tests/backend.test.js tests/frontend.test.js tests/materials.test.js tests/material-xlsx.test.js tests/scanner.test.js tests/labels.test.js tests/user-csv.test.js tests/user-import-api.test.js tests/printing.test.js tests/printing-ui.test.js tests/compose.test.js tests/https.test.js
+      - run: node --test tests/database.test.js tests/backend.test.js tests/frontend.test.js tests/materials.test.js tests/material-xlsx.test.js tests/scanner.test.js tests/labels.test.js tests/user-csv.test.js tests/user-import-api.test.js tests/printing-retirement.test.js tests/compose.test.js tests/https.test.js
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3

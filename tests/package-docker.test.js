@@ -16,7 +16,7 @@ test('offline packaging saves three matching images and rejects missing PostgreS
     fs.rmSync(fixture, { recursive: true, force: true });
   });
   for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'config']) fs.mkdirSync(path.join(fixture, name));
-  for (const name of ['scripts/package.ps1', 'scripts/package-docker.ps1', 'scripts/bartender-agent.ps1', 'scripts/bartender-agent.cmd', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'docs/SYNOLOGY.md', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'docs/BARTENDER_AGENT.md', 'config/.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
+  for (const name of ['scripts/package.ps1', 'scripts/package-docker.ps1', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'docs/SYNOLOGY.md', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'config/.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
   const commandsFile = path.join(fixture, 'artifacts', 'mock-commands.json');
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   const run = ({ expected = 0, mismatch = '', badDigest = '', architectures = 'amd64,arm64' } = {}) => {
@@ -68,17 +68,13 @@ test('offline packaging saves three matching images and rejects missing PostgreS
     return { metadataPath, metadata, archive, digest, originalHash: digest() };
   });
   for (const file of ['docker-compose.yml', 'docker-compose.local.yml']) assert.deepEqual(fs.readFileSync(path.join(release, file)), fs.readFileSync(path.join(root, 'deploy', file)));
-  assert.deepEqual(fs.readdirSync(release).filter(name => !name.endsWith('.tar') && !name.endsWith('.json') && !name.endsWith('.zip')).sort(), ['BARTENDER_AGENT.md', 'bartender-agent.ps1', 'LABEL_PRINTING.md', 'SCANNING_HTTPS.md', 'SYNOLOGY.md', 'docker-compose.local.yml', 'docker-compose.yml'].sort());
-  for (const [source, asset] of [['docs/BARTENDER_AGENT.md', 'BARTENDER_AGENT.md'], ['scripts/bartender-agent.ps1', 'bartender-agent.ps1']]) assert.deepEqual(fs.readFileSync(path.join(release, asset)), fs.readFileSync(path.join(root, source)), 'standalone printing attachment must match frozen source bytes');
-  const sourceManifest = JSON.parse(fs.readFileSync(path.join(release, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''));
-  for (const name of ['docs/BARTENDER_AGENT.md', 'scripts/bartender-agent.ps1', 'scripts/bartender-agent.cmd']) {
-    assert.equal(sourceManifest.sources.find(source => source.path === name)?.sha256, crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex'), 'source ZIP must include the same printing source');
-  }
+  assert.deepEqual(fs.readdirSync(release).filter(name => !name.endsWith('.tar') && !name.endsWith('.json') && !name.endsWith('.zip')).sort(), ['LABEL_PRINTING.md', 'SCANNING_HTTPS.md', 'SYNOLOGY.md', 'docker-compose.local.yml', 'docker-compose.yml'].sort());
+  assert.deepEqual(fs.readFileSync(path.join(release, 'LABEL_PRINTING.md')), fs.readFileSync(path.join(root, 'docs/LABEL_PRINTING.md')), 'standalone label printing guide must match frozen source bytes');
   assert.deepEqual(run(), [], 'verified reuse must not rebuild or pull dependencies');
-  const printedAgent = path.join(release, 'bartender-agent.ps1'), originalAgent = fs.readFileSync(printedAgent);
-  fs.writeFileSync(printedAgent, 'different existing printing attachment');
-  assert.deepEqual(run({ expected: 1 }), [], 'different existing printing attachment must fail before Docker mutation');
-  fs.writeFileSync(printedAgent, originalAgent);
+  const labelGuide = path.join(release, 'LABEL_PRINTING.md'), originalGuide = fs.readFileSync(labelGuide);
+  fs.writeFileSync(labelGuide, 'different existing label printing guide');
+  assert.deepEqual(run({ expected: 1 }), [], 'different existing deployment attachment must fail before Docker mutation');
+  fs.writeFileSync(labelGuide, originalGuide);
   const first = artifacts[0];
   for (const missing of ['databaseImage', 'httpsImage', 'database', 'https-proxy']) {
     const invalid = structuredClone(first.metadata);

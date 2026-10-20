@@ -60,8 +60,6 @@ try {
         'docs/SYNOLOGY.md' = 'SYNOLOGY.md'
         'docs/SCANNING_HTTPS.md' = 'SCANNING_HTTPS.md'
         'docs/LABEL_PRINTING.md' = 'LABEL_PRINTING.md'
-        'docs/BARTENDER_AGENT.md' = 'BARTENDER_AGENT.md'
-        'scripts/bartender-agent.ps1' = 'bartender-agent.ps1'
     }
     foreach ($source in $deploymentFiles.Keys) {
         $destination = Get-ArtifactPath (Join-Path $release $deploymentFiles[$source]) $release

@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 
-ARG VERSION=0.8.2
+ARG VERSION=0.9.0
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/HotLL233/labmg" \
       org.opencontainers.image.version=$VERSION \
@@ -14,8 +14,6 @@ WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 COPY --chown=node:node src ./src
-COPY --chown=node:node scripts/bartender-agent.ps1 ./scripts/bartender-agent.ps1
-COPY --chown=node:node scripts/bartender-agent.cmd ./scripts/bartender-agent.cmd
 COPY --chown=node:node docs/licenses ./docs/licenses
 COPY --chown=node:node docs/THIRD_PARTY.md ./docs/THIRD_PARTY.md
 RUN mkdir -p /var/lib/labos && chown node:node /var/lib/labos

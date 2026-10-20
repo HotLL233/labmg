@@ -201,6 +201,8 @@ CREATE TABLE IF NOT EXISTS material_stock_units(
   CREATE INDEX IF NOT EXISTS material_unit_batch ON material_stock_units(catalog_id,region_id,warehouse,batch,expiry_date,status);
   CREATE INDEX IF NOT EXISTS material_unit_source ON material_stock_units(source_movement_id);
   CREATE INDEX IF NOT EXISTS material_unit_exit ON material_stock_units(exit_movement_id);
+-- Retired native-printing storage: retain schema and rows for existing database backups.
+-- No application API reads, claims, expires or changes these historical tasks.
 CREATE TABLE IF NOT EXISTS printing_templates(
   id TEXT PRIMARY KEY, name TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL,
   size BIGINT NOT NULL CHECK(size>0 AND size<=4194304), content_base64 TEXT NOT NULL, fields TEXT NOT NULL,

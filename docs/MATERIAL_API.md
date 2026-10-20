@@ -1,8 +1,10 @@
-# 物资与打印 API 合同（0.8.0）
+# 物资 API 合同（0.9.0）
 
-实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore, labelRowsForPrint}`，方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验与回导已经发布，其后实际 PG18 CI159/159及容器证据见[版本说明](CHANGELOG.md)，替代本页此前“CI尚待执行、镜像未发布”的过期状态。0.8.0 新增打印 API，验证结果单独记录，不复用旧版结论。
+实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验与回导已经发布，其后实际 PG18 CI159/159及容器证据见[版本说明](CHANGELOG.md)，替代本页此前“CI尚待执行、镜像未发布”的过期状态。0.8.0 新增打印 API，验证结果单独记录，不复用旧版结论。
 
-## 0.8.0 打印任务
+0.9.0按用户决定删除全部BarTender活动接口、助手下载和打印站／队列模块，普通鉴权仍先执行，已登录用户访问旧路径返回404。旧表惰性保留，不再处理过期任务，也不加入物资JSON恢复。以下两段打印合同仅为历史，不是当前API。
+
+## 历史：0.8.0打印任务（0.9.0已撤除）
 
 打印入口为独立 `createPrinting(...)`，共同前缀 `/api/printing`；下列模板、站点、任务ID均为UUID字符串，物资单件ID仍为正整数。网页接口需登录及 `materials.read`；模板维护另需 ADMIN/MATERIAL 和 `materials.catalog.write`，打印站维护需 `permissions.write`。普通人员仅能查看和操作本人任务，任一上述管理权限可管理任务及填写人工确认。
 
@@ -81,7 +83,7 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 - `POST /scan/resolve` 命中单件 → `{kind:'unit',catalog,unit,batch}`；已领用／作废仍可追溯，但不可重复出库。单件码指向既有入库实物，不能拿它再验收入库。
 - 逐件 `POST /issues/:id/issue` 及减少库存的 `POST /stock/adjustments` 必须传 `unitIds:number[]` 或 `unitCodes:string[]`，两者只选一个。编号不得重复，必须同一精确批次且仍在库，个数须等于申请／调整数量；检查、状态更改与扣库同事务。按数量主档拒绝这两个字段。
 
-申请仍只记录批次和数量，不预占单件；扫码单件可定位批次并预填申请一件，发放时扫描实际取出的每件。标签支持 Code128 条形码及二维码，两者表示同一永久单件编号；重打印不重新发号。
+申请仍只记录批次和数量，不预占单件；扫码单件可定位批次并预填申请一件，发放时扫描实际取出的每件。0.9.0标签仅输出二维码与基础信息，二维码仍表示原永久单件编号，重打印不重新发号；原Code128生成已撤除，包装码读取继续保留。
 
 ## 包装条码与库存二维码
 
@@ -232,7 +234,7 @@ schema 5 新增 material_openings 与 material_opening_items，严格检查草�
 
 `backup(user)`、`restore(payload,user)` 均返回 Promise；备份在事务锁内一致读取，恢复完整校验并事务写入，调用方必须等待提交成功后再响应。根层通用台账/系统备份明确排除新版物资，物资须使用专用备份；组合包不会被旧恢复静默忽略。单个 JSON 最多25 MiB、附件原始总量最多20 MiB，超过时拒绝生成无法在线恢复的包。业务备份不是 PostgreSQL、附件及部署秘密文件的灾备替代，部署级备份按 [群晖说明](SYNOLOGY.md)停服完整保存，不在线复制正在写入的 PostgreSQL 目录。
 
-## BarTender 打印与预览（独立 `/api/printing`）
+## 历史：BarTender打印与预览（0.9.0已撤除）
 
 网页接口要求登录及`materials.read`；模板维护另需ADMIN/MATERIAL及信息库维护权限，打印站维护需`permissions.write`。普通人员仅能读写自己的任务，管理人员按打印权限查看全部。模板／任务／打印站随完整PostgreSQL备份，不加入上述物资JSON恢复。
 

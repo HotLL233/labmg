@@ -224,21 +224,10 @@ test('camera device, occupancy, policy and interrupted startup failures explain 
   }
 });
 
-test('single-item Code128 labels produce a real decodable image and reject unsupported or oversized contents', async () => {
-  const app = fixture(), text = 'LAB-20261017-000001';
-  app.context.ZXingWASM.writeBarcode = (value, options) => {
-    app.writes.push({ text: value, options }); return zxing.writeBarcode(value, options);
-  };
-  const image = await app.api.createBarcode(text);
-  assert.ok(image instanceof Blob);
-  const results = await zxing.readBarcodes(new Uint8Array(await image.arrayBuffer()), { formats: ['Code128'], maxNumberOfSymbols: 2 });
-  assert.equal(results.length, 1); assert.equal(results[0].text, text); assert.equal(results[0].format, 'Code128');
-  assert.equal(app.writes[0].options.addQuietZones, true); assert.equal(app.writes[0].options.addHRT, true);
-  for (const value of ['', ' ', '瓶-0001', 'LAB\n0001', 'x'.repeat(129), null]) await assert.rejects(app.api.createBarcode(value), /1–128.*ASCII/);
-  app.context.ZXingWASM.writeBarcode = async () => ({ image: new Blob(['boundary']), error: '' });
-  assert.ok(await app.api.createBarcode('x'.repeat(128)) instanceof Blob);
-  app.context.ZXingWASM.writeBarcode = async () => ({ error: 'encoding failed' });
-  await assert.rejects(app.api.createBarcode(text), /条码生成失败/);
+test('only QR generation is exposed while packaging barcode recognition stays supported', () => {
+  const app = fixture();
+  assert.equal(typeof app.api.createQr, 'function');
+  assert.equal(app.api.createBarcode, undefined);
 });
 
 test('multiple visible codes do not select an arbitrary target and missing WASM keeps manual fallback', async () => {

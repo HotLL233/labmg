@@ -209,15 +209,8 @@ async function createQr(text) {
   return result.image;
 }
 
-async function createBarcode(text) {
-  if (typeof text !== 'string' || !/^[\x20-\x7e]{1,128}$/.test(text) || !text.trim()) throw Error('条码内容须为 1–128 个可打印 ASCII 字符。');
-  const library = await engine();
-  const result = await library.writeBarcode(text, { format: 'Code128', scale: 3, addQuietZones: true, addHRT: true });
-  if (result.error || !result.image) throw Error('条码生成失败，请检查编码内容后重试。');
-  return result.image;
-}
 
-globalThis.MaterialScanner = Object.freeze({ scan, close, createQr, createBarcode });
+globalThis.MaterialScanner = Object.freeze({ scan, close, createQr });
 addEventListener('pagehide', close);
 addEventListener('hashchange', close);
 addEventListener('popstate', close);

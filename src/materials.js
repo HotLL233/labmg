@@ -520,15 +520,6 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       status: row.status, sourceMovementId: row.source_movement_id, exitMovementId: row.exit_movement_id,
       sourceReceiptId: source.receipt_id, createdAt: row.created_at };
   }
-  async function labelRowsForPrint(user, unitIds) {
-    if (!permit(user, 'materials.read')) error(403, '没有物资读取权限');
-    if (!Array.isArray(unitIds) || !unitIds.length || unitIds.length > 1000 ||
-      unitIds.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(unitIds).size !== unitIds.length) error(400, '请选择1至1000个不重复的有效单件ID');
-    const rows = await all(`SELECT * FROM material_stock_units WHERE id IN (${unitIds.map(() => '?').join(',')})`, ...unitIds);
-    const byId = new Map(rows.map(row => [row.id, row]));
-    if (rows.length !== unitIds.length) error(404, '部分单件不存在，请刷新后重新选择');
-    return mapRows(unitIds, id => unitView(byId.get(id)));
-  }
   async function listUnits(url, user) {
     const filters = [], args = [];
     for (const [parameter, column] of [['catalogId', 'catalog_id'], ['regionId', 'region_id'], ['warehouse', 'warehouse'], ['batch', 'batch'], ['expiryDate', 'expiry_date']]) {
@@ -2121,7 +2112,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     res.end(buffer);
   }
 
-  return { handle, backup, restore, labelRowsForPrint };
+  return { handle, backup, restore };
 }
 
 module.exports = createMaterials;
