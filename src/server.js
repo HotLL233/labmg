@@ -118,10 +118,11 @@ async function api(req,res,url){
   return (await startSession(res,current))
  }
  if(url.pathname==='/api/auth/logout'){const token=sessionToken(req);if(token)(await db.prepare('DELETE FROM sessions WHERE token=?').run(token));res.setHeader('Set-Cookie','labos_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');return send(res,200,{ok:true})}if(url.pathname==='/api/auth/me'){const required=(await setupRequired());return send(res,200,{user:publicUser((await tokenUser(req))),setupRequired:required,...(required?{setupUsername}:{})})}
- if(url.pathname==='/api/printing/agent-script'&&req.method==='GET'){
+ if(['/api/printing/agent-script','/api/printing/agent-launcher'].includes(url.pathname)&&req.method==='GET'){
   const user=await tokenUser(req);if(!user)return send(res,401,{error:'请先登录'});if(!requirePermission(user,'materials.read',res))return;
-  const agentFile=path.join(ROOT,'scripts/bartender-agent.ps1');if(!fs.existsSync(agentFile))return send(res,503,{error:'打印端脚本尚未准备完成'});
-  res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':'attachment; filename="bartender-agent.ps1"','Cache-Control':'no-store'});return fs.createReadStream(agentFile).on('error',()=>res.destroy()).pipe(res);
+  const fileName=url.pathname.endsWith('agent-launcher')?'bartender-agent.cmd':'bartender-agent.ps1';
+  const agentFile=path.join(ROOT,'scripts',fileName);if(!fs.existsSync(agentFile))return send(res,503,{error:'打印端文件尚未准备完成'});
+  res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':`attachment; filename="${fileName}"`,'Cache-Control':'no-store'});return fs.createReadStream(agentFile).on('error',()=>res.destroy()).pipe(res);
  }
  if(await printing.handle(req,res,url))return;
  const u=(await tokenUser(req));if(url.pathname.startsWith('/api/')&&!u)return send(res,401,{error:'请先登录'});

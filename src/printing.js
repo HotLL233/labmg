@@ -10,8 +10,13 @@ const COLUMNS = Object.freeze([
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const TEMPLATE_META = 'id,name,file_name,sha256,size,fields,active,created_at';
-const STATION_META = 'id,name,printer_name,enabled,last_seen_at';
-const JOB_META = 'id,status,station_id,station_name,printer_name,template_id,template_name,template_sha256,unit_ids,row_count,created_by,created_at,updated_at,message,reason,reprint_of,confirmed_by,confirmed_at,confirmation_reason';
+const STATION_META = 'id,name,printer_name,enabled,last_seen_at,agent_version';
+const JOB_META = 'id,status,kind,paper,(preview_base64 IS NOT NULL) AS has_preview,station_id,station_name,printer_name,template_id,template_name,template_sha256,unit_ids,row_count,created_by,created_at,updated_at,message,reason,reprint_of,confirmed_by,confirmed_at,confirmation_reason';
+const modernAgent = version => {
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) return false;
+  const [major, minor, patch] = version.split('.').map(Number);
+  return [major, minor, patch].every(Number.isSafeInteger) && (major > 0 || minor > 8 || minor === 8 && patch >= 1);
+};
 
 function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, labelRows }) {
   const one = (sql, ...args) => db.prepare(sql).get(...args);
@@ -36,12 +41,38 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
   function keys(input, allowed) {
     if (Object.keys(input).some(key => !allowed.includes(key))) error(400, '包含不支持的字段，请勿提交打印路径、份数、XML或标签内容');
   }
+  function paper(value) {
+    if (value == null) return null;
+    if (typeof value !== 'object' || Array.isArray(value)) error(400, '纸张设置无效');
+    keys(value, ['widthMm', 'heightMm', 'orientation']);
+    const { widthMm, heightMm, orientation } = value;
+    if (![widthMm, heightMm].every(number => typeof number === 'number' && Number.isFinite(number) && number >= 5 && number <= 300 && Math.abs(number * 1000 - Math.round(number * 1000)) < 0.000001)) error(400, '纸张宽高须为5至300毫米，最多3位小数');
+    if (!['portrait', 'landscape'].includes(orientation) || orientation === 'portrait' && widthMm > heightMm || orientation === 'landscape' && widthMm < heightMm) error(400, '纸张方向须与宽高一致：纵向宽不大于高，横向宽不小于高');
+    return { widthMm, heightMm, orientation };
+  }
+  function preview(value) {
+    if (typeof value !== 'string' || value.length > 2796204 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) error(400, '原生预览须为不超过2MiB的规范PNG Base64');
+    const image = Buffer.from(value, 'base64');
+    if (image.length < 45 || image.length > 2097152 || image.toString('base64') !== value || !image.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) || image.readUInt32BE(8) !== 13 || image.toString('ascii',12,16) !== 'IHDR' || ![image.readUInt32BE(16), image.readUInt32BE(20)].every(number => number > 0 && number <= 4096) || image.toString('ascii',image.length - 8,image.length - 4) !== 'IEND' || image.readUInt32BE(image.length - 12) !== 0) error(400, '原生预览必须是尺寸不超过4096×4096的PNG，最大2MiB');
+    return value;
+  }
   const templateView = row => ({ id: row.id, name: row.name, fileName: row.file_name, sha256: row.sha256, size: row.size,
     fields: JSON.parse(row.fields), active: Boolean(row.active), createdAt: row.created_at });
-  const stationView = row => ({ id: row.id, name: row.name, printerName: row.printer_name, enabled: Boolean(row.enabled), lastSeenAt: row.last_seen_at });
-  const jobView = row => ({ id: row.id, status: row.status, stationId: row.station_id, stationName: row.station_name, printerName: row.printer_name,
+  const stationView = row => {
+    const lastSeen = Date.parse(row.last_seen_at), age = Date.now() - lastSeen;
+    return { id: row.id, name: row.name, printerName: row.printer_name, enabled: Boolean(row.enabled), lastSeenAt: row.last_seen_at,
+      agentVersion: row.agent_version, connectionStatus: !row.enabled ? 'disabled' : !row.last_seen_at ? 'never_connected' : Number.isFinite(lastSeen) && age >= -5000 && age <= 60000 ? 'online' : 'offline' };
+  };
+  const visibleMessage = (row, user) => {
+    if (!row.message || jobManager(user)) return row.message;
+    if (row.status === 'unknown') return row.kind === 'preview' ? '原生预览结果未确认，请联系管理员检查打印助手。此任务不会出纸。' : '打印结果未确认，请先核对实际出纸数量，再联系管理员处理。';
+    if (row.status === 'failed') return row.message.startsWith('PREFLIGHT_REJECTED_CONFIGURED_PRINTER_NOT_FOUND') ? '打印站没有找到配置的打印机，请联系管理员核对打印机名称。' : 'Windows 打印端报告失败，请联系管理员检查模板、打印机和打印端配置。';
+    if (row.status === 'submitted') return row.kind === 'preview' ? '原生模板图已生成，此任务不会出纸。' : '打印引擎已提交任务，仍需核对实际出纸。';
+    return '';
+  };
+  const jobView = (row, user) => ({ id: row.id, status: row.status, kind: row.kind, paper: row.paper ? JSON.parse(row.paper) : null, hasPreview: Boolean(row.has_preview || row.preview_base64), stationId: row.station_id, stationName: row.station_name, printerName: row.printer_name,
     templateId: row.template_id, templateName: row.template_name, templateSha256: row.template_sha256, unitIds: JSON.parse(row.unit_ids),
-    count: row.row_count, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at, message: row.message,
+    count: row.row_count, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at, message: visibleMessage(row, user),
     reason: row.reason, reprintOf: row.reprint_of, confirmedBy: row.confirmed_by, confirmedAt: row.confirmed_at, confirmationReason: row.confirmation_reason });
   async function job(id, user) {
     const row = await one('SELECT * FROM printing_jobs WHERE id=?', identifier(id, '任务ID'));
@@ -78,15 +109,16 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
       if (await one("SELECT 1 FROM printing_jobs WHERE station_id=? AND status IN ('claimed','printing')", current.id)) return reply({ job: null });
       const next = await one("SELECT * FROM printing_jobs WHERE station_id=? AND status='queued' ORDER BY created_at,id LIMIT 1", current.id);
       if (!next) return reply({ job: null });
+      if ((next.kind === 'preview' || next.paper) && !modernAgent(version)) return reply({ job: null, blockedReason: 'AGENT_UPGRADE_REQUIRED', minimumAgentVersion: '0.8.1' });
       const leaseToken = crypto.randomBytes(32).toString('base64url'), leaseExpiresAt = Date.now() + 120000;
       await run("UPDATE printing_jobs SET status='claimed',lease_hash=?,lease_expires_at=?,updated_at=? WHERE id=? AND status='queued'", hash(leaseToken), leaseExpiresAt, now(), next.id);
-      return reply({ job: { id: next.id, template: { id: next.template_id, fileName: next.template_file_name, sha256: next.template_sha256,
+      return reply({ job: { id: next.id, kind: next.kind, paper: next.paper ? JSON.parse(next.paper) : null, template: { id: next.template_id, fileName: next.template_file_name, sha256: next.template_sha256,
         contentBase64: next.template_content_base64, fields: JSON.parse(next.template_fields) }, printerName: next.printer_name,
       rows: JSON.parse(next.rows_snapshot), leaseToken, leaseExpiresAt: new Date(leaseExpiresAt).toISOString() } });
     }
     const match = route.match(/^\/agent\/jobs\/([^/]+)\/(start|result)$/);
     if (!match) error(404, '打印端接口不存在');
-    keys(input, match[2] === 'start' ? ['leaseToken'] : ['leaseToken', 'status', 'message']);
+    keys(input, match[2] === 'start' ? ['leaseToken'] : ['leaseToken', 'status', 'message', 'previewBase64']);
     const id = identifier(match[1], '任务ID');
     const currentJob = await one('SELECT * FROM printing_jobs WHERE id=? AND station_id=?', id, current.id);
     if (!currentJob) error(404, '打印任务不存在');
@@ -100,9 +132,11 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
     }
     if (!['submitted', 'failed', 'unknown'].includes(input.status)) error(400, '引擎结果状态无效');
     const message = text(input.message ?? '', '打印结果', 2000, true);
-    if (currentJob.status === input.status && currentJob.result_status === input.status && currentJob.result_message === message) return reply({ ok: true, status: currentJob.status });
+    const image = currentJob.kind === 'preview' && input.status === 'submitted' ? preview(input.previewBase64) : null;
+    if (image === null && input.previewBase64 !== undefined) error(400, '只有预览任务成功时可以提交PNG');
+    if (currentJob.status === input.status && currentJob.result_status === input.status && currentJob.result_message === message && currentJob.preview_base64 === image) return reply({ ok: true, status: currentJob.status });
     if (currentJob.status !== 'printing' && !(currentJob.status === 'claimed' && ['failed', 'unknown'].includes(input.status))) return reply({ error: '任务未启动、已处理或租约已失效，不能覆盖结果' }, 409);
-    await run('UPDATE printing_jobs SET status=?,message=?,result_status=?,result_message=?,lease_expires_at=NULL,updated_at=? WHERE id=?', input.status, message, input.status, message, now(), id);
+    await run('UPDATE printing_jobs SET status=?,message=?,result_status=?,result_message=?,preview_base64=?,lease_expires_at=NULL,updated_at=? WHERE id=?', input.status, message, input.status, message, image, now(), id);
     await audit(null, 'RESULT', 'printing_jobs', id, input.status);
     return reply({ ok: true, status: input.status });
   }
@@ -115,11 +149,14 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
     if (!hasPermission(user, 'materials.read')) error(403, '没有物资读取权限');
     const reply = (value, status = 200) => send(res, status, value);
     await expire();
-    if (route === '/config' && method === 'GET') return reply({
-      templates: (await all(`SELECT ${TEMPLATE_META} FROM printing_templates ORDER BY created_at,id`)).map(templateView),
-      stations: (await all(`SELECT ${STATION_META} FROM printing_stations ORDER BY created_at,id`)).map(stationView),
-      capabilities: { manageTemplates: manager(user), manageStations: stationManager(user), submit: true }
-    });
+    if (route === '/config' && method === 'GET') {
+      const busy = new Set((await all("SELECT station_id FROM printing_jobs WHERE status IN ('claimed','printing')")).map(row => row.station_id));
+      return reply({
+        templates: (await all(`SELECT ${TEMPLATE_META} FROM printing_templates ORDER BY created_at,id`)).map(templateView),
+        stations: (await all(`SELECT ${STATION_META} FROM printing_stations ORDER BY created_at,id`)).map(row => ({ ...stationView(row), busy: busy.has(row.id) })),
+        stationContactTimeoutSeconds: 60, serverTime: now(), capabilities: { manageTemplates: manager(user), manageStations: stationManager(user), submit: true }
+      });
+    }
     if (route === '/templates' && method === 'POST') {
       if (!manager(user)) error(403, '需要物资模板管理权限');
       keys(input, ['name', 'fileName', 'contentBase64', 'fields']);
@@ -184,18 +221,21 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
       }
     }
     if (route === '/jobs' && method === 'POST') {
-      keys(input, ['stationId', 'templateId', 'unitIds', 'idempotencyKey', 'reason', 'reprintOf']);
+      keys(input, ['stationId', 'templateId', 'unitIds', 'idempotencyKey', 'reason', 'reprintOf', 'kind', 'paper']);
+      const kind = input.kind === undefined ? 'print' : input.kind, sheet = paper(input.paper);
+      if (!['print', 'preview'].includes(kind)) error(400, '任务类型须为print或preview');
       const stationId = identifier(input.stationId, '打印站ID'), templateId = identifier(input.templateId, '模板ID');
       const idempotencyKey = text(input.idempotencyKey, '请求号', 128), reason = text(input.reason ?? '', '打印原因', 1000, true);
       const unitIds = input.unitIds;
       if (!Array.isArray(unitIds) || !unitIds.length || unitIds.length > 1000 || unitIds.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(unitIds).size !== unitIds.length) error(400, '请选择1至1000个不重复的有效单件ID');
       const reprintOf = input.reprintOf == null ? null : identifier(input.reprintOf, '原任务ID');
+      if (kind === 'preview' && (unitIds.length !== 1 || reprintOf)) error(400, '原生预览须选择1件，不能作为重印任务');
       if (reprintOf && !reason) error(400, '重印必须填写原因');
-      const digest = hash(JSON.stringify({ stationId, templateId, unitIds, reason, reprintOf }));
+      const digest = hash(JSON.stringify({ stationId, templateId, unitIds, reason, reprintOf, ...(kind !== 'print' || sheet ? { kind, paper: sheet } : {}) }));
       const existing = await one(`SELECT ${JOB_META},payload_digest FROM printing_jobs WHERE created_by=? AND idempotency_key=?`, user.id, idempotencyKey);
       if (existing) {
         if (existing.payload_digest !== digest) error(409, '同一请求号不能用于不同打印内容');
-        return reply(jobView(existing), 201);
+        return reply(jobView(existing, user), 201);
       }
       const target = await station(stationId), template = await one('SELECT * FROM printing_templates WHERE id=?', templateId);
       if (!target.enabled) error(409, '打印站已停用');
@@ -203,6 +243,8 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
       let rows;
       if (reprintOf) {
         const previous = await job(reprintOf, user);
+        if (previous.kind !== 'print') error(400, '原生预览任务不能重印');
+        if (previous.paper !== (sheet ? JSON.stringify(sheet) : null)) error(400, '重印必须保持原任务纸张设置');
         if (previous.station_id !== stationId || previous.template_id !== templateId || previous.unit_ids !== JSON.stringify(unitIds)) error(400, '重印必须保持原任务的打印站、模板和单件顺序');
         if (['queued', 'claimed', 'printing'].includes(previous.status)) error(409, '原任务尚未结束，不能重印');
         rows = JSON.parse(previous.rows_snapshot);
@@ -213,11 +255,11 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
       }
       const id = crypto.randomUUID(), createdAt = now();
       await run(`INSERT INTO printing_jobs(id,station_id,station_name,printer_name,template_id,template_name,template_file_name,template_sha256,
-        template_content_base64,template_fields,unit_ids,rows_snapshot,row_count,status,created_by,created_at,updated_at,idempotency_key,payload_digest,reason,reprint_of)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?,?,?,?,?,?)`, id, target.id, target.name, target.printer_name, template.id, template.name, template.file_name,
-      template.sha256, template.content_base64, template.fields, JSON.stringify(unitIds), JSON.stringify(rows), rows.length, user.id, createdAt, createdAt, idempotencyKey, digest, reason, reprintOf);
+        template_content_base64,template_fields,unit_ids,rows_snapshot,row_count,status,created_by,created_at,updated_at,idempotency_key,payload_digest,reason,reprint_of,kind,paper)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?,?,?,?,?,?,?,?)`, id, target.id, target.name, target.printer_name, template.id, template.name, template.file_name,
+      template.sha256, template.content_base64, template.fields, JSON.stringify(unitIds), JSON.stringify(rows), rows.length, user.id, createdAt, createdAt, idempotencyKey, digest, reason, reprintOf, kind, sheet ? JSON.stringify(sheet) : null);
       await audit(user, reprintOf ? 'REPRINT' : 'CREATE', 'printing_jobs', id, reason);
-      return reply(jobView(await job(id, user)), 201);
+      return reply(jobView(await job(id, user), user), 201);
     }
     if (route === '/jobs' && method === 'GET') {
       const parameter = (name, fallback, maximum) => {
@@ -229,28 +271,29 @@ function createPrinting({ db, body, send, fail, log, hasPermission, tokenUser, l
       const page = parameter('page', 1, 1000000), pageSize = parameter('pageSize', 20, 100), where = jobManager(user) ? '' : ' WHERE created_by=?';
       const args = jobManager(user) ? [] : [user.id];
       const total = (await one('SELECT COUNT(*) AS total FROM printing_jobs' + where, ...args)).total;
-      return reply({ items: (await all(`SELECT ${JOB_META} FROM printing_jobs` + where + ' ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?', ...args, pageSize, (page - 1) * pageSize)).map(jobView), total, page, pageSize });
+      return reply({ items: (await all(`SELECT ${JOB_META} FROM printing_jobs` + where + ' ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?', ...args, pageSize, (page - 1) * pageSize)).map(row => jobView(row, user)), total, page, pageSize });
     }
     match = route.match(/^\/jobs\/([^/]+)(\/(cancel|confirm))?$/);
     if (match) {
       const row = await job(match[1], user);
-      if (method === 'GET' && !match[2]) return reply({ ...jobView(row), rows: JSON.parse(row.rows_snapshot) });
+      if (method === 'GET' && !match[2]) return reply({ ...jobView(row, user), rows: JSON.parse(row.rows_snapshot), ...(row.preview_base64 ? { previewBase64: row.preview_base64 } : {}) });
       if (method === 'POST' && match[3] === 'cancel') {
         keys(input, []);
         if (!['queued', 'claimed'].includes(row.status)) return reply({ error: '任务已经启动或结束，不能取消；请人工核对打印状态' }, 409);
         await run("UPDATE printing_jobs SET status='cancelled',lease_hash=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?", now(), row.id);
         await audit(user, 'CANCEL', 'printing_jobs', row.id);
-        return reply(jobView(await job(row.id, user)));
+        return reply(jobView(await job(row.id, user), user));
       }
       if (method === 'POST' && match[3] === 'confirm') {
         keys(input, ['reason']);
         if (!jobManager(user)) error(403, '需要打印管理权限进行人工确认');
+        if (row.kind === 'preview') error(400, '原生预览不出纸，不能人工确认出纸');
         const reason = text(input.reason, '人工核对说明', 1000);
         if (!['submitted', 'unknown'].includes(row.status)) return reply({ error: '只有引擎已提交或结果不明的任务可以人工确认' }, 409);
         const timestamp = now();
         await run("UPDATE printing_jobs SET status='confirmed',confirmed_by=?,confirmed_at=?,confirmation_reason=?,updated_at=?,lease_hash=NULL,lease_expires_at=NULL WHERE id=?", user.id, timestamp, reason, timestamp, row.id);
         await audit(user, 'CONFIRM', 'printing_jobs', row.id, reason);
-        return reply(jobView(await job(row.id, user)));
+        return reply(jobView(await job(row.id, user), user));
       }
     }
     error(404, '打印接口不存在');

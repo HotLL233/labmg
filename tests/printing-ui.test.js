@@ -35,8 +35,8 @@ function matches(node,selector){if(selector.endsWith(':checked'))return node.che
 function parse(html,parent){const stack=[parent],pattern=/<\/?([a-z][\w-]*)([^>]*?)>/gi;let match,last=0;while((match=pattern.exec(html))){stack.at(-1)._text=(stack.at(-1)._text||'')+decode(html.slice(last,match.index));last=pattern.lastIndex;const tag=match[1].toLowerCase();if(match[0].startsWith('</')){if(stack.at(-1).tagName===tag)stack.pop();continue;}const attrs={};for(const item of match[2].matchAll(/([^\s=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g))attrs[item[1]]=decode(item[2]??item[3]??item[4]??'');const node=stack.at(-1).appendChild(new Element(tag,attrs));if(!['input','br','img','hr'].includes(tag))stack.push(node);}stack.at(-1)._text=(stack.at(-1)._text||'')+decode(html.slice(last));}
 function fixture({ manage=false, empty=false, status='queued' }={}){
   const document=new Element('document');document.body=document.appendChild(new Element('body'));document.createElement=tag=>new Element(tag);
-  const config={templates:empty?[]:[{id:ids.template,name:'单件母版',fileName:'unit.btw',sha256:'a'.repeat(64),active:true,fields:['Code','Name']}],stations:empty?[]:[{id:ids.station,name:'标签工作站',printerName:'Deli DL-886A(NEW)',enabled:true}],capabilities:{manageTemplates:manage,manageStations:manage,submit:true}};
-  const job={id:ids.job,status,templateId:ids.template,templateName:'单件母版',stationId:ids.station,stationName:'标签工作站',printerName:'Deli DL-886A(NEW)',count:2,unitIds:[11,12],createdBy:1,rows:[{Code:'000011',Name:'乙醇',Specification:'500mL',Warehouse:'主仓库',Location:'A-01'},{Code:'000012',Name:'乙醇',Specification:'500mL',Warehouse:'主仓库',Location:'A-01'}]};
+  const config={templates:empty?[]:[{id:ids.template,name:'单件母版',fileName:'unit.btw',sha256:'a'.repeat(64),active:true,fields:['Code','Name']}],stations:empty?[]:[{id:ids.station,name:'标签工作站',printerName:'Deli DL-886A(NEW)',enabled:true,lastSeenAt:null,agentVersion:'',connectionStatus:'never_connected',busy:false}],capabilities:{manageTemplates:manage,manageStations:manage,submit:true}};
+  const job={id:ids.job,status,kind:'print',paper:null,hasPreview:false,templateId:ids.template,templateName:'单件母版',stationId:ids.station,stationName:'标签工作站',printerName:'Deli DL-886A(NEW)',count:2,unitIds:[11,12],createdBy:1,rows:[{Code:'000011',Name:'乙醇',Specification:'500mL',Warehouse:'主仓库',Location:'A-01'},{Code:'000012',Name:'乙醇',Specification:'500mL',Warehouse:'主仓库',Location:'A-01'}]};
   const requests=[],intervals=new Set(),downloads=[],clipboard=[];let intercept;
   const response=(data,status=200)=>({ok:status<400,status,json:async()=>structuredClone(data),blob:async()=>new Blob(['script'])});
   const context={document,crypto:crypto.webcrypto,AbortController,Blob,Uint8Array,URLSearchParams,URL:{createObjectURL:()=> 'blob:download',revokeObjectURL(){}},btoa:text=>Buffer.from(text,'binary').toString('base64'),atob:text=>Buffer.from(text,'base64').toString('binary'),navigator:{clipboard:{writeText:async text=>clipboard.push(text)}},setTimeout:callback=>{callback();return 1;},setInterval:callback=>{intervals.add(callback);return callback;},clearInterval:callback=>intervals.delete(callback),fetch:async(url,options={})=>{const request={url,options,body:options.body?JSON.parse(options.body):null};requests.push(request);const override=await intercept?.(request);if(override)return response(override.body,override.status);if(url==='/api/printing/config')return response(config);if(url.startsWith('/api/printing/jobs?'))return response({items:[job],total:1,page:1,pageSize:20});if(url==='/api/printing/jobs'&&options.method==='POST')return response({...job,unitIds:request.body.unitIds,count:request.body.unitIds.length},201);if(url==='/api/printing/jobs/'+ids.job)return response(job);if(url==='/api/printing/stations'&&options.method==='POST')return response({station:config.stations[0],token:'secret-once'},201);if(url==='/api/printing/templates'&&options.method==='POST')return response(config.templates[0],201);return response({ok:true});}};
@@ -45,7 +45,7 @@ function fixture({ manage=false, empty=false, status='queued' }={}){
   const dialog=()=>document.querySelector('#material-printing');
   const click=async(action,value)=>{const node=dialog().querySelectorAll('[data-bp]').find(node=>node.dataset.bp===action&&(value===undefined||node.dataset.value===value));assert.ok(node,'missing action '+action);assert.equal(node.disabled,false,'disabled action '+action);dialog().listeners.click({target:node});await tick();};
   const submit=async action=>{const form=dialog().querySelector(`[data-bp-form="${action}"]`);assert.ok(form,'missing form '+action);dialog().listeners.submit({target:form,preventDefault(){}});await tick();};
-  const choose=()=>{const form=dialog().querySelector('#bp-compose');form.elements.templateId.value=ids.template;form.elements.stationId.value=ids.station;return form;};
+  const choose=()=>{const form=dialog().querySelector('#bp-compose');form.elements.templateId.value=ids.template;form.elements.stationId.value=ids.station;dialog().listeners.change({target:form.elements.stationId});return form;};
   const setRange=(from,to)=>{const form=dialog().querySelector('#bp-compose');form.elements.from.value=from;form.elements.to.value=to;dialog().listeners.input({target:form.elements.from});};
   return {api:context.MaterialPrinting,document,dialog,config,job,requests,downloads,clipboard,intervals,click,submit,choose,setRange,setIntercept:value=>{intercept=value;}};
 }
@@ -133,4 +133,64 @@ test('queued cancellation and manager confirmation use separate mutations and co
 test('untrusted metadata and task snapshot cells remain text in every printing view',async()=>{
   const app=fixture({manage:true,status:'unknown'});const attack='<img src=x onerror=alert(1)>';app.config.templates[0].name=attack;app.config.stations[0].printerName=attack;app.job.message=attack;app.job.rows[0].Location=attack;
   await app.api.send([{id:11,code:attack}]);assert.equal(app.dialog().querySelector('img'),null);assert.match(app.dialog().innerHTML,/&lt;img/);await app.click('templates');assert.equal(app.dialog().querySelector('img'),null);await app.click('stations');assert.equal(app.dialog().querySelector('img'),null);await app.click('jobs');await app.click('detail',ids.job);assert.equal(app.dialog().querySelector('img'),null);assert.match(app.dialog().innerHTML,/&lt;img/);app.api.close();
+});
+
+test('station views and task refreshes show current communication, agent version and safe queued reasons',async()=>{
+  const app=fixture();await app.api.open();assert.match(app.dialog().textContent,/从未连接/);assert.match(app.dialog().textContent,/配置并启动打印助手/);
+  app.config.stations[0].lastSeenAt=new Date().toISOString();app.config.stations[0].connectionStatus='online';app.config.stations[0].agentVersion='0.8.1';
+  const before=app.requests.filter(row=>row.url==='/api/printing/config').length;await app.click('refresh');assert.equal(app.requests.filter(row=>row.url==='/api/printing/config').length,before+1);assert.match(app.dialog().textContent,/最近有通信/);assert.match(app.dialog().textContent,/0.8.1/);
+  app.config.stations[0].busy=true;await app.click('detail',ids.job);assert.match(app.dialog().textContent,/正在处理前一项/);
+  app.config.stations[0].connectionStatus='offline';await app.click('detail',ids.job);assert.match(app.dialog().textContent,/打印助手已离线/);
+  await app.click('stations');assert.match(app.dialog().textContent,/离线（超过60秒未联系）/);assert.match(app.dialog().textContent,/双击 bartender-agent.cmd/);
+  await app.click('download-launcher');await app.click('download-agent');assert.deepEqual(app.downloads.map(row=>row.name),['bartender-agent.cmd','bartender-agent.ps1']);assert.ok(app.requests.some(row=>row.url==='/api/printing/agent-launcher'));app.api.close();
+});
+
+test('failed diagnostics never display cached online as current and offline stations still accept queued jobs',async()=>{
+  const app=fixture();app.config.stations[0].connectionStatus='online';app.config.stations[0].lastSeenAt=new Date().toISOString();await app.api.open();app.setIntercept(request=>request.url==='/api/printing/config'?{body:{error:'诊断离线'},status:503}:undefined);await app.click('refresh');assert.match(app.dialog().textContent,/状态暂不可用/);assert.doesNotMatch(app.dialog().textContent,/最近有通信/);await app.click('detail',ids.job);assert.match(app.dialog().textContent,/无法读取打印站的最新状态/);app.api.close();
+  const offline=fixture();offline.config.stations[0].connectionStatus='offline';await offline.api.send([{id:11}]);offline.choose();assert.match(offline.dialog().textContent,/可以先建立任务排队/);await offline.submit('submit-job');assert.equal(offline.requests.filter(row=>row.options.method==='POST').length,1);offline.api.close();
+});
+
+test('native paper settings preview actual dimensions, swap orientation and reject invalid sizes without submitting',async()=>{
+  const app=fixture();await app.api.send([{id:11},{id:12}]);let form=app.choose();assert.equal(form.elements.widthMm.disabled,true);assert.match(app.dialog().textContent,/沿用 BTW 内保存的纸张/);
+  form.elements.paperMode.value='custom';app.dialog().listeners.change({target:form.elements.paperMode});assert.equal(form.elements.widthMm.disabled,false);assert.ok(app.dialog().querySelector('svg'));assert.match(app.dialog().textContent,/60 × 40 mm · 横向/);
+  form.elements.orientation.value='portrait';app.dialog().listeners.change({target:form.elements.orientation});assert.equal(form.elements.widthMm.value,'40');assert.equal(form.elements.heightMm.value,'60');assert.match(app.dialog().textContent,/40 × 60 mm · 纵向/);
+  for(const width of ['4','301','30.1234','']){form.elements.widthMm.value=width;app.dialog().listeners.input({target:form.elements.widthMm});assert.equal(app.dialog().querySelector('#bp-submit').disabled,true);assert.equal(app.dialog().querySelector('[data-bp="preview-job"]').disabled,true);await app.submit('submit-job');assert.equal(app.requests.filter(row=>row.options.method==='POST').length,0);}
+  form.elements.widthMm.value='30.125';app.dialog().listeners.input({target:form.elements.widthMm});await app.submit('submit-job');const sent=app.requests.find(row=>row.options.method==='POST');assert.deepEqual(sent.body.paper,{widthMm:30.125,heightMm:60,orientation:'portrait'});assert.equal(sent.body.kind,undefined);app.api.close();
+});
+
+test('native preview uses only the selected first unit, binds PNG to immutable paper and cannot be confirmed or reprinted',async()=>{
+  const app=fixture({manage:true}),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS9kAAAAASUVORK5CYII=';
+  await app.api.send([{id:11},{id:12}]);const form=app.choose();app.setRange('2','2');form.elements.paperMode.value='custom';app.dialog().listeners.change({target:form.elements.paperMode});
+  app.setIntercept(request=>{if(request.url==='/api/printing/jobs'&&request.options.method==='POST'){Object.assign(app.job,{kind:'preview',paper:request.body.paper,status:'submitted',unitIds:[12],count:1,previewBase64:png,rows:[{Code:'000012'}]});return {body:app.job,status:201};}});
+  await app.click('preview-job');const sent=app.requests.find(row=>row.options.method==='POST');assert.equal(sent.body.kind,'preview');assert.deepEqual(sent.body.unitIds,[12]);assert.deepEqual(sent.body.paper,{widthMm:60,heightMm:40,orientation:'landscape'});assert.match(app.dialog().textContent,/原生模板图已生成/);assert.match(app.dialog().textContent,/不是 PrintPreview/);assert.equal(app.dialog().querySelector('img').attrs.src,'data:image/png;base64,'+png);assert.equal(app.dialog().querySelector('[data-bp="reprint"]'),null);assert.equal(app.dialog().querySelector('[data-bp="confirm-form"]'),null);
+  await app.click('compose');assert.ok(app.dialog().querySelector('#bp-native-preview').querySelector('img'));const next=app.dialog().querySelector('#bp-compose');next.elements.heightMm.value='31';app.dialog().listeners.input({target:next.elements.heightMm});assert.equal(app.dialog().querySelector('#bp-native-preview').querySelector('img'),null);app.api.close();
+});
+
+test('a failed native-preview request retries unchanged paper, kind, first-unit selection and idempotency key',async()=>{
+  const app=fixture();let first=true;app.setIntercept(request=>{if(request.url==='/api/printing/jobs'&&request.options.method==='POST'&&first){first=false;return {body:{error:'响应不明'},status:503};}});await app.api.send([{id:11},{id:12}]);const form=app.choose();form.elements.paperMode.value='custom';app.dialog().listeners.change({target:form.elements.paperMode});await app.click('preview-job');const pending=app.dialog().querySelector('#bp-compose');assert.equal(pending.elements.widthMm.disabled,true);assert.equal(pending.elements.paperMode.disabled,true);await app.click('retry-job');const posts=app.requests.filter(row=>row.options.method==='POST');assert.deepEqual(posts[0].body,posts[1].body);assert.equal(posts[1].body.kind,'preview');assert.deepEqual(posts[1].body.unitIds,[11]);app.api.close();
+});
+
+test('native preview image accepts only bounded PNG base64 metadata and template management explains the real entry point',async()=>{
+  const app=fixture({manage:true,status:'submitted'});app.job.kind='preview';app.job.previewBase64='" onerror="alert(1)';await app.api.open();await app.click('detail',ids.job);assert.equal(app.dialog().querySelector('img'),null);await app.click('templates');assert.match(app.dialog().textContent,/从库存选择已有实物/);assert.match(app.dialog().textContent,/不会覆盖母版/);app.api.close();
+});
+
+test('queued native jobs explain old-agent blocks and immutable printer names without stopping offline queuing',async()=>{
+  const app=fixture();app.job.paper={widthMm:50,heightMm:30,orientation:'landscape'};Object.assign(app.config.stations[0],{lastSeenAt:new Date().toISOString(),connectionStatus:'online',agentVersion:'0.8.0',printerName:'新打印机名称'});await app.api.open();assert.match(app.dialog().textContent,/旧助手不会领取此任务/);assert.match(app.dialog().textContent,/保留创建时的打印机名称/);app.config.stations[0].agentVersion='0.8.1';await app.click('refresh');assert.doesNotMatch(app.dialog().textContent,/旧助手不会领取此任务/);app.api.close();
+});
+
+test('reprinting keeps original paper disabled in the form and posts the same snapshot',async()=>{
+  const app=fixture({manage:true,status:'failed'});app.job.paper={widthMm:30,heightMm:50,orientation:'portrait'};await app.api.open();await app.click('detail',ids.job);await app.click('reprint');const form=app.dialog().querySelector('#bp-compose');for(const name of ['paperMode','widthMm','heightMm','orientation'])assert.equal(form.elements[name].disabled,true);form.elements.reason.value='合成重印原因';await app.submit('submit-job');assert.deepEqual(app.requests.find(row=>row.options.method==='POST').body.paper,app.job.paper);app.api.close();
+});
+
+test('native presets enable task paper and keep both supported rolls aligned with the chosen direction',async()=>{
+  const app=fixture();await app.api.send([{id:11}]);const form=app.choose();assert.equal(form.elements.paperMode.value,'template');assert.equal(form.elements.widthMm.disabled,true);
+  const change=(name,value)=>{form.elements[name].value=value;app.dialog().listeners.change({target:form.elements[name]});};
+  change('paperPreset','38.5x30.5');assert.equal(form.elements.paperMode.value,'custom');assert.equal(form.elements.widthMm.value,'38.5');assert.equal(form.elements.heightMm.value,'30.5');assert.equal(form.elements.widthMm.disabled,false);
+  change('orientation','portrait');assert.equal(form.elements.widthMm.value,'30.5');assert.equal(form.elements.heightMm.value,'38.5');change('paperPreset','60x40');assert.equal(form.elements.widthMm.value,'40');assert.equal(form.elements.heightMm.value,'60');
+  change('orientation','landscape');assert.equal(form.elements.widthMm.value,'60');assert.equal(form.elements.heightMm.value,'40');change('paperPreset','38.5x30.5');assert.equal(form.elements.widthMm.value,'38.5');assert.equal(form.elements.heightMm.value,'30.5');
+  form.elements.widthMm.value='42';app.dialog().listeners.input({target:form.elements.widthMm});assert.equal(form.elements.paperPreset.value,'custom');assert.match(app.dialog().textContent,/Designer.*PAPER_REQUIRES_MATCHING_NATIVE_TEMPLATE/);await app.submit('submit-job');assert.deepEqual(app.requests.find(row=>row.options.method==='POST').body.paper,{widthMm:42,heightMm:30.5,orientation:'landscape'});app.api.close();
+});
+
+test('station setup explains current-user login background and does not claim the menu itself starts printing',async()=>{
+  const app=fixture();await app.api.open();await app.click('stations');assert.match(app.dialog().textContent,/菜单 4 安装／更新当前用户登录后台/);assert.match(app.dialog().textContent,/下次登录自动监听/);assert.match(app.dialog().textContent,/Windows 用户须保持登录/);assert.match(app.dialog().textContent,/本次立即处理仍需选择开始监听/);assert.equal(app.requests.some(row=>row.options.method==='POST'),false);app.api.close();
 });

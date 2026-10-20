@@ -1,8 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.8.0（已公开验证版）**，增加原生 BarTender `.btw` 模板管理、打印站、逐件打印任务和 Windows PowerShell 7 打印助手，支持基于已有母版另存派生模板。网页标签、CSV 和物资流程继续可用。[0.8.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.8.0) 已公开为 prerelease，实际验证与边界见[版本说明](docs/CHANGELOG.md)。历史版本的镜像、部署文件与记录保留。
+本源码版本：**0.8.1（打印修复开发中）**，针对纸张、横纵方向、预览和Windows助手启动修复，增加可选的登录后台方式。当前尚未冻结发布；0.8.0已公开为验证版，历史镜像、部署文件与记录保留。实际验证与边界见[版本说明](docs/CHANGELOG.md)。
 
-本轮已交付两份完整 YML、amd64／arm64 三镜像 TAR、Windows 打印脚本、指南及校验清单，本机 `artifacts/releases/0.8.0/` 全部14件文件及摘要核对通过。真实PG18 CI 188/188及四项部署门禁通过，ARM64容器使用QEMU；本轮未在群晖、真手机或 USB 打印机验收。打印设置见[操作指南](docs/BARTENDER_AGENT.md)。
+本轮交付目标继续包含两份完整YML、amd64／arm64三镜像TAR、Windows打印脚本、指南和摘要，使用独立`artifacts/releases/0.8.1/`。构建与硬件状态按真实结果补记；不以替身COM或网页预览代替BarTender许可、纸张送料与USB验收。打印设置见[操作指南](docs/BARTENDER_AGENT.md)。
 
 系统使用 Node.js、PostgreSQL 和静态前端，覆盖档案、模板、财务、设备、物资、体系文件、人员和合同管理。用户明确本轮不用考虑旧库，按全新 PostgreSQL 18 部署处理，不提供旧版数据库迁移，也不读取或删除旧数据库文件。稳定分支 `main` 仍保留 0.1.1。
 
@@ -19,7 +19,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.8.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.8.1/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -30,7 +30,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.8.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.8.1/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 

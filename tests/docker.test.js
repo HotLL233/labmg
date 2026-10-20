@@ -226,6 +226,9 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const agentScript = await request(first.base, '/api/printing/agent-script', { headers: { Cookie: cookie } });
     assert.deepEqual(Buffer.from(await agentScript.arrayBuffer()), fs.readFileSync(path.join(root, 'scripts/bartender-agent.ps1')),
       'the deployed application must serve the exact frozen Windows printing agent');
+    const agentLauncher = await request(first.base, '/api/printing/agent-launcher', { headers: { Cookie: cookie } });
+    assert.deepEqual(Buffer.from(await agentLauncher.arrayBuffer()), fs.readFileSync(path.join(root, 'scripts/bartender-agent.cmd')),
+      'the deployed application must serve the exact frozen Windows printing launcher');
     const printingConfig = await (await request(first.base, '/api/printing/config', { headers: { Cookie: cookie } })).json();
     assert.deepEqual(printingConfig.templates, []);
     assert.deepEqual(printingConfig.stations, []);
@@ -369,11 +372,22 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const printStation = await post('/api/printing/stations', { name: '隔离测试站（不运行）', printerName: 'fixture-printer-no-output' });
     const printJob = await post('/api/printing/jobs', {
       templateId: printTemplate.id, stationId: printStation.station.id,
-      unitIds: expectedUnits.map(unit => unit.id), idempotencyKey: crypto.randomUUID()
+      unitIds: expectedUnits.map(unit => unit.id), idempotencyKey: crypto.randomUUID(),
+      paper: { widthMm: 38.5, heightMm: 30.5, orientation: 'landscape' }
     });
     const printSnapshot = await (await request(first.base, `/api/printing/jobs/${printJob.id}`, { headers: { Cookie: cookie } })).json();
     assert.equal(printSnapshot.status, 'queued');
+    assert.equal(printSnapshot.kind, 'print');
+    assert.deepEqual(printSnapshot.paper, { widthMm: 38.5, heightMm: 30.5, orientation: 'landscape' });
     assert.deepEqual(printSnapshot.rows.map(row => row.Code), expectedUnits.map(unit => unit.code));
+    const previewJob = await post('/api/printing/jobs', {
+      templateId: printTemplate.id, stationId: printStation.station.id, kind: 'preview',
+      unitIds: [expectedUnits[0].id], idempotencyKey: crypto.randomUUID(),
+      paper: { widthMm: 40, heightMm: 60, orientation: 'portrait' }
+    });
+    const previewSnapshot = await (await request(first.base, `/api/printing/jobs/${previewJob.id}`, { headers: { Cookie: cookie } })).json();
+    assert.equal(previewSnapshot.kind, 'preview');
+    assert.equal(previewSnapshot.status, 'queued');
     const expectedRule = await (await request(first.base, '/api/materials/unit-label-rule', { headers: { Cookie: cookie } })).json();
     assert.equal(expectedRule.nextSequence, 4);
     const workbook = await request(first.base, `/api/materials/export.xlsx?type=requests&requestId=${materialRequest.id}`, { headers: { Cookie: cookie } });
@@ -408,6 +422,8 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const secondCookie = await login(second.base);
     const persistedPrint = await (await request(second.base, `/api/printing/jobs/${printJob.id}`, { headers: { Cookie: secondCookie } })).json();
     assert.deepEqual(persistedPrint, printSnapshot, 'recreation must preserve the print task and fixed-code snapshot without executing it');
+    const persistedPreview = await (await request(second.base, `/api/printing/jobs/${previewJob.id}`, { headers: { Cookie: secondCookie } })).json();
+    assert.deepEqual(persistedPreview, previewSnapshot, 'recreation must preserve preview kind and paper without executing a print');
     const persistedTemplate = await (await request(second.base, `/api/printing/templates/${printTemplate.id}`, { headers: { Cookie: secondCookie } })).json();
     assert.deepEqual(Buffer.from(persistedTemplate.contentBase64, 'base64'), printTemplateBytes);
     const persistedPrintConfig = await (await request(second.base, '/api/printing/config', { headers: { Cookie: secondCookie } })).json();

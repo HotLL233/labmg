@@ -223,6 +223,9 @@ CREATE TABLE IF NOT EXISTS printing_jobs(
   confirmed_by BIGINT REFERENCES users(id), confirmed_at TEXT, confirmation_reason TEXT NOT NULL DEFAULT '',
   UNIQUE(created_by,idempotency_key)
 );
+ALTER TABLE printing_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'print' CHECK(kind IN ('print','preview'));
+ALTER TABLE printing_jobs ADD COLUMN IF NOT EXISTS paper TEXT;
+ALTER TABLE printing_jobs ADD COLUMN IF NOT EXISTS preview_base64 TEXT CHECK(preview_base64 IS NULL OR length(preview_base64)<=2796204);
 CREATE INDEX IF NOT EXISTS printing_job_queue ON printing_jobs(station_id,status,created_at,id);
 CREATE INDEX IF NOT EXISTS printing_job_owner ON printing_jobs(created_by,created_at,id);
 CREATE UNIQUE INDEX IF NOT EXISTS printing_station_busy ON printing_jobs(station_id) WHERE status IN ('claimed','printing');

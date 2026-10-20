@@ -21,6 +21,8 @@ async function fixture(t) {
   fs.mkdirSync(path.join(directory, 'scripts'));
   const agentBytes = fs.readFileSync(path.resolve(__dirname, '../scripts/bartender-agent.ps1'));
   fs.writeFileSync(path.join(directory, 'scripts/bartender-agent.ps1'), agentBytes);
+  const launcherBytes = fs.readFileSync(path.resolve(__dirname, '../scripts/bartender-agent.cmd'));
+  fs.writeFileSync(path.join(directory, 'scripts/bartender-agent.cmd'), launcherBytes);
   const reservation = net.createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');
   const port = reservation.address().port;
@@ -85,7 +87,7 @@ async function fixture(t) {
   const start = (claimed, source = station, status = 200) => api('POST', `/agent/jobs/${claimed.id}/start`, { token: source.token }, { leaseToken: claimed.leaseToken }, status);
   const result = (claimed, state = 'submitted', message = '合成引擎结果', source = station, expected = 200) => api('POST', `/agent/jobs/${claimed.id}/result`, { token: source.token }, { leaseToken: claimed.leaseToken, status: state, message }, expected);
   return { db, api, request, admin, reader, other, finance, material, unitIds, templateInput, template, station, make, claim, start, result,
-    baseUrl: `http://127.0.0.1:${port}`, agentBytes, catalogId: catalog.lastInsertRowid, regionId: region.lastInsertRowid };
+    baseUrl: `http://127.0.0.1:${port}`, agentBytes, launcherBytes, catalogId: catalog.lastInsertRowid, regionId: region.lastInsertRowid };
 }
 
 test('BarTender printing API uses immutable snapshots and authenticated, non-retrying station leases', async t => {
@@ -100,6 +102,11 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     assert.equal(JSON.stringify(config).includes('token_hash'), false);
     assert.equal(JSON.stringify(config).includes(station.token), false);
     assert.equal(config.templates[0].contentBase64, undefined);
+    assert.equal(config.stations[0].connectionStatus, 'never_connected');
+    assert.equal(config.stations[0].agentVersion, '');
+    assert.equal(config.stations[0].busy, false);
+    assert.equal(config.stationContactTimeoutSeconds, 60);
+    assert.ok(Number.isFinite(Date.parse(config.serverTime)));
     assert.equal((await api('GET', '/config', material)).capabilities.manageTemplates, true);
     await api('POST', '/templates', reader, f.templateInput, 403);
     await api('GET', '/templates/' + template.id, reader, undefined, 403);
@@ -113,13 +120,15 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     await api('POST', '/jobs/' + firstJob.id + '/cancel', other, {}, 403);
   });
   await t.test('Windows agent download is authenticated and preserves the exact script bytes', async () => {
-    await f.request('GET', '/api/printing/agent-script', null, undefined, 401);
-    await f.request('GET', '/api/printing/agent-script', finance, undefined, 403);
-    const response = await fetch(f.baseUrl + '/api/printing/agent-script', { headers: { Cookie: reader.cookie } });
+    for (const [route, file, bytes] of [['agent-script', 'bartender-agent.ps1', f.agentBytes], ['agent-launcher', 'bartender-agent.cmd', f.launcherBytes]]) {
+    await f.request('GET', '/api/printing/' + route, null, undefined, 401);
+    await f.request('GET', '/api/printing/' + route, finance, undefined, 403);
+    const response = await fetch(f.baseUrl + '/api/printing/' + route, { headers: { Cookie: reader.cookie } });
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get('content-disposition'), 'attachment; filename="bartender-agent.ps1"');
+    assert.equal(response.headers.get('content-disposition'), `attachment; filename="${file}"`);
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), f.agentBytes);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    }
   });
   await t.test('template validates canonical base64, file name, field allowlist and exact 4MiB boundary', async () => {
     for (const extra of [{ contentBase64: '' }, { contentBase64: 'YQ' }, { contentBase64: 'YR==' }, { contentBase64: 'YQ==\n' },
@@ -174,6 +183,10 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     assert.deepEqual(claimed.template.fields, f.templateInput.fields);
     assert.equal(claimed.template.contentBase64, f.templateInput.contentBase64);
     assert.equal((await api('GET', '/config', admin)).stations[0].lastSeenAt !== null, true);
+    const connected = (await api('GET', '/config', reader)).stations.find(row => row.id === station.station.id);
+    assert.equal(connected.connectionStatus, 'online');
+    assert.equal(connected.agentVersion, 'test-only');
+    assert.equal(connected.busy, true);
     await f.result(claimed, 'submitted', '不能先报告', station, 409);
     const second = await api('POST', '/stations', admin, { name: '第二打印站', printerName: '第二打印机' }, 201);
     await f.start(claimed, second, 404);
@@ -245,6 +258,66 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     assert.equal(state, cancel.response.status === 200 ? 'cancelled' : 'printing');
     if (state === 'printing') await f.result(claimed, 'unknown', '并发场景无真实打印');
   });
+  await t.test('station diagnostics distinguish offline, future timestamps and disabled without exposing tokens', async () => {
+    for (const lastSeen of [new Date(Date.now() - 61000).toISOString(), new Date(Date.now() + 60000).toISOString(), 'invalid-date']) {
+      await db.prepare('UPDATE printing_stations SET last_seen_at=?,agent_version=? WHERE id=?').run(lastSeen, '0.8.0', station.station.id);
+      const row = (await api('GET', '/config', reader)).stations.find(row => row.id === station.station.id);
+      assert.equal(row.connectionStatus, 'offline');
+      assert.equal(row.agentVersion, '0.8.0');
+      assert.equal(row.token, undefined);
+    }
+    await db.prepare('UPDATE printing_stations SET last_seen_at=? WHERE id=?').run(null, station.station.id);
+    assert.equal((await api('GET', '/config', reader)).stations.find(row => row.id === station.station.id).connectionStatus, 'never_connected');
+  });
+  await t.test('paper and preview tasks are bounded immutable snapshots, block legacy FIFO workers and keep previews out of print flows', async () => {
+    const dedicated = await api('POST', '/stations', admin, { name: '预览合成站', printerName: '不调用设备' }, 201);
+    const input = { stationId: dedicated.station.id, templateId: template.id, unitIds: [unitIds[0]], idempotencyKey: crypto.randomUUID() };
+    const sheet = { widthMm: 50.125, heightMm: 30, orientation: 'landscape' };
+    for (const paper of [false, [], {}, { ...sheet, widthMm: '50' }, { ...sheet, widthMm: 4.999 }, { ...sheet, heightMm: 300.001 }, { ...sheet, widthMm: 50.1234 }, { ...sheet, orientation: 'portrait' }, { ...sheet, orientation: 'LANDSCAPE' }, { ...sheet, path: 'unsafe' }]) await api('POST', '/jobs', reader, { ...input, paper }, 400);
+    for (const extra of [{ kind: 'export' }, { kind: null }, { kind: 'preview', unitIds }, { kind: 'preview', reprintOf: firstJob.id, reason: '禁止预览重印' }]) await api('POST', '/jobs', reader, { ...input, ...extra }, 400);
+    const created = await api('POST', '/jobs', reader, { ...input, kind: 'preview', paper: sheet }, 201);
+    assert.equal(created.kind, 'preview');assert.deepEqual(created.paper, sheet);assert.equal(created.hasPreview, false);
+    assert.equal((await api('POST', '/jobs', reader, { ...input, kind: 'preview', paper: sheet }, 201)).id, created.id);
+    await api('POST', '/jobs', reader, { ...input, kind: 'preview', paper: { ...sheet, widthMm: 55 } }, 409);
+    const later = await f.make(reader, { stationId: dedicated.station.id });
+    for (const agentVersion of ['', '0.8.0', 'test-only', 'v0.8.1', '0.8.1-rc.1', '00.8.1', '0.8.01', '99999999999999999999.0.0']) {
+      const blocked = await api('POST', '/agent/claim', { token: dedicated.token }, { agentVersion });
+      assert.equal(blocked.job, null);assert.equal(blocked.blockedReason, 'AGENT_UPGRADE_REQUIRED');
+      assert.equal((await api('GET', '/jobs/' + later.id, reader)).status, 'queued');
+    }
+    const claimed = (await api('POST', '/agent/claim', { token: dedicated.token }, { agentVersion: '0.8.1' })).job;
+    assert.equal(claimed.id, created.id);assert.equal(claimed.kind, 'preview');assert.deepEqual(claimed.paper, sheet);
+    await f.start(claimed, dedicated);
+    const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS9kAAAAASUVORK5CYII=';
+    const submit = (previewBase64, status = 'submitted', expected = 400) => api('POST', `/agent/jobs/${claimed.id}/result`, { token: dedicated.token }, { leaseToken: claimed.leaseToken, status, message: '合成PNG，未执行BarTender', ...(previewBase64 === undefined ? {} : { previewBase64 }) }, expected);
+    const wide = Buffer.from(image, 'base64');wide.writeUInt32BE(4097, 16);
+    for (const invalid of [undefined, '', 'data:image/png;base64,' + image, Buffer.from('<svg/>').toString('base64'), image + '\n', wide.toString('base64'), Buffer.alloc(2097153).toString('base64')]) await submit(invalid);
+    await submit(image, 'failed');
+    await submit(image, 'submitted', 200);await submit(image, 'submitted', 200);
+    const different = Buffer.from(image, 'base64');different[40] ^= 1;
+    await submit(different.toString('base64'), 'submitted', 409);
+    const detail = await api('GET', '/jobs/' + created.id, reader);
+    assert.equal(detail.previewBase64, image);assert.equal(detail.hasPreview, true);assert.deepEqual(detail.paper, sheet);
+    const listing = (await api('GET', '/jobs', reader)).items.find(row => row.id === created.id);
+    assert.equal(listing.hasPreview, true);assert.equal(listing.previewBase64, undefined);
+    await api('GET', '/jobs/' + created.id, other, undefined, 403);
+    await api('POST', '/jobs/' + created.id + '/confirm', admin, { reason: '禁止预览确认出纸' }, 400);
+    await f.make(reader, { stationId: dedicated.station.id, unitIds: [unitIds[0]], reprintOf: created.id, reason: '禁止预览重印', paper: sheet }).then(() => assert.fail('preview reprint accepted'), error => assert.match(error.message, /400/));
+    const normal = (await api('POST', '/agent/claim', { token: dedicated.token }, { agentVersion: '0.8.0' })).job;
+    assert.equal(normal.id, later.id);assert.equal(normal.kind, 'print');assert.equal(normal.paper, null);
+    await f.start(normal, dedicated);
+    await api('POST', `/agent/jobs/${normal.id}/result`, { token: dedicated.token }, { leaseToken: normal.leaseToken, status: 'submitted', previewBase64: image }, 400);
+    await f.result(normal, 'failed', '合成机器路径 C:\\private\\template.btw', dedicated);
+    assert.doesNotMatch((await api('GET', '/jobs/' + normal.id, reader)).message, /private/);
+    assert.match((await api('GET', '/jobs/' + normal.id, admin)).message, /private/);
+    const print = await f.make(reader, { stationId: dedicated.station.id, paper: sheet });
+    const printClaim = (await api('POST', '/agent/claim', { token: dedicated.token }, { agentVersion: '1.0.0' })).job;
+    assert.equal(printClaim.id, print.id);assert.deepEqual(printClaim.paper, sheet);
+    await f.start(printClaim, dedicated);await f.result(printClaim, 'failed', '合成失败', dedicated);
+    await f.make(reader, { stationId: dedicated.station.id, reprintOf: print.id, reason: '不允许丢纸张' }).then(() => assert.fail('paper mismatch accepted'), error => assert.match(error.message, /400/));
+    const reprint = await f.make(reader, { stationId: dedicated.station.id, reprintOf: print.id, reason: '保留纸张', paper: sheet });
+    assert.deepEqual(reprint.paper, sheet);await api('POST', '/jobs/' + reprint.id + '/cancel', reader, {});
+  });
   await t.test('rotation revokes old bearer and active lease; disabling invalidates active work and blocks claims', async () => {
     const queued = await f.make(), claimed = (await f.claim()).job;
     const rotated = await api('POST', '/stations/' + station.station.id + '/rotate-token', admin, {});
@@ -257,6 +330,7 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     await f.start(active, rotated);
     const disabled = await api('PUT', '/stations/' + station.station.id, admin, { enabled: false });
     assert.equal(disabled.enabled, false);
+    assert.equal(disabled.connectionStatus, 'disabled');
     assert.equal((await api('GET', '/jobs/' + next.id, reader)).status, 'unknown');
     await api('POST', '/agent/claim', { token: rotated.token }, {}, 401);
     await api('POST', '/jobs', reader, { stationId: station.station.id, templateId: template.id, unitIds, idempotencyKey: crypto.randomUUID() }, 409);
@@ -280,5 +354,20 @@ test('BarTender printing API uses immutable snapshots and authenticated, non-ret
     const audits = await db.prepare("SELECT detail FROM audit_logs WHERE entity LIKE 'printing_%'").all();
     assert.ok(audits.length > 0);
     assert.equal(audits.some(row => row.detail.includes(station.token) || row.detail.includes(f.templateInput.contentBase64)), false);
+  });
+  await t.test('0.8.0 printing tables gain new columns idempotently while retaining existing snapshots, stations and tokens', async () => {
+    const before = await db.prepare('SELECT * FROM printing_jobs WHERE id=?').get(firstJob.id);
+    const existingStation = await db.prepare('SELECT * FROM printing_stations WHERE id=?').get(station.station.id);
+    const existingTemplate = await db.prepare('SELECT * FROM printing_templates WHERE id=?').get(template.id);
+    await db.exec('ALTER TABLE printing_jobs DROP COLUMN kind, DROP COLUMN paper, DROP COLUMN preview_base64');
+    const { SCHEMA } = require('../src/schema');
+    await db.transaction(() => db.exec(SCHEMA));
+    await db.transaction(() => db.exec(SCHEMA));
+    const upgraded = await db.prepare('SELECT * FROM printing_jobs WHERE id=?').get(firstJob.id);
+    assert.deepEqual(upgraded, before);
+    assert.equal(upgraded.kind, 'print');assert.equal(upgraded.paper, null);assert.equal(upgraded.preview_base64, null);
+    assert.deepEqual(await db.prepare('SELECT * FROM printing_stations WHERE id=?').get(station.station.id), existingStation);
+    assert.deepEqual(await db.prepare('SELECT * FROM printing_templates WHERE id=?').get(template.id), existingTemplate);
+    assert.equal((await api('GET', '/jobs/' + firstJob.id, reader)).rows[0].Code, '000001');
   });
 });

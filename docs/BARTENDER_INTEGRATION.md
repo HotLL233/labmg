@@ -2,7 +2,23 @@
 
 分析日期：2026-10-20。下文保留开发前针对 LabOS 0.7.0、群晖 Linux Docker、Windows USB 连接的 DL-886A（NEW）及本机 BarTender 2016 R7（文件版本11.0.7.3146）的能力核实和实施方案。
 
-后续用户已授权实施，0.8.0 源码新增原生模板、打印站和任务、Windows COM 打印助手及已有对象母版派生，见[打印助手操作指南](BARTENDER_AGENT.md)。下文“当前没有／尚未实现”描述调研当时状态，由本次源码实现替代；实际自动测试见[版本说明](CHANGELOG.md)。本轮仍未启动真实 COM、核实授权、生成实机校准后的业务 `.btw` 或执行 USB 打印，不能把实现与替身测试当作硬件验收。
+后续用户已授权实施，0.8.0源码新增原生模板、打印站和任务、Windows COM打印助手及已有对象母版派生，见[打印助手操作指南](BARTENDER_AGENT.md)。0.8.0该轮未启动真实COM或执行USB打印；0.8.1新增纸张设置、模板图预览、CMD入口和当前用户登录后台。下文保留初次调研的结论与建议，“当时没有／尚未实现”的部分由下面的实施补充替代。实际许可、原生导出与USB仍未验，不能把源码、文档或替身测试当作硬件验收。
+
+## 0.8.1实施补充与验证边界
+
+网页维护不可覆盖的原生模板、打印站及任务，Windows端通过可信HTTPS主动领取。用户从网页下载同版`bartender-agent.ps1`与`bartender-agent.cmd`，放在同一固定文件夹，双击CMD进入菜单；默认菜单不领取任务，缺少PowerShell 7、脚本或初始化配置时显示指引并保留窗口。CMD只从PATH调用`pwsh.exe`，不调用旧版`powershell.exe`。令牌隐藏输入并由同一Windows用户的DPAPI保护；HTTP 401／403／409、重定向与连接失败分别给受控诊断。
+
+菜单4或`-InstallStartup`在已初始化的稳定运行目录登记当前用户的交互登录任务，以普通权限隐藏窗口运行。当前脚本复制到`<运行目录>/agent/bin/bartender-agent.ps1`，任务显式引用原运行目录，保留同用户的配置和待回执；不保存Windows登录密码。**安装／更新仅登记，下一次登录生效，不立即启动或领取队列**；立即处理需显式选择菜单3。菜单5／`-StopBackground`请求当前周期结束后正常退出，保留登录登记；菜单6／`-UninstallStartup`再移除对应登录任务。两者都保留配置、缓存和待回执，不强杀任务或BarTender。受控`agent.log`按约1MiB轮转。该方式要求Windows用户登录，不是Session0系统服务，也不把商业BarTender引擎打包进群晖容器。
+
+任务的`paper`默认空值，沿用原生母版；显式值为`{widthMm,heightMm,orientation}`，宽高各5–300mm、最多3位小数，方向须与实际宽高一致。助手使用带毫米单位索引的`PaperWidth/Height`和`LabelWidth/Height`、`Orientation`、单行单列及零页边距／页内间距设置，读回`Valid`和四个尺寸，允许0.05mm数值容差。[11][12] 原生设计对象不自动缩放或重排；任一边缩小超过容差即在Print或导出前以`PAPER_REQUIRES_MATCHING_NATIVE_TEMPLATE`拒绝。60×40mm和38.5×30.5mm、横向和纵向须使用适配的Designer母版；`-DeriveTemplate`的可选纸张设置也遵守同一限制。
+
+原生预览是独立的单件任务，覆盖所选首件命名数据源后调用`Format.ExportToFile(path,"PNG",colors,150,btDoNotSaveChanges)`，不调用Print。PNG上限2MiB、宽高各4096像素，检查签名、IHDR及结尾，回执沿用DPAPI日记复送保护。它是Automation可用的**模板图**；真正的`ExportPrintPreviewToImage`要求Enterprise Automation，当前未调用，也不以网页纸张轮廓模拟该原生预览。[13][14] 图片绑定任务快照，改变纸张、模板或实物后重新生成；不能从图像或引擎返回推断实物出纸、送料或贴标成功。
+
+0.8.1也补充COM归属核验：按类型库名称读取`ProcessId`，必要时由`Application.Window.Handle`通过Windows窗口API映射PID；两者有效时必须一致。排除创建前已有PID后，再核对注册EXE、进程名、当前用户SID、会话和启动时间。未证明独占身份时不隐藏、不Print、不Quit该进程，不凭进程差集猜测归属。[15] 对已注册官方EXE使用`LoadTypeLibEx(REGKIND_NONE)`只读核对，确认`Edition`为BSTR、`ProcessId`为I4、毫米枚举为3、24位颜色枚举为4；尺寸为`(BtUnits,Single)`索引属性。类型信息证明接口形态，不证明实际授权或运行成功。
+
+Windows专项完成PowerShell内部87项、Node 3/3及PowerShell语法检查；Node首项包含内部87项，不重复计数。检查用COM、打印机及任务计划替身，覆盖纸张索引反射和读回、缩小拒绝、预览不调用Print、PNG边界、回执复送、进程身份和后台任务登记／卸载。另实际运行了受保护副本的`-Check`入口，以及含空格目录内CMD的缺PS1错误暂停和默认菜单选择0退出，均未领取真实队列或启动COM。证据为`artifacts/cache/0.8.1/windows-agent-mock-report.json`、`launcher-error-final-report.json`和`launcher-console-report.json`；首次手写CMD包装引号的失败记录保留，正确参数调用后通过。
+
+早先2026-10-20一次获准的只读COM诊断未取得可证明独占的进程ID便停止，检查后曾观察到新`bartend`进程PID 35992保留；没有打开模板、SaveAs、Export或Print，也未Quit或强杀该进程。此后的`ProcessId`／窗口回退补丁仅经替身验证，没有再次启动真实COM；不能将旧失败认定为已完成现场修复。实际BarTender许可、真实SaveAs／PNG输出、登录后台、USB出纸和标签校准仍待验收。其他业务和发布门禁由[版本说明](CHANGELOG.md)单独记录。
 
 ## 结论与接入边界
 
@@ -12,11 +28,11 @@
 
 建议的职责分工：群晖保存物资、固定编码和打印任务；连接 USB 的 Windows 电脑保存经审核的模板、运行 BarTender 并调用已有打印驱动。浏览器提交任务，手机也可作为任务入口。Windows 打印端需要开机并在线；群晖 Compose 不能代替该电脑上的 BarTender 引擎。[1][5]
 
-## 已核实的现状
+## 0.7.0初次调研时的现状（历史记录）
 
-- 本机 `bartend.exe` 产品版本为 2016 R7，文件版本 11.0.7.3146。安装目录有 Automation／XMLScript 帮助及 BTXML 2.0 XSD；**安装了文件不代表具有对应授权**，本轮没有读取许可证或启动软件。
+- 本机`bartend.exe`产品版本为2016 R7，文件版本11.0.7.3146。安装目录有Automation／XMLScript帮助及BTXML 2.0 XSD；**安装了文件不代表具有对应授权**，初次调研没有读取许可证或启动软件。后续0.8.1只读COM尝试及副作用另见上节。
 - Windows 只读打印机清单包含 `Deli DL-886A(NEW) (副本 1)`，驱动为 `Deli DL-886A(NEW)`、端口 USB003。名称用于本机配置示例，不能硬编码为所有电脑的默认值；清单状态不代表已经出纸或校准通过。
-- 当前代码仅有网页系统打印窗口与 BarTender CSV 导出，没有命令行、COM、BTXML、常驻打印端或原生模板生成。见 `src/public/material-labels.js`、`src/public/material.js` 及[既有打印说明](LABEL_PRINTING.md)。
+- 当时代码仅有网页系统打印窗口与BarTender CSV导出，没有命令行、COM、BTXML、常驻打印端或原生模板生成。该“没有”的结论已由0.8.0／0.8.1实现替代；网页与CSV路径继续保留，见`src/public/material-labels.js`、`src/public/material.js`及[既有打印说明](LABEL_PRINTING.md)。
 - 网页模板保存在当前浏览器的 localStorage，属于 JSON 布局；当前不会同步为 BarTender 模板。CSV 每行一件实物，默认每件一张，重印保留原有编码。
 
 ## 2016 版本的接口与授权区别
@@ -29,6 +45,9 @@
 | 命令行调用 `.btw` | `/F` 模板、`/AF=` 限定活动文档、`/D` 文本数据、`/PRN` 打印机、`/C=n` 每项份数、`/S=n` 序列数量；`/FPD` 强制使用数据库并显示打印窗口，`/FP` 强制数据库方式打印 | 官方标注自动控制需要 Automation 或 Enterprise Automation；适合小验证，但不能仅凭进程退出认定物理完成 [5][6] |
 | COM：打开、赋值、`Format.Print()` | 返回打印结果与诊断消息，可选择等待打印过程返回 | Automation 或 Enterprise Automation；建议作为直接打印首选验证接口，须处理错误和超时 [1][7] |
 | COM：`Format.SaveAs()` | 将打开的文档另存为 `.btw`，可指定是否覆盖 | Automation 或 Enterprise Automation；适合基于母版生成新模板文件，覆盖应默认关闭 [2] |
+| COM：`PageSetup` | 设置带单位的纸张／标签尺寸、方向和行列，读取有效性 | Automation或Enterprise Automation；本版显式设置后读回，拒绝缩小母版，不自动重排对象 [11][12] |
+| COM：`Format.ExportToFile()` | 将模板导出为图像 | Automation或Enterprise Automation；本版单件PNG图使用此方法，不调用Print [13] |
+| COM：`Format.ExportPrintPreviewToImage()` | 导出每页打印预览 | **Enterprise Automation**；与模板图不同，本版未调用此方法 [14] |
 | COM：`Application.XMLScript()` | 提交 BTXML 并返回 XML 响应 | 官方 2016 方法页要求 **Enterprise Automation**，不能笼统说普通 Automation 也能用此入口 [8] |
 
 `PrintOut()` 没有返回值，`Print()` 能返回结果和诊断，因此新集成优先核实后者。[1][7][10] 命令行的 `/P` 默认影响全部打开文档，需明确 `/AF=` 范围；`/FP` 的 F 指强制数据库方式，并非只打印当前文档。另需区分 `/S=n` 序列数量和不带等号的 `/S` 保存命令。[6] 不以“目录内有 SDK／帮助文件”或“手动打印可用”替代授权验证。
@@ -37,7 +56,7 @@
 
 ### 首选：Designer 制作母版，业务数据独立
 
-1. 在 Windows 的 BarTender 中选择已安装的打印机驱动，按实物纸张配置宽、高、间隙和方向。用户尚未确定标签尺寸；现有 60 × 40 mm 只是示例。
+1. 在 Windows 的 BarTender 中选择已安装的打印机驱动，按实物纸张配置宽、高、间隙和方向。调研时用户尚未确定标签尺寸；后续0.8.1明确为60×40mm和38.5×30.5mm，需各自校准母版。
 2. 放置原生 Code128 对象、QR Code 对象和需要的文本。Code128 与编码文本使用 `Code`，二维码使用完整 `QRPayload`，不能让打印软件再次加前缀、流水或序列化。
 3. 选择一种供数方式：人工数据库打印使用 CSV 字段；自动逐件赋值使用同名的“命名数据源”。CSV 列名、命名数据源名和设计对象名是三个不同概念，必须在母版中明确绑定，不能只改对象名。
 4. 保存如 `unit-csv.btw` 或 `unit-api.btw`，经预览、首张试打和回扫后再用于批量打印。实际运行不需要每瓶另存一份 `.btw`。
@@ -74,9 +93,9 @@ flowchart LR
     C --> F[回传引擎结果与错误]
 ```
 
-当前没有这条任务链；后续开发只需增加任务接口和一个 Windows 打印端，不改库存入账或编码生成，也不需要为此另加 Redis 或暴露 PostgreSQL 端口。
+初次调研时没有这条任务链；该结论已由0.8.0／0.8.1的任务接口和Windows打印端替代。实现不改库存入账或编码生成，也没有为此另加Redis或暴露PostgreSQL端口。
 
-首版打印端可先在 Windows 登录用户会话运行，确认 BarTender 授权、字体和驱动均可用后，再评估开机启动；不要直接假设同一套配置在 Windows 服务账号下也有效。Windows 端主动通过系统可信 HTTPS 领取任务，可避免手机浏览器直接访问本机端口或启动本机程序的兼容问题；具体轮询与认证尚未实现。
+初稿建议先在Windows登录用户会话验证，再评估后台。0.8.1已实现当前用户登录后的隐藏后台及可信HTTPS轮询／站点令牌认证；实际授权、字体、驱动和登录后运行仍需现场验证，不能据此假设Session0服务账号也可用。Windows端主动领取，手机浏览器无需直接连接本机端口或启动Windows程序。
 
 需要落到实现中的最小约束：
 
@@ -116,11 +135,11 @@ flowchart LR
 
 XML 标签和数据必须由标准 XML 写入器转义，不能拼接未经处理的用户内容。本例已通过本机安装的 `btxmlscript_2.0.xsd` 及其包含文件的结构校验，未执行任务。结构通过不能证明模板存在、命名数据源匹配、许可可用或打印机实际出纸。
 
-## 建议的验证顺序与本轮边界
+## 初次调研建议的验证顺序与边界（历史记录）
 
-先确认 BarTender 实际授权和纸张尺寸；用现有 CSV 做一份原生 `.btw` 并完成首张、连续多件、中文／前导零／长码、位置偏移与回扫验收。随后在 Windows 单独验证打开母版、覆盖字段、`Print()` 错误返回和 `SaveAs()`，再开发网页任务链。仅在仍需要网页编辑原生版式时，增加母版派生能力。
+初稿建议先确认BarTender实际授权和纸张尺寸，用现有CSV校准母版，再验证COM并开发网页链路。后续用户已授权开发，任务链和受控母版派生已有源码实现；首张、连续多件、中文／前导零／长码、位置偏移与回扫、真实`Print()`错误返回及`SaveAs()`仍不能由替身测试代替。
 
-本轮只读核对安装版本、驱动清单、现有代码及官方 2016 帮助；没有启动 BarTender、读取授权秘密、生成真实 `.btw`、调用 COM 或打印。没有改应用版本、镜像、冻结发布附件、数据库或 NAS 配置。
+初次调研只读核对安装版本、驱动清单、当时代码及官方2016帮助，没有启动BarTender、读取授权秘密、生成真实`.btw`、调用COM或打印，也没有改应用版本、镜像、冻结附件、数据库或NAS配置。后续实施和0.8.1只读COM尝试由上节追加记录，不用这条历史边界概括当前全部工作。
 
 ## 官方资料
 
@@ -136,3 +155,8 @@ XML 标签和数据必须由标准 XML 写入器转义，不能拼接未经处�
 8. [Application.XMLScript：Enterprise Automation 要求](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/XMLScript.htm)
 9. [已有设计对象属性](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/DesignObject_Object.htm)及[Format.Objects 访问](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/Objects_Property.htm)
 10. [PrintOut 返回 void](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/PrintOut_Method.htm)
+11. [PageSetup对象及Automation授权](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/PageSetup_Object.htm)、[纸张宽度的单位索引](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/PaperWidth_Property.htm)和[Orientation枚举](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/Orientation_Property.htm)
+12. [PageSetup.Valid](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/Valid_Property.htm)及[页设置自动调整规则](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/Automatic_Adjustments_to_Page_Setup_Values.htm)
+13. [ExportToFile模板图及Automation授权](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/ExportToFile_Method.htm)
+14. [ExportPrintPreviewToImage及Enterprise Automation授权](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/ExportPreview_Method.htm)
+15. [Application.ProcessID](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/ProcessID_Property.htm)及[Window对象和句柄](https://help.seagullscientific.com/2016/en/Subsystems/ActiveX/Content/Window_Object.htm)

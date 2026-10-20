@@ -231,3 +231,16 @@ schema 5 新增 material_openings 与 material_opening_items，严格检查草�
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 
 `backup(user)`、`restore(payload,user)` 均返回 Promise；备份在事务锁内一致读取，恢复完整校验并事务写入，调用方必须等待提交成功后再响应。根层通用台账/系统备份明确排除新版物资，物资须使用专用备份；组合包不会被旧恢复静默忽略。单个 JSON 最多25 MiB、附件原始总量最多20 MiB，超过时拒绝生成无法在线恢复的包。业务备份不是 PostgreSQL、附件及部署秘密文件的灾备替代，部署级备份按 [群晖说明](SYNOLOGY.md)停服完整保存，不在线复制正在写入的 PostgreSQL 目录。
+
+## BarTender 打印与预览（独立 `/api/printing`）
+
+网页接口要求登录及`materials.read`；模板维护另需ADMIN/MATERIAL及信息库维护权限，打印站维护需`permissions.write`。普通人员仅能读写自己的任务，管理人员按打印权限查看全部。模板／任务／打印站随完整PostgreSQL备份，不加入上述物资JSON恢复。
+
+- `GET /config`返回模板元数据、打印站、管理能力，以及站点助手版本、最后通信与`connectionStatus`；60秒内联系显示online，仅代表通信。
+- `GET /agent-script`、`GET /agent-launcher`分别鉴权下载同版PS1和CMD，两个文件保存在同一固定目录；安装与后台使用见[助手指南](BARTENDER_AGENT.md)。
+- `POST /jobs`接受`{stationId,templateId,unitIds,idempotencyKey,reason?,reprintOf?,kind?,paper?}`。默认kind为print、paper为null沿用BTW；preview仅1件且不可重印或人工确认出纸。paper为`{widthMm,heightMm,orientation}`，数值5–300mm且最多3位小数，portrait要求宽≤高、landscape要求宽≥高。旧请求默认摘要保持不变；显式纸张、类型纳入幂等摘要及快照，重印保持原纸张与原完整数据。
+- `GET /jobs`分页列表含kind/paper/hasPreview，不返回图片；`GET /jobs/:id`另返回首件数据及仅授权可见的`previewBase64`。PNG绑定生成时快照，不表示物理出纸或驱动预览。
+- Windows站点Bearer接口仍以`POST /agent/claim {agentVersion}`领取；队头为preview或有paper覆盖时，低于0.8.1或不合法版本不能领取，也不能越过它领取后续任务。启动、租约、回执恢复和不自动重印规则沿用0.8.0。
+- `POST /agent/jobs/:id/result`在preview且submitted时必填`previewBase64`，仅接受规范PNG、最大2MiB、IHDR边长最多4096；其他任务或失败状态不接受图片。回执幂等比较包含图片，不允许同一结果被换图；请求不接受任意打印内容、份数、路径或XML。
+
+原生模板图由Windows的ExportToFile生成，预览不调用Print；原生对象重排和打印介质校准仍在Designer进行。网页标签JSON模板与BTW为两条独立路径，纸张设置不互相覆盖。

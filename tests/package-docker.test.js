@@ -16,7 +16,7 @@ test('offline packaging saves three matching images and rejects missing PostgreS
     fs.rmSync(fixture, { recursive: true, force: true });
   });
   for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'config']) fs.mkdirSync(path.join(fixture, name));
-  for (const name of ['scripts/package.ps1', 'scripts/package-docker.ps1', 'scripts/bartender-agent.ps1', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'docs/SYNOLOGY.md', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'docs/BARTENDER_AGENT.md', 'config/.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
+  for (const name of ['scripts/package.ps1', 'scripts/package-docker.ps1', 'scripts/bartender-agent.ps1', 'scripts/bartender-agent.cmd', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'docs/SYNOLOGY.md', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'docs/BARTENDER_AGENT.md', 'config/.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
   const commandsFile = path.join(fixture, 'artifacts', 'mock-commands.json');
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   const run = ({ expected = 0, mismatch = '', badDigest = '', architectures = 'amd64,arm64' } = {}) => {
@@ -71,7 +71,7 @@ test('offline packaging saves three matching images and rejects missing PostgreS
   assert.deepEqual(fs.readdirSync(release).filter(name => !name.endsWith('.tar') && !name.endsWith('.json') && !name.endsWith('.zip')).sort(), ['BARTENDER_AGENT.md', 'bartender-agent.ps1', 'LABEL_PRINTING.md', 'SCANNING_HTTPS.md', 'SYNOLOGY.md', 'docker-compose.local.yml', 'docker-compose.yml'].sort());
   for (const [source, asset] of [['docs/BARTENDER_AGENT.md', 'BARTENDER_AGENT.md'], ['scripts/bartender-agent.ps1', 'bartender-agent.ps1']]) assert.deepEqual(fs.readFileSync(path.join(release, asset)), fs.readFileSync(path.join(root, source)), 'standalone printing attachment must match frozen source bytes');
   const sourceManifest = JSON.parse(fs.readFileSync(path.join(release, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''));
-  for (const name of ['docs/BARTENDER_AGENT.md', 'scripts/bartender-agent.ps1']) {
+  for (const name of ['docs/BARTENDER_AGENT.md', 'scripts/bartender-agent.ps1', 'scripts/bartender-agent.cmd']) {
     assert.equal(sourceManifest.sources.find(source => source.path === name)?.sha256, crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex'), 'source ZIP must include the same printing source');
   }
   assert.deepEqual(run(), [], 'verified reuse must not rebuild or pull dependencies');

@@ -85,6 +85,13 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
     assert.ok(launcher.includes('node_modules\\zxing-wasm\\dist\\full\\zxing_full.wasm'), 'launcher installs scanner dependency on older extracted installations');
   assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile'), 'utf8'), /COPY[^\n]+package\.json package-lock\.json/);
   assert.match(fs.readFileSync(path.join(extracted, 'deploy/Dockerfile.dockerignore'), 'utf8'), /^!package-lock\.json$/m);
+  const dockerfile = fs.readFileSync(path.join(extracted, 'deploy/Dockerfile'), 'utf8');
+  const dockerAllowlist = fs.readFileSync(path.join(extracted, 'deploy/Dockerfile.dockerignore'), 'utf8').split(/\r?\n/);
+  for (const agent of ['bartender-agent.ps1', 'bartender-agent.cmd']) {
+    assert.ok(files.includes(`scripts/${agent}`), `printing download must be in ZIP: ${agent}`);
+    assert.ok(dockerfile.split(/\r?\n/).some(line => line.startsWith('COPY ') && line.split(/\s+/).includes(`scripts/${agent}`)), `printing download must be in image: ${agent}`);
+    assert.ok(dockerAllowlist.includes(`!scripts/${agent}`), `printing download must enter Docker context: ${agent}`);
+  }
   run(process.execPath, [path.join(extracted, 'scripts/check.js')]);
   if (process.env.LABOS_PACKAGE_INSTALL_TEST === '1') {
     const npmCache = path.join(root, 'artifacts/cache', version, 'npm');
