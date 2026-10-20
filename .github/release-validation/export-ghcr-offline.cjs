@@ -205,7 +205,7 @@ async function main() {
 
   if (validate) {
     const frozen = path.join(stage, 'frozen');
-    for (const name of ['tests/docker.test.js', 'package.json', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml']) {
+    for (const name of ['tests/docker.test.js', 'package.json', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'scripts/bartender-agent.ps1']) {
       const file = path.join(frozen, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, selected.get(name));
     }
     for (const architecture of ['amd64', 'arm64']) {
