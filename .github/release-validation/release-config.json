@@ -1,0 +1,9 @@
+{
+  "version": "0.8.2",
+  "commit": "7298bd7d2ab5df2184c2f8eb518428adf0fef5ee",
+  "indexDigest": "sha256:e093dc33d84868732d78ebd2f97bfd1bf6f82349bc1bdd5a2a14830df9c03e48",
+  "baseParent": "b69b564e57847675af59ede3817e8253f3c8cfda",
+  "featureBranch": "feature/v0.8.2-printing-release-verification",
+  "status": "source-frozen",
+  "buildRunId": 39383264290
+}
