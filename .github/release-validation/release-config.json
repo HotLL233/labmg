@@ -1,0 +1,9 @@
+{
+  "version": "0.8.0",
+  "commit": "b4d0df5dbca039fa32795c4b30c6fa89281e74b8",
+  "indexDigest": "sha256:136c1ce392ae5cdb994bf319157d54bc988dc1aaf05070dfc7077da9210a58e6",
+  "baseParent": "fb9cf1c74319a7fb7f9b51cea46e8e8fc7de1b24",
+  "featureBranch": "feature/v0.8.0-bartender-printing",
+  "status": "source-frozen",
+  "buildRunId": 39363826155
+}
