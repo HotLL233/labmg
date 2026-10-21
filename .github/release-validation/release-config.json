@@ -1,0 +1,9 @@
+{
+  "version": "0.9.1",
+  "commit": "89c20325f86471e172b181fd75d523c6c9d67546",
+  "indexDigest": "sha256:a4e90155d2674e2d1da0dfc809094ce9fde0a3ccb63f0da2b3df85cda3762841",
+  "baseParent": "7e30ab1d9b6a5cf83e2e4f6d74b8f1a7f9e2d1fc",
+  "featureBranch": "feature/v0.9.1-print-paper-diagnostics",
+  "status": "source-frozen",
+  "buildRunId": 39527567285
+}
