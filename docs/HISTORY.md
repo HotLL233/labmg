@@ -631,3 +631,11 @@ README、开发与部署说明、标签指南、MEMORY与统一CHANGELOG补充�
 amd64 TAR247938048字节、SHA256 `8f09fde7918cd70641ea5c61e3b399bdbe4a38b64e20796f538f351f593b2260`；arm64 TAR244652032字节、SHA256 `a55acf56e6b97428d9cabed61fa2f020bdb3d99b5c70e6651d1b24d26e213905`。`local-image-archive-verification.json`确认各包恰含labos:0.9.1、postgres:18-bookworm、caddy:2.11.7-alpine，六config的Linux架构及摘要通过；未在本机执行Docker或逐层读取层正文。首次归档检查因并行运行时前置`local-delivery-verification.json`尚未生成而失败，`local-image-archives-final-check.txt`保留，按顺序重跑`local-image-archives-after-delivery-check.txt`通过，属于验证顺序问题而非产品错误。
 
 Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check.txt`及`github-release-verification.json`通过12件公开元数据、11摘要及10个非TAR共769189字节的官方API匿名完整下载。报告`localTarDownloads:false`只说明该检查自身不传输TAR，本机双TAR完整性由独立报告证明，不称匿名完整TAR下载或浏览器Release界面验收。两条0.9.1变更由未发布归入2026-10-21真实版本，其他旧未发布项和历史版本保留；后补只改七份文档，不重打源码／镜像／资产、不移动标签。本轮未访问NAS、业务库、原生系统打印窗口、真实USB设备、真手机或Windows计划任务，物理送料及长期容量仍须现场验收。
+
+## 2026-10-21：0.9.1实物偏移反馈与默认纸型核对
+
+用户提供实物照片并反馈仍偏，进一步确认纸卷宽38.5mm、走纸长30.5mm，照片是三次不同设置的结果，暂不确定是否逐张漂移。照片有边缘截断及空白，但不能从斜拍量出准确补偿或推定同次任务的送料行为。只读Win32_PrinterConfiguration取得本机DL-886A（NEW）副本1的PaperWidth=1041、PaperLength=1016，微软类文档确认单位为0.1mm，即104.1×101.6mm；记录`artifacts/cache/print-offset-20261021/printer-defaults-initial.json`。这属于Windows默认配置，不代表照片中任务的实际纸型；已请用户核对打印首选项，未改配置或发送任务。
+
+只读复核打印调用、固定尺寸、隐藏项与最后选中项分页，并做最小合成Edge对照，`css-probe-ME86Pd/report.json`保存8份PDF共19页，每页含图像绘制和文字，无空白页或浏览器异常。38.5×30.5mm下10件10页、单选第5件1页、4–6件3页，单件0°／90°各1页；关闭CSS纸型优先的Letter对照变成大页。此有限测试不能覆盖原生预览、驱动或实物，未将DevTools方向参数当作Windows设置。源码SHA256仍为`ca794d7a39bdf94b7043c85f249119b065919fe66a5f66498e114adfd9ef8bbb`，未确认新源码缺陷。
+
+在`feature/print-offset-diagnostics`仅补充固定一套纸型／方向／缩放／偏移、单张PDF及同任务连续三张的排查步骤；稳定的整层偏移才测量校准。保留0.9.1发布与全部旧证据，不重打镜像或改标签，不访问NAS或业务库，不将实物问题记为已修复。现场对照结果待用户反馈。
