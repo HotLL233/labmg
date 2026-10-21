@@ -617,3 +617,17 @@ README、开发与部署说明、标签指南、MEMORY与统一CHANGELOG补充�
 真实隔离Edge报告`artifacts/cache/0.9.1/labels/workflow-O6Owgl/report.json`通过283项、6份双页PDF、6图、0异常，源码SHA256为`f22fbf20a1242963931b208aee1d1f88f5970330b83f13130ee16d018a9eb9f0`。首轮helper误将90°水平-10mm视为必然越界负例，保留失败报告；修正为垂直-10mm后通过，未改几何源码。上述浏览器结果及完整回归属于最后三条回落文案优化前阶段；后将提示改为“从60×40mm示例载入初始布局，请以当前纸张设置为准”，防止改尺寸后误读为仍用默认纸张。优化后标签25/25、37JS重跑通过，最终文案Edge专项待重跑。本轮只验证列明纸型、合成数据及拦截系统打印请求，未打开真实窗口。README、开发、部署、标签指南、MEMORY及统一CHANGELOG先记录开发状态；0.9.1未发布前不把目标YML标签或TAR清单写成已交付，本轮未访问NAS、业务库、真实打印设备或Windows计划任务。
 
 最终文案浏览器专项随后完成：`artifacts/cache/0.9.1/labels/workflow-AS2XDU/report.json`通过286项、6份双页PDF、6图、0异常，最终源码SHA256为`ca794d7a39bdf94b7043c85f249119b065919fe66a5f66498e114adfd9ef8bbb`，补充前述待验状态；283项报告仍作为阶段证据。冻结前已按精确data目录fast停止本轮专用localhost PG54891，报告`postgres-stop-report.json`保留，不关闭其他实例或删除缓存。正式PG18、镜像和发布结果待本轮门禁后追加。
+
+## 2026-10-21：0.9.1 冻结、正式门禁与公开交付
+
+源码冻结为`89c20325f86471e172b181fd75d523c6c9d67546`／`v0.9.1`，注解标签对象`daee2621d24c7798453da97a0afd4193616c789d`。构建`39527567285`／job`118985714935`成功，原日志228330字节、SHA256 `ab4a685e9f8f93290436ca722a8aa760c70c804184b6083a634cc7c1f423d029`；独立复核真实PG18.6回归177/177、0失败／跳过、37JS通过。双架构应用索引`sha256:a4e90155d2674e2d1da0dfc809094ce9fde0a3ccb63f0da2b3df85cda3762841`，本机匿名五份registry JSON的架构、版本、revision与非root核对通过。
+
+验证`39528200860`／运维提交`4947707fd4bd6536f060fd1c2f9ad12f9665e296`四门禁成功：匿名双架构及在线Compose、绑定同次在线执行的PG18六项持久化证据、每架构应用+PG18+Caddy三镜像TAR与本地YML禁止pull的生命周期、严格信任本实例CA的无SNI Caddy HTTPS。`independent-raw-tap-verification-39528200860.json`独立核对三份原TAP各1通过、0失败／跳过、root初始化标记各1；PG captured不计第四次生命周期，ARM64为QEMU，非目标实机验收。
+
+首次证据导入因少传`--zip`在参数门禁失败，`import-evidence-first-attempt.json`保留；下载本次官方13676字节证据ZIP后重跑通过，属于工具调用失败而非应用错误。本机TAR首次下载`blob-reuse-download-2vKzN4`在amd64偏移166146048处失败，未生成目标TAR，原part及报告保留；对该28067字节取得新官方redirect后严格206／长度探测通过，不据此确认缓存故障。仅调整本轮ignored下载helper取得新redirect和不含敏感信息的结果日志，自检通过后在独立目录重试。
+
+最终`blob-reuse-download-gLXJs4/report.json`为passed：只复用再次核SHA的旧blob正文，新header及其他范围取官方严格Range，整包官方size／SHA通过后新建，未改冻结资产。本机`local-delivery-verification.json`确认12件共493359269字节、11条摘要、5份源附件与冻结ZIP逐字节一致。源码ZIP641472字节、SHA256 `e6bb60c7f8dc3223c424d3926a9c69b181e1888ee45b6d366b6c1f7cfb0c58af`，manifest sourceSha256为`1b22597d3abc17dce2c720737cccbf1508392c6f88da955689631ea08e7d8390`。
+
+amd64 TAR247938048字节、SHA256 `8f09fde7918cd70641ea5c61e3b399bdbe4a38b64e20796f538f351f593b2260`；arm64 TAR244652032字节、SHA256 `a55acf56e6b97428d9cabed61fa2f020bdb3d99b5c70e6651d1b24d26e213905`。`local-image-archive-verification.json`确认各包恰含labos:0.9.1、postgres:18-bookworm、caddy:2.11.7-alpine，六config的Linux架构及摘要通过；未在本机执行Docker或逐层读取层正文。首次归档检查因并行运行时前置`local-delivery-verification.json`尚未生成而失败，`local-image-archives-final-check.txt`保留，按顺序重跑`local-image-archives-after-delivery-check.txt`通过，属于验证顺序问题而非产品错误。
+
+Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check.txt`及`github-release-verification.json`通过12件公开元数据、11摘要及10个非TAR共769189字节的官方API匿名完整下载。报告`localTarDownloads:false`只说明该检查自身不传输TAR，本机双TAR完整性由独立报告证明，不称匿名完整TAR下载或浏览器Release界面验收。两条0.9.1变更由未发布归入2026-10-21真实版本，其他旧未发布项和历史版本保留；后补只改七份文档，不重打源码／镜像／资产、不移动标签。本轮未访问NAS、业务库、原生系统打印窗口、真实USB设备、真手机或Windows计划任务，物理送料及长期容量仍须现场验收。
