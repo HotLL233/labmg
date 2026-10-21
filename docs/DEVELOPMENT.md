@@ -18,6 +18,7 @@ scripts/
   package-docker.ps1   Docker 镜像导出与版本化层缓存
 config/
   .env.example         环境变量示例
+  label-templates/     可导入的标签布局示例，使用前备份当前模板并试打
 deploy/
   Dockerfile           Node 24 非 root 应用镜像
   docker-compose.yml   在线完整配置：应用、PG18、初始化、内联 HTTPS

@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "width": 38.5,
+  "height": 30.5,
+  "rotation": 0,
+  "offsetX": 0,
+  "offsetY": 0,
+  "elements": [
+    {
+      "field": "name",
+      "show": true,
+      "x": 2,
+      "y": 2,
+      "w": 17.5,
+      "h": 4,
+      "font": 9
+    },
+    {
+      "field": "spec",
+      "show": true,
+      "x": 2,
+      "y": 6,
+      "w": 17.5,
+      "h": 5,
+      "font": 7
+    },
+    {
+      "field": "unit",
+      "show": true,
+      "x": 2,
+      "y": 11,
+      "w": 17.5,
+      "h": 3.5,
+      "font": 7
+    },
+    {
+      "field": "code",
+      "show": true,
+      "x": 2,
+      "y": 18.5,
+      "w": 34.5,
+      "h": 3.5,
+      "font": 6
+    },
+    {
+      "field": "qr",
+      "show": true,
+      "x": 21.5,
+      "y": 2,
+      "w": 15,
+      "h": 15,
+      "font": 8
+    },
+    {
+      "field": "catalogCode",
+      "show": false,
+      "x": 2,
+      "y": 20,
+      "w": 56,
+      "h": 4,
+      "font": 8
+    },
+    {
+      "field": "regionName",
+      "show": false,
+      "x": 2,
+      "y": 31,
+      "w": 24,
+      "h": 4,
+      "font": 8
+    },
+    {
+      "field": "warehouse",
+      "show": true,
+      "x": 2,
+      "y": 15,
+      "w": 17.5,
+      "h": 3.5,
+      "font": 7
+    },
+    {
+      "field": "location",
+      "show": true,
+      "x": 2,
+      "y": 22,
+      "w": 34.5,
+      "h": 3.5,
+      "font": 7
+    },
+    {
+      "field": "batch",
+      "show": true,
+      "x": 2,
+      "y": 25.5,
+      "w": 34.5,
+      "h": 3,
+      "font": 7
+    },
+    {
+      "field": "expiryDate",
+      "show": false,
+      "x": 30,
+      "y": 34,
+      "w": 28,
+      "h": 4,
+      "font": 8
+    }
+  ]
+}
