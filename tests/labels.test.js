@@ -10,7 +10,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 // Only the popup/document APIs used by labels are modeled; real Edge and physical printers are separate checks.
-function fixture({ template, createQr, imageFailure = false, textOverflow, onYield } = {}) {
+function fixture({ template, stored, readError = false, saveError = false, createQr, imageFailure = false, textOverflow, onYield } = {}) {
   const urls = new Set(), revoked = [], generated = [], downloads = [], popups = [], saved=[];
   const node = () => ({ disabled: false, textContent: '', setAttribute() {}, remove() {}, click() { downloads.push(this); } });
   function popup() {
@@ -48,7 +48,7 @@ function fixture({ template, createQr, imageFailure = false, textOverflow, onYie
   }
   const context = {
     Blob, clearTimeout, setTimeout(callback, delay) { if (delay === 0) onYield?.(); return setTimeout(callback, delay); },
-    localStorage: { getItem() { return template ? JSON.stringify(template) : null; },setItem(key,value){saved.push({key,value:JSON.parse(value)});} },
+    localStorage: { getItem() { if(readError)throw Error('读取被阻止');return stored===undefined?(template?JSON.stringify(template):null):stored; },setItem(key,value){if(saveError)throw Error('保存被阻止');saved.push({key,value:JSON.parse(value)});} },
     URL: { createObjectURL() { const url = 'blob:label-' + (generated.length + 1); urls.add(url); generated.push(url); return url; }, revokeObjectURL(url) { urls.delete(url); revoked.push(url); } },
     document: { createElement: node, body: { appendChild() {} } }, window: { open: popup },
     MaterialScanner: {
@@ -163,6 +163,51 @@ test('ready label popups print at the configured size and release every blob aft
   popup.close(); assert.equal(app.urls.size, 0); assert.equal(app.revoked.length, 2);
 });
 
+test('missing, corrupt and unreadable browser templates expose the 60x40 fallback without overwriting settings',async()=>{
+  for(const [settings,notice] of [[{},/没有已保存模板/],[{stored:'{broken'},/已保存模板无效/],[{stored:'{"schema":2,"elements":[]}'},/已保存模板无效/],[{readError:true},/不允许读取模板设置/]]){
+    const app=fixture(settings);await app.api.printUnits([{code:'A001'}]);const popup=app.popups[0],doc=popup.document;
+    assert.match(doc.html,notice);assert.match(doc.html,/已从 60 × 40 mm 示例载入初始布局/);
+    assert.equal(doc.getElementById('paper-width').value,'60');assert.equal(doc.getElementById('paper-height').value,'40');
+    assert.equal(app.saved.length,0);assert.match(doc.getElementById('paper-summary').textContent,/本次纸张：60 × 40 mm/);
+    popup.close();
+  }
+  const saved=resize(clone(defaults),38.5,30.5,90),app=fixture({template:saved});await app.api.printUnits([{code:'A001'}]);
+  const doc=app.popups[0].document;assert.match(doc.html,/已读取当前浏览器和访问地址下保存的模板/);
+  assert.equal(doc.getElementById('paper-width').value,'38.5');assert.equal(doc.getElementById('paper-height').value,'30.5');assert.equal(doc.getElementById('paper-rotation').value,'90');assert.equal(app.saved.length,0);
+  app.popups[0].close();
+});
+
+test('paper and driver reminders follow preset and custom dimensions and saving reports its actual result',async()=>{
+  for(const saveError of [false,true]){
+    const app=fixture({saveError});await app.api.printUnits([{code:'A001'}]);const popup=app.popups[0],doc=popup.document;
+    assert.match(doc.html,/#paper-summary\{font-size:20px/);
+    const preset=doc.getElementById('paper-preset');preset.value='38.5x30.5';preset.onchange();
+    assert.match(doc.getElementById('driver-reminder').textContent,/横跨纸卷宽 38.5 mm、走纸长 30.5 mm/);
+    assert.match(doc.getElementById('template-status').textContent,/尚未保存/);
+    doc.getElementById('save-paper').onclick();
+    if(saveError){assert.equal(app.saved.length,0);assert.match(doc.getElementById('status').textContent,/未保存：保存被阻止/);assert.match(doc.getElementById('template-status').textContent,/尚未保存/);}
+    else{assert.equal(app.saved.length,1);assert.match(doc.getElementById('template-status').textContent,/已保存到本浏览器和当前访问地址/);}
+    const width=doc.getElementById('paper-width');width.value='50';width.oninput();
+    assert.match(doc.getElementById('driver-reminder').textContent,/横跨纸卷宽 50 mm、走纸长 30.5 mm（自定义纸型）/);
+    assert.match(doc.getElementById('template-status').textContent,/尚未保存/);popup.close();
+  }
+});
+
+test('PDF diagnostics use the selected range and pending paper edits without claiming automatic file export',async()=>{
+  const app=fixture();await app.api.printUnits([{code:'A001'},{code:'A002'},{code:'A003'}]);const popup=app.popups[0],doc=popup.document;
+  doc.getElementById('from').value='2';doc.getElementById('to').value='3';
+  doc.getElementById('paper-width').value='50';doc.getElementById('paper-height').value='35';doc.getElementById('paper-rotation').value='90';
+  doc.getElementById('pdf-print').onclick();assert.deepEqual(popup.printed,[[2,3]]);
+  assert.match(doc.getElementById('label-layout').textContent,/@page\{size:50mm 35mm;margin:0\}/);
+  assert.match(doc.getElementById('paper-summary').textContent,/内容 90°/);
+  assert.match(doc.getElementById('pdf-size').textContent,/141\.73 × 99\.21 pt/);
+  assert.match(doc.getElementById('status').textContent,/手动选择浏览器“另存为 PDF”/);assert.match(doc.getElementById('status').textContent,/无法确认是否保存成功/);
+  assert.equal(app.downloads.length,0);assert.equal(app.saved.length,0);
+  doc.getElementById('from').value='4';doc.getElementById('pdf-print').onclick();assert.equal(popup.printCount,1);assert.equal(doc.getElementById('pdf-print').disabled,true);
+  doc.getElementById('from').value='1';doc.getElementById('paper-width').value='0';doc.getElementById('pdf-print').onclick();assert.equal(popup.printCount,1);assert.match(doc.getElementById('status').textContent,/预览未更新/);
+  popup.close();
+});
+
 test('DL-886A print range validates input, previews selected labels and restores selection after a one-label trial', async () => {
   const app = fixture(); await app.api.printUnits([{ code: 'A001' }, { code: 'A002' }, { code: 'A003' }]);
   const popup = app.popups[0], doc = popup.document, from = doc.getElementById('from'), to = doc.getElementById('to');
@@ -262,7 +307,8 @@ test('actual text overflow names the clipped field and blocks silent print outpu
   const app=fixture({textOverflow:'name'});await app.api.printUnits([{code:'A001',name:'较长名称'}]);
   const popup=app.popups[0],doc=popup.document;
   assert.match(doc.getElementById('status').textContent,/文字超出元素范围：物资名称/);
-  assert.equal(doc.getElementById('print').disabled,true);doc.getElementById('print').onclick();assert.equal(popup.printCount,0);
+  assert.equal(doc.getElementById('print').disabled,true);assert.equal(doc.getElementById('pdf-print').disabled,true);
+  doc.getElementById('print').onclick();doc.getElementById('pdf-print').onclick();assert.equal(popup.printCount,0);
   popup.close();
 });
 
@@ -312,7 +358,7 @@ test('batch labels contain their real QR and no unavailable Code128 placeholder'
 });
 
 test('changing pages after label generation closes a stale popup instead of issuing a print or download', async () => {
-  for (const action of ['print', 'test-print']) {
+  for (const action of ['print', 'test-print', 'pdf-print']) {
     let active = true;
     const app = fixture(); await app.api.printUnits([{ code: 'A001' }], { isActive: () => active });
     active = false; app.popups[0].document.getElementById(action).onclick();
