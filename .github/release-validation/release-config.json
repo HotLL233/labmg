@@ -1,0 +1,9 @@
+{
+  "version": "0.11.0",
+  "commit": "20423cabbc7a9d7e2599e9d62332a327212c3c43",
+  "indexDigest": "sha256:2b25fa66620da0284b30c159a2ecb0007de9601018c43c68a35fc58488aa7b92",
+  "baseParent": "da3acbea3d8cab91fcecd7676da4e6cb10aa4671",
+  "featureBranch": "feature/v0.11.0-material-ui-inventory",
+  "status": "source-frozen",
+  "buildRunId": 39751146983
+}
