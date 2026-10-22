@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.9.3（打印预览与自动 HTTPS，开发中）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。本版尚未冻结或发布；已公开交付仍为[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)，不能把当前未发布YML与旧镜像混用。实际状态见[版本说明](CHANGELOG.md)，旧版验证不作为本轮结果。
+本源码版本为 **0.9.4（部署验证修正，开发中）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。本版尚未冻结或发布；已公开交付仍为[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)，不能把当前未发布YML与旧镜像混用。实际状态见[版本说明](CHANGELOG.md)，旧版验证不作为本轮结果。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -52,7 +52,13 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.9.3：打印预览与自动 HTTPS（开发中，2026-10-22）
+## 0.9.4：部署验证修正（开发中，2026-10-22）
+
+从0.9.3冻结9260b1e建立feature/v0.9.4-https-deployment-verification，补齐Docker preflight的node -e子进程UID/GID声明；其余产品源码保持，所有版本配置及cache/releases目录改为0.9.4。0.9.3构建真实PG18.6的189/189、39JS通过，但实际Gate1在预检报uid未定义，生命周期未开始，后续三门禁未运行，Release不公开。保留旧标签、源码、镜像、7附件草稿、官方失败原日志与诊断ZIP，不移动标签或覆盖已有归档；0.9.4重新冻结及运行所有正式门禁。
+
+打印UI沿用同文件0.9.3的188项Edge／6PDF／6图，不称新执行；NAS现有0.9.2 HTTPS恢复结果保持。缓存只用artifacts/cache/0.9.4/，交付目标artifacts/releases/0.9.4/，当前尚未冻结发布，正式部署仍取公开0.9.2配套附件。
+
+## 0.9.3：打印预览与自动 HTTPS（冻结候选，未公开，2026-10-22）
 
 在 `feature/v0.9.3-print-preview-auto-https` 开发，缓存统一 `artifacts/cache/0.9.3/`，交付目标 `artifacts/releases/0.9.3/`，main与既有交付保持原样。打印页长文和纸张／校准默认折叠，顶部不再固定；按钮缩短为“试打首张／系统打印／保存 PDF／保存设置”，错误仍在折叠区外可见。模板和实体纸／内容旋转逻辑不变。
 

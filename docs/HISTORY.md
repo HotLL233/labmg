@@ -699,3 +699,14 @@ Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check
 0.9.3冻结前补充：最终受影响合跑42项中41通过、0失败、1本机Docker条件跳过，含两项独立打包回归；日志`affected-tests-final.txt`。本轮没有为未改动业务重启专用本机数据库，正式PG18完整回归交由本版云端实际执行。最终离线helper总自检03:52:58Z通过，29份CJS／3段workflow内联／30旧摘要保护及12附件、11摘要、7初始输入通过；真实源码ZIP全src与Git逐文件核验仍待冻结后执行。
 
 2026-10-22现有NAS HTTPS随后已恢复：通过已授权OpenSSH登录，仅把实际0.9.2 YML中的默认host从0.0.0.0改为NAS局域网IP，先备份`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅重建HTTPS代理。远端命令核对应用／PG容器ID及CA摘要不变，两者保持healthy。独立LAN客户端使用与当前NAS一致的CA（SHA256 `7593d8aa4e02b7898ccd5580b7d1fbfe8f02d4a0fb968f7e75a9365c726ac2ca`）严格校验链及IP身份、空SNI访问成功：HTTP／HTTPS根页都200、2788字节、正文SHA一致；新证书SAN为实际IP。报告`nas-https-restoration.json`补充上方“尚未写入NAS”的早期状态。未登录应用或读业务正文，未重建应用／数据库，未在NAS部署0.9.3；新版auto和目标GUI首次创建路径仍须独立验证，手机相机及USB未验。
+
+
+## 2026-10-22：0.9.3候选停止与0.9.4验证修正
+
+0.9.3冻结9260b1e／注解v0.9.3 e5b068a，构建39719606701／job119629776136原日志确认PG18.6回归189/189、39JS及双架构索引bb28e4ff…通过，独立代理核对一致。标准ZIP107源／108项与23个src完整验证，初始新增Git原字节guard误拒正常Windows CRLF；仅修ignored validator为先验证原ZIP字节、再按Git clean规则核对tree blob，14原样／9仅CRLF-LF／0其他差异，不重打ZIP或移标签。
+
+实际验证39720321145／运维454378c164c8d2c8c7154f538923b5c40338fb27在Gate1失败：root新增Docker node -e测试漏声明uid/gid，已完成一次HTTPS原子写入及权限断言但尚未启动Compose生命周期，后续门禁跳过，cleanup未确认。官方失败诊断artifact12400028728／SHA b7b11b35f1b89357a738fe05fdf7b85cb9ca117e4390f69b70106c2c7bbee2a9及原TAP保存于0.9.3 cache，保留失败，不弱化门禁或改冻结测试。候选Release保留私有7附件，镜像存在不代表可部署公开版。
+
+按旧标签／归档不可改写约定，从9260b1e新建feature/v0.9.4-https-deployment-verification，补一行子进程环境UID/GID声明，同步版本及隔离缓存0.9.4。产品源码不变，既有Edge188项等只沿用同文件证据；本轮正式PG18、四门禁及双架构TAR／12件交付重新执行。0.9.2现场HTTPS已恢复的结果保持，未向NAS部署失败候选。
+
+0.9.4冻结前本机受影响合跑42项中41通过、0失败、1Docker条件跳过，两个打包回归通过；39JS语法通过。本机无运行Docker，子进程修正的真实Linux执行继续由本版容器门禁验证，不以本机条件跳过代替通过。

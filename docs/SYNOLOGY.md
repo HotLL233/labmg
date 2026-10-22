@@ -1,31 +1,33 @@
 # 群晖 Docker 部署
 
-当前源码为**0.9.3（开发中，未发布）**，继续PostgreSQL18。本页当前步骤面向0.9.3源码配置；该版镜像和TAR尚未交付，不能直接用未发布配置更新现有项目。正式部署暂从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载其同版本附件，不混用0.9.2镜像与当前0.9.3 YML。发布附件内指南保留源码冻结快照，后补事实以当前仓库文档及版本记录为准。
+当前源码为**0.9.4（开发中，未发布）**，继续PostgreSQL18。本页当前步骤面向0.9.4源码配置；该版镜像和TAR尚未交付，不能直接用未发布配置更新现有项目。正式部署暂从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载其同版本附件，不混用0.9.2镜像与当前0.9.4 YML。发布附件内指南保留源码冻结快照，后补事实以当前仓库文档及版本记录为准。
+
+0.9.3虽通过真实CI回归189/189及39份JS检查，容器Gate1因新增测试脚本漏声明uid/gid而在功能断言前失败，保留为未公开冻结候选；0.9.4修正测试，交付仍须通过本轮门禁，不移动旧标签。当前最新公开部署版仍为0.9.2。
 
 0.9.2已交付在线／本地两份完整YML、amd64／arm64三镜像TAR等12件共488902906字节，本机全部保存并通过11条摘要及5份冻结源附件核对；双TAR三镜像及六config核对通过。公开后12件元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过，TAR另有本机完整下载核验。该版真实PG18.6回归179/179、37JS和四项容器门禁通过，ARM64为QEMU。旧0.9.1及更早验证保持其原有范围。同一PG18项目更新保留原runtime/、https/、项目名及UID/GID，不提供PG17／SQLite迁移，旧版产物保持原样。
 
-0.9.3保留0.9.2的可视化标签排版，将打印页纸张设置和长说明默认折叠，标签预览、范围与操作先显示；系统窗口仍由用户确认驱动，不自动选择USB设备。实体纸宽×走纸长固定，内容独立0°／90°旋转，当前纸卷宽38.5mm、走纸长30.5mm，避免驱动再旋转。188项有限浏览器检查不代替实物试打；2026-10-22用户确认的是此前提供的两方向留白JSON模板，不能扩展为所有模板或新设计器已实物验收。操作及旧后台清理见[标签打印说明](LABEL_PRINTING.md)。
+0.9.4沿用0.9.3的精简打印页，保留0.9.2的可视化标签排版，将纸张设置和长说明默认折叠，预览、范围与操作先显示；系统窗口仍由用户确认驱动，不自动选择USB设备。实体纸宽×走纸长固定，内容独立0°／90°旋转，当前纸卷宽38.5mm、走纸长30.5mm，避免驱动再旋转。本轮未重跑188项浏览器专项，沿用0.9.3同文件证据，不能代替实物试打；2026-10-22用户确认的仅为此前两方向留白JSON模板，不能扩展为所有模板或新设计器已实物验收。操作及旧后台清理见[标签打印说明](LABEL_PRINTING.md)。
 
-2026-10-22现有0.9.2 NAS已备份实际YML并仅将代理主机默认值由`0.0.0.0`修正为实际IPv4，再只重建代理。独立客户端使用原CA、空SNI及严格IP身份校验，HTTP／HTTPS公共根页均为200、2788字节且摘要一致，应用／数据库容器与CA未变。证据见`artifacts/cache/0.9.3/nas-https-restoration.json`；这不是0.9.3自动识别的NAS验收，手机相机及USB仍待确认。
+2026-10-22现有0.9.2 NAS已备份实际YML并仅将代理主机默认值由`0.0.0.0`修正为实际IPv4，再只重建代理。独立客户端使用原CA、空SNI及严格IP身份校验，HTTP／HTTPS公共根页均为200、2788字节且摘要一致，应用／数据库容器与CA未变。证据见`artifacts/cache/0.9.3/nas-https-restoration.json`；这不是0.9.4自动识别的NAS验收，手机相机及USB仍待确认。
 
 ## 两份完整 YML，任选一份
 
 | 方式 | 文件 | 使用条件 |
 | --- | --- | --- |
-| 在线拉取 | [开发中 docker-compose.yml](../deploy/docker-compose.yml) | 配套0.9.3镜像交付后，应用从GHCR拉取，数据库与代理从官方镜像仓库拉取 |
-| 本地镜像 | [开发中 docker-compose.local.yml](../deploy/docker-compose.local.yml) | 配套0.9.3 TAR交付并导入全部三个镜像后使用，所有服务禁止拉取 |
+| 在线拉取 | [开发中 docker-compose.yml](../deploy/docker-compose.yml) | 配套0.9.4镜像交付后，应用从GHCR拉取，数据库与代理从官方镜像仓库拉取 |
+| 本地镜像 | [开发中 docker-compose.local.yml](../deploy/docker-compose.local.yml) | 配套0.9.4 TAR交付并导入全部三个镜像后使用，所有服务禁止拉取 |
 
-两份文件都包含应用、PostgreSQL 18、一次性初始化和 HTTPS 代理四个服务。0.9.3只有`labos-init`使用宿主机网络，自动选择一个主局域网IPv4并生成`runtime/https-config/Caddyfile`，代理只读加载；应用和代理仍在Compose网络。**不用手写Caddyfile，不用合并HTTPS YML，也不要求创建.env。** 在线与本地版不要一起启动；在Container Manager项目中选择其中一份。如果界面固定要求文件名docker-compose.yml，可复制为此名称。上一已发布版附件仍见[0.9.2在线YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.yml)和[本地YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.local.yml)，其手填IP步骤保留在该版指南中。
+两份文件都包含应用、PostgreSQL 18、一次性初始化和 HTTPS 代理四个服务。0.9.4只有`labos-init`使用宿主机网络，自动选择一个主局域网IPv4并生成`runtime/https-config/Caddyfile`，代理只读加载；应用和代理仍在Compose网络。**不用手写Caddyfile，不用合并HTTPS YML，也不要求创建.env。** 在线与本地版不要一起启动；在Container Manager项目中选择其中一份。如果界面固定要求文件名docker-compose.yml，可复制为此名称。上一已发布版附件仍见[0.9.2在线YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.yml)和[本地YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.local.yml)，其手填IP步骤保留在该版指南中。
 
 ## 首次部署
 
 1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。在 File Station 先创建 YML 旁的 `runtime/`、`https/` 两个父目录，避免 DSM 拒绝不存在的 bind 路径；已有部署保留原目录内容。
 2. 默认保留`labos-init`中的`LABOS_HTTPS_HOST=auto`，无需手填IP；空值、旧`CHANGE_ME`及`0.0.0.0`也按自动识别处理。识别排除回环、Docker／桥接、VPN及链路本地地址，优先按默认路由选主接口。无可用地址或多网卡仍无法确定时初始化明确报错；此时在该服务中指定实际IPv4或主机名，不填协议、端口、路径。已有`.env`或项目环境可能覆盖默认值。建议保留固定IP；默认HTTP 3000、HTTPS 8443，冲突时修改端口映射。
-3. 取得实际交付的同版本配套镜像后，在线版拉取；本地版导入对应amd64或arm64 TAR，须包含`labos:0.9.3`、`postgres:18-bookworm`、`caddy:2.11.7-alpine`三者。先核对随包SHA256SUMS及群晖架构；当前尚无0.9.3已发布TAR，不能把下列包名当作本机已有文件。
+3. 取得实际交付的同版本配套镜像后，在线版拉取；本地版导入对应amd64或arm64 TAR，须包含`labos:0.9.4`、`postgres:18-bookworm`、`caddy:2.11.7-alpine`三者。先核对随包SHA256SUMS及群晖架构；当前尚无0.9.4已发布TAR，不能把下列包名当作本机已有文件。
 4. 启动项目。`labos-init`日志显示`HTTPS host: <实际地址> (auto, interface <网卡>)`及配置路径，正常退出0后数据库与应用启动，代理读取生成配置。选择的是一个地址，并非为所有网卡IP签发证书。空数据库首次打开网页设置管理员账号和密码。
 5. 按[手机HTTPS与扫码](SCANNING_HTTPS.md)将本项目根证书安装到手机并信任，通过日志所示实际地址的`https://<地址>:8443`使用实时相机；不能打开`https://0.0.0.0:8443`。
 
-以下命令仅在取得0.9.3同版本配套镜像后使用，在 **NAS SSH的项目目录**执行，在线版示例：
+以下命令仅在取得0.9.4同版本配套镜像后使用，在 **NAS SSH的项目目录**执行，在线版示例：
 
 ~~~text
 docker compose -f docker-compose.yml config --quiet
@@ -36,7 +38,7 @@ docker compose -f docker-compose.yml logs --tail=100 labos-init postgres labos l
 本地版示例（目标为 amd64，ARM64 换对应包名）：
 
 ~~~text
-docker load -i labos-0.9.3-linux-amd64.tar
+docker load -i labos-0.9.4-linux-amd64.tar
 docker compose -f docker-compose.local.yml config --quiet
 docker compose -f docker-compose.local.yml up -d --pull never
 ~~~
@@ -51,7 +53,7 @@ docker compose -f docker-compose.local.yml up -d --pull never
   runtime/
     postgres/18/docker/               # PostgreSQL 18 数据
     secrets/postgres-password         # 自动生成并持续保留的数据库口令
-    https-config/Caddyfile            # 0.9.3初始化生成，代理只读加载
+    https-config/Caddyfile            # 0.9.4初始化生成，代理只读加载
     uploads/                         # 附件
     data/                            # 兼容目录，不保存 SQLite 业务库
     logs/
@@ -70,13 +72,13 @@ docker compose -f docker-compose.local.yml up -d --pull never
 
 可先停应用，使用 PostgreSQL 18 的 pg_dump/pg_dumpall 做逻辑备份，并备份附件和证书；或停整个项目后保存完整目录。不要在数据库运行时直接复制物理数据目录当作一致备份。数据库主版本升级需要独立方案，本次按用户确认不提供旧版迁移，也不删除原来的任何数据目录。
 
-可选环境变量仍可覆盖端口、UID/GID和数据路径；本版源码本地应用镜像固定为`labos:0.9.3`，避免残留LABOS_IMAGE将其切回远程仓库。没有自定义需求时保留自动识别；多网卡或需主机名时显式指定`labos-init`的LABOS_HTTPS_HOST，并重新执行初始化、重建代理，保留原CA。既有PG18更新须保留原项目名及完整runtime/、https/，核对数据路径后按实际发布说明更新；首次设置页面意外出现时先检查是否接入了空库。
+可选环境变量仍可覆盖端口、UID/GID和数据路径；本版源码本地应用镜像固定为`labos:0.9.4`，避免残留LABOS_IMAGE将其切回远程仓库。没有自定义需求时保留自动识别；多网卡或需主机名时显式指定`labos-init`的LABOS_HTTPS_HOST，并重新执行初始化、重建代理，保留原CA。既有PG18更新须保留原项目名及完整runtime/、https/，核对数据路径后按实际发布说明更新；首次设置页面意外出现时先检查是否接入了空库。
 
 业务功能沿用物资信息、Excel、申报验收和逐件库存流程，见[物资 API](MATERIAL_API.md)及[标签打印](LABEL_PRINTING.md)。配置解析及自动化容器验证不能代替实际群晖、手机证书、物理相机和 USB 打印验收；实际结果以版本记录为准。
 
 ## PostgreSQL 不健康但界面没有日志
 
-镜像页只说明镜像标签已存在，不能确认容器正常启动。本地版需要与所选YML完全一致的应用标签（0.6.2为`labos:0.6.2`，0.9.2为`labos:0.9.2`，当前开发配置为`labos:0.9.3`），以及`postgres:18-bookworm`、`caddy:2.11.7-alpine`；另有`postgres:18`不会改变该YML使用的标签。先到Container Manager左侧“容器”，选择实际的PostgreSQL容器查看状态、退出码和日志。
+镜像页只说明镜像标签已存在，不能确认容器正常启动。本地版需要与所选YML完全一致的应用标签（0.6.2为`labos:0.6.2`，0.9.2为`labos:0.9.2`，当前开发配置为`labos:0.9.4`），以及`postgres:18-bookworm`、`caddy:2.11.7-alpine`；另有`postgres:18`不会改变该YML使用的标签。先到Container Manager左侧“容器”，选择实际的PostgreSQL容器查看状态、退出码和日志。
 
 若仍无可用日志，在 **NAS 的 SSH 终端**执行以下只读命令；`labos-postgres-1` 是本次反馈中的名称，其他项目应替换为自己的实际容器名：
 

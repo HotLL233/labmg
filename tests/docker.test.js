@@ -137,6 +137,7 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     await docker(['run', '--rm', '--pull', 'never', '--user', '0:0', '--platform', environment.DOCKER_DEFAULT_PLATFORM,
       '--label', `labos.test=${project}`, '--env', `LABOS_UID=${uid}`, '--env', `LABOS_GID=${gid}`, image, 'node', '-e', `
         const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
+        const uid=Number(process.env.LABOS_UID),gid=Number(process.env.LABOS_GID);
         const postgres='/var/lib/labos/postgres',pgdata=postgres+'/18/docker',password='/var/lib/labos/secrets/postgres-password';
         const initialize=()=>{const result=spawnSync(process.execPath,['src/init-runtime.js'],{encoding:'utf8',timeout:10000});assert.ifError(result.error);return result};
         const metadata=directory=>{const stat=fs.lstatSync(directory);return {uid:stat.uid,gid:stat.gid,mode:stat.mode&0o777}};

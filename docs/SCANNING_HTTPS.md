@@ -1,6 +1,8 @@
 # 手机实时扫码与群晖 HTTPS
 
-当前源码为**0.9.3（开发中，未发布）**，在线、本地两份完整YML默认自动识别一个主局域网IPv4并生成HTTPS配置，无需手填IP、另放Caddyfile或合并YML。该版镜像与TAR尚未交付；正式部署暂使用[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)的同版本配套文件，其手填IP步骤不适用于当前自动识别配置。数据库继续使用PostgreSQL18，同一PG18项目更新保留完整`runtime/`和`https/`；实际发布及验证以[版本说明](CHANGELOG.md)为准，旧容器门禁不作为0.9.3或真手机验收。
+当前源码为**0.9.4（开发中，未发布）**，在线、本地两份完整YML默认自动识别一个主局域网IPv4并生成HTTPS配置，无需手填IP、另放Caddyfile或合并YML。该版镜像与TAR尚未交付；正式部署暂使用[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)的同版本配套文件，其手填IP步骤不适用于当前自动识别配置。数据库继续使用PostgreSQL18，同一PG18项目更新保留完整`runtime/`和`https/`；实际发布及验证以[版本说明](CHANGELOG.md)为准，旧容器门禁不作为0.9.4或真手机验收。
+
+0.9.3真实CI回归189/189、39份JS检查通过，但容器Gate1在新增测试脚本漏声明uid/gid处失败，未测到后续功能断言；该版保留为未公开冻结候选。0.9.4修正该声明，交付仍须通过本轮门禁，不能用0.9.3候选替代正式部署版。
 
 ## 为什么 HTTP 不能实时扫码
 
@@ -10,7 +12,7 @@
 
 应用监听`0.0.0.0:3000`，HTTPS代理监听`:443`。只有一次性`labos-init`使用宿主机网络来识别地址，应用与代理仍在Compose网络。`LABOS_HTTPS_HOST`决定请求匹配和证书名称，默认`auto`；空值、旧`CHANGE_ME`及`0.0.0.0`也作为自动识别输入，不会将`0.0.0.0`写成证书名称。手机始终使用识别出的实际地址。
 
-1. 在线选择[docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择[docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。当前文件需要尚未交付的同版0.9.3镜像；部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
+1. 在线选择[docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择[docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。当前文件需要尚未交付的同版0.9.4镜像；部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
 2. 默认保留`labos-init`的`LABOS_HTTPS_HOST=auto`。初始化排除回环、Docker／桥接、VPN和链路本地地址，结合默认路由选择一个主局域网IPv4；缺少合适地址或多网卡仍无法确定时明确失败。需固定另一地址或主机名时，在该服务手动指定实际IPv4或主机名，不带协议、端口、路径；同目录`.env`或项目环境可能覆盖默认值。建议为群晖保留固定IP，默认HTTPS端口8443。
 3. 在File Station先创建YML旁的`runtime/`、`https/`父目录；2026-10-19的DS918+实测缺少`https/`时拒绝bind挂载，不能依赖自动创建。取得配套镜像后启动，查看`labos-init`日志的`HTTPS host: <实际地址> (auto, interface <网卡>)`。初始化生成`runtime/https-config/Caddyfile`，代理从只读目录加载；自定义LABOS_DATA_DIR时配置位于该运行目录下。代理继续创建`https/data/`、`https/config/`，保留整份`https/`内的实例CA及私钥。
 4. 将下列公开根证书传到手机并安装、信任。只传 root.crt，不要导出 .key 或整份 https/data/。
@@ -30,15 +32,15 @@ YML所在目录/https/data/caddy/pki/authorities/local/root.crt
 
 ## 仍无法调用相机时
 
-0.9.3先看`labos-init`退出码和日志。地址无法确定时，在该服务指定实际地址，校验Compose配置后重新执行初始化、重建代理，保留`runtime/`和`https/`。代理异常时再检查其日志及`runtime/https-config/Caddyfile`是否生成、是否包含预期地址，不手改只读挂载文件代替修正初始化输入。
+0.9.4先看`labos-init`退出码和日志。地址无法确定时，在该服务指定实际地址，校验Compose配置后重新执行初始化、重建代理，保留`runtime/`和`https/`。代理异常时再检查其日志及`runtime/https-config/Caddyfile`是否生成、是否包含预期地址，不手改只读挂载文件代替修正初始化输入。
 
-本轮先只读检查发现现有0.9.2配置把`0.0.0.0`用作证书／站点名称，HTTPS曾返回200但正文为空。2026-10-22已备份实际YML到`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅将该主机默认值改为实际IPv4并重建代理，应用／PostgreSQL容器及原CA保持不变。独立客户端使用同一CA、空SNI及严格IP身份校验后，HTTP／HTTPS公共根页均返回200、2788字节、相同SHA256，证书SAN包含实际IP。证据为`artifacts/cache/0.9.3/nas-https-restoration.json`。此结果补充先前“尚未现场修复”状态；0.9.3自动识别代码仍未部署到该NAS，手机相机及USB未验。不能只凭状态码认定页面可用，仍须核对证书名称和非空应用正文。
+本轮先只读检查发现现有0.9.2配置把`0.0.0.0`用作证书／站点名称，HTTPS曾返回200但正文为空。2026-10-22已备份实际YML到`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅将该主机默认值改为实际IPv4并重建代理，应用／PostgreSQL容器及原CA保持不变。独立客户端使用同一CA、空SNI及严格IP身份校验后，HTTP／HTTPS公共根页均返回200、2788字节、相同SHA256，证书SAN包含实际IP。证据为`artifacts/cache/0.9.3/nas-https-restoration.json`。此结果补充先前“尚未现场修复”状态；0.9.4自动识别代码仍未部署到该NAS，手机相机及USB未验。不能只凭状态码认定页面可用，仍须核对证书名称和非空应用正文。
 
 按顺序确认 HTTPS 地址及端口、证书无警告、当前根证书已完全信任，再检查浏览器和系统相机权限、其他应用占用。若提示扫码组件加载失败，检查本站 /vendor/zxing-wasm/3.1.5/index.js 和 WASM 的加载情况。群晖防火墙需允许局域网访问所选 HTTPS 端口。
 
 源码、配置与自动化容器验证的结果见版本记录。2026-10-19 已在用户 DS918+ 及独立局域网客户端验证 HTTPS 接口返回 200，并严格校验本实例根证书；尚未在用户手机安装 CA 或完成实际扫码，不把服务端或桌面客户端通过写成物理相机验收。
 
-历史补充：2026-10-20的0.7.0现场曾因`CHANGE_ME`未修改导致代理循环退出，填写实际地址、仅重建旧代理后恢复严格可信HTTPS 200。旧脚本拒绝占位值的操作仅适用于该版；0.9.3已由初始化自动识别及显式失败替代，不能照搬“只重建代理”来重新生成配置。
+历史补充：2026-10-20的0.7.0现场曾因`CHANGE_ME`未修改导致代理循环退出，填写实际地址、仅重建旧代理后恢复严格可信HTTPS 200。旧脚本拒绝占位值的操作仅适用于该版；0.9.4已由初始化自动识别及显式失败替代，不能照搬“只重建代理”来重新生成配置。
 
 ## 历史：0.6.1 及更早的可选 HTTPS overlay
 
