@@ -1,6 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.10.1（开发中，未发布）**。本轮实现申报与验收解耦：申报检索为可选，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。正式部署当前仍取[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)的同版本镜像及两份YML，本轮验证和交付结果见[版本说明](docs/CHANGELOG.md)。
+本源码版本：**0.10.1（已公开验证版，2026-10-22）**。本轮实现申报与验收解耦：申报仅在显式选择时关联物资信息，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。正式部署从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版本镜像及两份YML，完整交付保存在`artifacts/releases/0.10.1/`。
+
+0.10.1冻结于`5d59622`／`v0.10.1`，公开prerelease为Release420407248。真实PostgreSQL18.6回归203/203、42份JS检查和四项容器发布门禁通过；ARM64容器使用QEMU。12件交付共489027423字节、11条摘要及两架构三镜像包已在本机核对，10个非TAR附件共898911字节经官方API匿名完整下载通过；TAR另由本机完整大小、SHA256及结构报告证明，ARM64包通过复用已核验旧镜像层补齐。原下载超时记录保留，不称匿名全量TAR或真机验收。发布附件保留冻结快照，后补文档不重打包或移动标签。详见[版本说明](docs/CHANGELOG.md)。
 
 ## 0.9.4 历史交付记录
 
@@ -46,7 +48,7 @@ npm test
 
 “物资主档”就是同种物资的标准信息，在页面中称为**物资信息库**，保存编码、名称、规格、单位、分类和管理方式。它不代表已经有库存；库存数量由期初、验收、调整和领用流水累计。相同名称但规格或单位不同的物资分别保留。
 
-申报时先选择区域和仓库，按中文名称或规格检索，所选范围有库存的物资优先显示；已有物资用完后仍复用原信息，不因零库存重复建档。确认没有匹配项时可以填写新物资并提交，验收前由具有维护权限的管理员确认建档或关联已有信息。0.7.0 页面将程序编码显示为只读，后端自动分配；中文名称、规格和单位共同确定身份，同名不同规格不混合。已提交单的关联仍由物资管理员填写原因修订，保留原提交与修改历史。
+申报时先选择区域和仓库，可按中文名称或规格检索，所选范围有库存的物资优先显示；只有显式选择信息库记录才关联，手填相同名称也不会静默匹配。未匹配时可直接填写名称、规格、单位并提交，不要求先建档。物资管理员具备验收动作权限时，可在验收、拒收或结案的同次请求中选择已有物资或新建／复用物资信息，不额外要求`catalog.write`；新建信息与验收操作同事务提交。已有物资用完后继续复用原信息，不因零库存重复建档。程序编码只读、由后端分配，中文名称、规格和单位共同确定身份，同名不同规格不混合。已提交单的后续修订仍须物资管理员填写原因，保留原提交快照与修改历史。
 
 物资信息库支持下载 XLSX 模板、导入和导出。**导入物资信息只建立标准信息，不增加库存、不生成实物条码。** 带数量、金额和存放位置的旧有实物，从“期初库存”或期初关闭后的“存量补录”导入草稿，核对并确认入库后才记库存；补录必须原因并保留流水。逐件管理物资按实际入库整数数量生成一瓶／一件一个固定码。
 
@@ -60,16 +62,16 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。从0.9.4 Release下载同版本配套文件；在线应用镜像为`ghcr.io/hotll233/labmg:0.9.4`，本地三镜像包使用`labos:0.9.4`：
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。从0.10.1 Release下载同版本配套文件；在线应用镜像为`ghcr.io/hotll233/labmg:0.10.1`，本地三镜像包使用`labos:0.10.1`：
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.9.4 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.9.4 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.10.1 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.10.1/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.10.1 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.10.1/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-0.9.4的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
+0.10.1的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
-首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
+首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；schema6物资备份不能交0.9.4恢复，需回退时使用升级前数据库副本。本次不提供 PostgreSQL 主版本迁移。
 
 数据保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令，`https-config/Caddyfile`是0.9.4初始化生成的代理配置。HTTPS证书继续保存在旁边的`https/data/`；群晖首次部署先创建`runtime/`与`https/`父目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 

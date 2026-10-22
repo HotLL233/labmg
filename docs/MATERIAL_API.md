@@ -1,6 +1,8 @@
-# 物资 API 合同（0.9.0）
+# 物资 API 合同（0.10.1）
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验与回导已经发布，其后实际 PG18 CI159/159及容器证据见[版本说明](CHANGELOG.md)，替代本页此前“CI尚待执行、镜像未发布”的过期状态。0.8.0 新增打印 API，验证结果单独记录，不复用旧版结论。
+
+0.10.1 采用“申报可不关联信息库，验收时完善”的合同：申报只按显式 `catalogId` 关联；未关联行可在验收、纯拒收或结案的同次请求中选择已有物资或创建／复用物资信息。此规则替代 0.6.0／0.7.0 的申报精确自动匹配及必须先在原单修订建档的旧流程；下文保留旧版 Excel 与接口来源说明，不将旧语义作为现行行为。
 
 0.9.0按用户决定删除全部BarTender活动接口、助手下载和打印站／队列模块，普通鉴权仍先执行，已登录用户访问旧路径返回404。旧表惰性保留，不再处理过期任务，也不加入物资JSON恢复。以下两段打印合同仅为历史，不是当前API。
 
@@ -38,23 +40,23 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 - warehouses 固定为 `{code,name}`：`MAIN` 默认仓库、`REAGENT` 试剂库、`CONSUMABLE` 耗材库、`SPARE` 备用库。
 - `GET /categories`、`GET /regions` → 分页；行 `{id,name,createdBy,createdAt}`。
 - `POST /categories`、`POST /regions`，正文 `{name}` → 201 创建行。ADMIN 或 MATERIAL + 对应动作权限；首期只新增，不删历史选项。
-- `GET /catalog` → 分页；支持 `q,categoryId,trackingMode,regionId,warehouse`。行 `{id,code,name,spec,unit,trackingMode,categoryId,categoryName,version,stockQtyM,localQtyM?}`。
-- `POST /catalog`，正文 `{code?,name,spec,unit,categoryId,trackingMode?}` → 201 物资信息；ADMIN/MATERIAL + `materials.catalog.write`。0.7.0 约定省略或空 `code` 时系统分配内部编码，网页不要求手填；显式传入编码仍须唯一且与身份一致。规范化后重复身份不另建；请求建档关联与导入的复用语义见下文。
+- `GET /catalog` → 分页；支持 `q,categoryId,trackingMode,regionId,warehouse`。行 `{id,code,name,spec,unit,remark,origin,trackingMode,categoryId,categoryName,version,stockQtyM,localQtyM?}`；排除已合并信息，`origin` 为 `manual|receipt`。
+- `POST /catalog`，正文 `{code?,name,spec,unit,categoryId,trackingMode?,remark?}` → 201 物资信息；ADMIN/MATERIAL + `materials.catalog.write`。0.7.0 约定省略或空 `code` 时系统分配内部编码，网页不要求手填；显式传入编码仍须唯一且与身份一致。规范化后重复身份不另建；请求建档关联与导入的复用语义见下文。新建来源为 `manual`，验收中新建来源为 `receipt`；复用已有信息不覆盖其备注或来源。
 
 下文省略共同前缀 `/api/materials`。
 
-## 物资信息库与库存匹配（0.6.0 起，0.7.0 改造中）
+## 物资信息库与库存匹配（0.10.1 现行规则）
 
 “主档”在页面称为“物资信息库”，保存标准身份信息，不代表库存。`stockQtyM` 为该物资所有区域／仓库的库存毫单位总量；传 `regionId` 或 `warehouse` 时另含筛选范围的 `localQtyM`。检索先按所选范围正库存、其他范围正库存、零库存排序；不传范围时全局正库存优先。`q` 对编码、名称、规格进行规范化包含搜索，只帮助选项查找，不能据此自动合并物资。
 
-新增申报行或明确解除已有匹配时，服务端用 NFKC、首尾去空白、转小写后的精确身份自动复用：编码命中已有记录时校验名称／规格／单位一致；编码未命中时只接受唯一的名称＋规格＋单位匹配，并采用已有记录的编码。零库存记录仍可复用。编码与身份矛盾返回 409；未匹配保留未建档行，不按同名、相似词或模糊搜索结果自动建档。选定 `catalogId` 时身份由服务器现有信息确定。
+新增申报行仅在显式提供 `catalogId` 时关联已有物资，其名称／规格／单位及编码取服务器现有信息；没有 `catalogId` 时保留未建档行，不按编码或名称＋规格＋单位自动复用。PATCH 省略 `catalogId` 保留原关联，显式 `null` 解除关联时仍受已有业务身份锁保护。新输入的名称／规格／单位进行 NFKC、首尾去空白及连续空白合并，仍须填写完整；修改其他字段不重写历史身份文本或快照。验收时的建档复用按规范化后的名称＋规格＋单位精确识别，并核对分类及管理方式；有歧义或冲突返回 409，不按模糊检索合并。
 
 | 接口 | 合同 |
 | --- | --- |
 | `GET /catalog/template` | 下载中文 XLSX 空模板及引用参考页，需 `materials.export`；路径没有 `.xlsx` 后缀 |
 | `GET /catalog/export.xlsx` | 导出全部符合 catalog 检索条件的标准信息，需 `materials.export`；最多 5000 条，超限 413 |
 | `POST /catalog/import` | `{name,content}`，`content` 是 XLSX canonical base64；ADMIN/MATERIAL + `materials.catalog.write`；201 `{created,skipped}` |
-| `POST /requests/:requestId/items/:itemId/catalog` | `{requestVersion,itemVersion,requestIdempotencyKey,code?,name,spec,unit,categoryId,trackingMode?,reason}`；复用或创建物资信息并原子关联；首次 201 `{request}`，幂等重试 200；0.7.0 空编码时自动分配 |
+| `POST /requests/:requestId/items/:itemId/catalog` | `{requestVersion,itemVersion,requestIdempotencyKey,code?,name,spec,unit,categoryId,trackingMode?,remark?,reason}`；保留的原单修正接口，复用或创建物资信息并原子关联；首次 201 `{request}`，幂等重试 200；0.7.0 空编码时自动分配 |
 
 0.7.0 信息库模板和导出列为：**物资名称、规格、单位、物资分类、管理方式**。名称／规格／单位可从引用下拉参考已有物资，也可填写新值；分类须为已有中文名称，管理方式为“逐件”或“数量”。参考列表基于导出时的数据，不能代替导入时的服务端校验。旧版含“物资编码”的六列表头仍可识别，旧编码须文本以保留前导零；新模板不要求人工编码。
 
@@ -63,6 +65,8 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 每次导入 1–5000 行、文件不超过 5 MiB，受下文 XLSX 压缩与公式等限制。按规范化的**名称＋规格＋单位**精确匹配；唯一已有身份且分类／管理方式一致则跳过复用，不重复建档，有歧义或字段冲突返回具体位置，整批不写。分类或管理方式冲突定位到实际对应列，新五列表分别为 D／E，不笼统归到物资名称。导出的信息库可原样导回，不增加库存或实物码；不能用信息库导入修改已经引用的物资身份。解析后重新验证会话与权限，在同一事务校验并写入；数量金额与位置继续从期初／补录草稿导入并确认入库。
 
 原单建档关联需要 ADMIN/MATERIAL + `materials.catalog.write` 以及该行 `mayEdit` 资格；只有未关联、没有历史验收／拒收／结案事件的行可用。已提交单另须 MATERIAL + `materials.request.edit_submitted`，原因、父单及行版本必填。创建信息、关联、版本递增、审计及修订快照处于同一事务，保留原提交版，不直接增加库存；同幂等键异文或版本过期返回 409。已有信息可在普通修订中直接选择关联。
+
+上述原单接口用于受控修正，不是未关联行办理首次验收的前置步骤；首次验收关联使用下文 `POST /receipts` 或结案接口及其验收权限。
 
 ## 独立单件与条码规则（0.4.0）
 
@@ -125,7 +129,7 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 
 明细含 `{id,requestId,catalogId,code,name,spec,unit,categoryId,categoryName,regionId,regionName,warehouse,qtyM,purpose,authorId,authorName,version,identityLocked,acceptedQtyM,closedQtyM,remainingQtyM,receiptStatus,canEdit,canDelete}`。`receiptStatus` 为 `pending|partial|done|closed`；identityLocked 表示存在任何历史验收/拒收/结案事件，冲正后也不解除身份保护。
 
-未匹配的草稿行允许普通用户先填写名称/规格/单位，catalogId 可为空；0.3.1 起允许先提交，0.6.0 补充上述精确自动复用和原单建档关联。验收、拒收或结案前必须关联物资信息，已提交单由 MATERIAL 受控修订并说明原因。0.3.0 的提交前匹配限制由此替代。有 catalogId 时名称/规格/单位由服务端物资信息确定。
+未匹配的草稿行允许普通用户先填写名称／规格／单位，`catalogId` 可为空；0.3.1 起允许先提交，0.10.1 继续保留此行为，并替代 0.6.0／0.7.0 的精确自动复用规则。验收、拒收或结案可在同次请求中完成首次关联；原单修订仍按受控修正规则办理。有 `catalogId` 时名称／规格／单位由服务端物资信息确定。规格、单位、分类、区域、仓库及数量的必填校验保持不变。
 
 草稿本人改本人行，MATERIAL 可改全部；仅创建者/MATERIAL 可改草稿表头。提交后仅 MATERIAL + `materials.request.edit_submitted` 可改表头/已有行，必须 reason；不能新增/删行。原提交快照不覆盖。已有任何验收/结案记录的行保护 catalogId/code/name/spec/unit/warehouse/regionId；qtyM 不得小于有效已验收+结案量。分类、用途、合法数量仍可修订。修改申报不改变库存。
 
@@ -135,11 +139,13 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 
 - `GET /acceptance` → SQL 筛选与分页 `{...明细,requestNo,requestTitle,requestVersion,requestRevision,requestCreatedAt}`；仅已提交行；可用 `status=all|pending|partial|done|closed` 按 receiptStatus 筛选，新增 `status=open` 按剩余数量大于零同时包含未验收及部分验收，SQL 总数和分页均只计算命中行。默认仍包含完成历史。可用 `catalogId,regionId,warehouse` 精确筛选，`from,to` 按原申请创建日期筛选；`q` 覆盖名称/编码/规格、分类/区域及来源单号/标题。
 - `GET /receipts?requestId=&itemId=` → 分页事件。事件含 `{id,type,requestId,itemId,requestRevision,snapshot,qtyM,rejectedQtyM,closedQtyM,amountCents?,reason,rejectedReason,zeroAmountReason,originalReceiptId,batch,expiryDate,date,actorId,actorName,createdAt,reversed}`。type 为 `acceptance|rejection|close|reversal`。
-- `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?,location?,locationVersion?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。合格入库可同时设置位置：省略 location 时保留现位置；显式提供时需当前 locationVersion，实际变更另需 ADMIN/MATERIAL 加 materials.stock.location。位置与验收同事务，历史 snapshot.location 保留入库时位置。
-- `POST /requests/:id/items/:itemId/close`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`，将当时剩余量结案，不产生库存。
+- `POST /receipts`，`{requestId,itemId,requestVersion,version,requestIdempotencyKey,quantity,amount,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,date?,location?,locationVersion?,catalogId?,newCatalog?}` → 201 `{receipt,request}`。实际仓库/区域取当前已确认申报行；不接受前端改归属。合格+拒收不超过当前剩余量；拒收不抵扣后续允许合格量。合格量大于零但金额为零须原因；纯拒收使用 quantity=`"0"`、amount=`"0"`、rejectedQuantity>0，不入库且不关闭期初。只要拒收数量大于零，rejectedReason 必填。合格入库可同时设置位置：省略 location 时保留现位置；显式提供时需当前 locationVersion，实际变更另需 ADMIN/MATERIAL 加 materials.stock.location。位置与验收同事务，历史 snapshot.location 保留入库时位置。
+- `POST /requests/:id/items/:itemId/close`，`{requestVersion,version,requestIdempotencyKey,reason,catalogId?,newCatalog?}` → 201 `{receipt,request}`，将当时剩余量结案，不产生库存。
 - `POST /receipts/:id/reverse`，`{requestVersion,version,requestIdempotencyKey,reason}` → 201 `{receipt,request}`。仅整笔冲正原合格验收，最多一次，数量金额精确反向，库存不能负数。
 
-验收、纯拒收及结案均须当前行已匹配主档，未匹配返回 409 且不产生事件、库存或身份锁定；页面提示从“原单 → 修订”完成匹配。原提交快照中的 null 主档保持原样。
+验收、纯拒收及结案支持两种互斥的可选入参：`catalogId` 选择有效已有信息，或 `newCatalog:{name,spec,unit,categoryId?,trackingMode?,remark?,code?}` 创建／复用信息。只对未关联行办理首次关联，分类省略时使用申报行分类；省略管理方式的 API 默认值仍为 `quantity`，页面明确默认 `unit` 并可改为数量管理。已关联行不传新字段即可沿用旧请求，不能通过此动作更换关联。未关联且未提供有效选择时返回 409：`验收前请选择已有物资信息，或填写新物资信息`。
+
+首次关联仅需本动作的 MATERIAL + `materials.acceptance.write`，不另需 `materials.catalog.write`、提交后修订权限或独立建档原因；拒收、零金额及结案等原有原因仍必填。建档／复用、写入标准身份、`LINK_CATALOG` 审计、父单及行版本递增、验收事件、库存及幂等结果在同一事务提交，失败全部回滚；纯拒收和结案不增加库存。原提交快照中的 null 主档保持原样，不重写历史快照。
 
 以上动作需要 MATERIAL + `materials.acceptance.write`。记账 `requestIdempotencyKey` 为 8–128 字符；同用户同键同正文返回原结果（200），同键不同正文 409。客户端每次真实操作产生新键，网络重试复用原键及原正文；不要与申报单 requestId 混淆。
 
@@ -224,11 +230,13 @@ Windows使用站点Bearer令牌，仅可处理本站：`POST /agent/claim {agent
 - `GET /backup` → 完整业务 JSON，需 backup.read + materials.amount.read。包含十七张物资业务及辅助表（含期初单及明细、单件、包装码映射、存放位置、领用）、编号规则与序号、附件内容、稳定用户映射与所有快照，不含用户密码。既有 Excel 导出保持原有数量金额及筛选口径。
 - `POST /restore`，正文为上述完整备份对象 → `{restored:true,counts}`，需 backup.restore + materials.amount.read；只允许空的新业务库，验证格式、用户 username→当前ID 映射、外键、库存及来源唯一性，事务恢复；同份重放与追加恢复均拒绝。
 
-物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=5`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表、schema 4 原十五表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
+物资备份严格限定顶层字段为 `type,schemaVersion,generatedAt,users,data,files`；`type=labos-materials-backup`、新导出 `schemaVersion=6`，生成时间为完整 ISO UTC 时间。严格兼容 schema 1 原十一表、schema 2 原十三表、schema 3 原十四表、schema 4 原十五表及 schema 5 原十七表：按旧版定义补空后续新增表，旧主档补 `quantity`，补初始编号规则及序号。每个版本必须包含当时全部表及字段，不能夹带未来版本的表/字段。用户映射仅 `{id,username}`，附件内容仅 `{id,content,sha256}`。未知顶层字段、未知表/字段、遗漏字段均拒绝。领用处理人、条码创建人、规则修改人及快照同样按 username 映射现有用户。
 
 恢复继续核对领用状态/版本、申请与发放流水、历史批次成本分摊、取消/驳回无流水、位置、包装码及非负库存。schema 4 另核对单件码／序号唯一、来源与退出流水、状态及数量守恒、编号规则和序号进度；失败整次回滚。旧服务不能恢复 schema 4，回退必须恢复升级前完整运行数据，不能只切旧镜像。旧版表结构升级要求仍保留。
 
 schema 5 新增 material_openings 与 material_opening_items，严格检查草稿无流水、已入库明细唯一对应正向来源流水、单件数量及补录闭账不变量；posted_by / postedBy 同样映射现有账号。旧格式恢复时补空两表，不虚构期初单据。旧服务无法恢复 schema 5，回退须恢复升级前完整运行目录。
+
+schema 6 增加物资信息的 `remark,origin,merged_into` 及申报／验收／流水的厂家、备注准备列。读取严格 schema 1–5 时仅补新列默认值（`remark`／`manufacturer`／`note` 为空，`origin=manual`、`merged_into=null`），不回填或改写历史快照；这些准备列本轮不代表已提供厂家／批次备注的前端或 Excel 录入。0.9.4 不能恢复 schema 6；旧程序在已升级库导出的带新列 schema 5 混合格式也不属于严格旧格式兼容范围。需回退时恢复升级前的数据库及配套完整运行数据，不能只切旧镜像。
 
 状态键只接受 `opening_closed` 与 `restored_once`，值只接受 `0|1`。存在任何合格验收历史（含已整笔冲正）时 `opening_closed` 必须为 `1`，恢复不能重开已关闭的期初。
 
