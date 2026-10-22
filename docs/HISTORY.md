@@ -651,3 +651,19 @@ Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check
 沿用`feature/print-offset-diagnostics`，在`config/label-templates/`新增可直接导入0.9.1的0°／90°布局配置。两模板固定38.5×30.5mm，显示八项（含15mm二维码），四边至少留2mm；九组两轴−2／0／+2mm均通过几何校验。补充标签指南的备份／导入／保存／重开步骤与校准方向，更新目录说明、MEMORY及统一CHANGELOG未发布；不提升业务版本，不改main、旧标签、0.9.1源码、YML或冻结产物。配置示例作为手写布局提交，测试和截图等生成物仍留ignored的artifacts目录。
 
 真实Edge报告`artifacts/cache/print-offset-20261021/template-trial-fANAWh/report.json`通过58项、6份单页PDF、6张截图、0异常，覆盖真实JSON导入保存重开、零点和四个±2mm角点、10次屏幕QR回扫、首张与范围请求、超长合成文字拒印。代理目视六图，root另目视两方向零偏移图；六PDF为固定实体页，仍存在既有浏览器小量取整。最终0°模板SHA256为`d0f93e924e6773b0a2d09483cd777318a0cc2e4d02b9e5f098be304b90b0606d`，90°为`cde7140a313593de1fc05cb253f7a7f6769ff5fb2f19c308dd14d8e0013ca5f1`，后者替代四字名称排版调整前草稿。隐藏字段须先重排、长文本仍可能拒印，极限偏移接近纸边，几何可用不等于硬件保证。未打开原生系统窗口、操作驱动、USB打印、NAS或业务库；实物偏移仍待试打，不能记为设备已修复。
+
+## 2026-10-22：两方向留白模板实物反馈与0.9.2可视化排版开发
+
+用户明确反馈“提供两方向都正常了”，对应此前提供的38.5×30.5mm 0°／90°留白JSON模板，补充2026-10-21“实物待验”的阶段记录。只记为这两份模板的用户实物确认，不将其扩展为任意模板、全部驱动或本轮新设计器已验收，不据此认定唯一根因；本轮没有操作NAS、业务库、Windows驱动或USB打印机。
+
+在`feature/v0.9.2-visual-label-designer`开发0.9.2，package、锁文件与部署配置同步版本，保留main、全部旧标签和交付。新增字段拖拽、选中元素与表格行高亮，预览倍率100%／150%／200%／300%（默认200%）且不改变实际输出尺寸。预览元素可聚焦，方向键沿实体纸轴移动0.1mm、Shift为1mm；数值输入仍保留原生行为，尺寸和字号通过表格修改。2mm虚线仅辅助编辑，不进入打印。拖拽与键盘移动在含校准偏移的纸内范围停止，手工越界与实际文字溢出仍拒绝；同纸型、同方向的`changedPaper`不再重排自定义布局，真正变更仍按原规则适配。沿用schema1、本浏览器及当前访问地址存储和JSON导入导出，不改库存、编码、实体纸／内容旋转数学或系统打印方式；隐藏字段启用前仍须排版。
+
+源码ZIP增加打包`config/label-templates/*.json`；缓存与未来交付隔离于`artifacts/cache/0.9.2/`、`artifacts/releases/0.9.2/`。发布helper从0.9.1隔离准备，旧helper逐项摘要保护，未读取凭据、联网、构建或发布。README及群晖指南明确当前源码开发中，正式部署暂取已公开0.9.1 Release附件；当前`deploy/`已为未发布0.9.2，不混作0.9.1文件。
+
+有限验证最初为标签Node27/27、37份JS语法及打包专项1/1通过。首次新断言因VM fixture尚未填入`style.textContent`，27项中26通过／1失败；仅改为比较`layoutCss(template)`，未为fixture修改产品，`label-first-attempt.json`保留。
+
+本机完整回归186项中184通过、1失败、1本机Docker条件跳过，日志`artifacts/cache/0.9.2/full-local-tests.txt`。失败项为Docker打包调用者的隔离fixture未复制新增`config/label-templates/`；补齐fixture后两打包项2/2通过，日志`package-fixture-recheck.txt`。完整轮在位移精度及倍率事件冒泡最后两微调前启动，未记为最终源码整轮全绿；最终标签27/27及37JS重跑通过。本轮专用localhost PG17.11端口54892按精确data目录fast停止，`postgres-stop-report.json`为exit0，缓存保留，未停止其他实例。
+
+发布helper首次总自检因CHANGELOG缺少0.9.2未发布说明而失败，原`offline-self-check-first-attempt.json`保留。文档补充后`release-helper-self-check.json`通过：29份CJS语法、3段workflow内联、30份旧helper摘要保护、12附件／11摘要／7初始输入清单及合成三镜像TAR正负例；不等同正式冻结ZIP验证、Docker或发布门禁，未联网、读取凭据、推送或发布。最终真实浏览器、正式PG18及容器门禁仍待本轮结果；尚未冻结或发布，旧版计数不作为本轮结果。
+
+最终真实浏览器专项随后完成：`artifacts/cache/0.9.2/labels/designer-ZNr88d/report.json`通过238项、4份PDF、4张桌面／390px截图、0异常，绑定JS SHA256 `eae8cb8cb7d21835725ac629c68dd28573ccaf33056a8eefb00bba4bd74976c0`及CSS `c4d17a6fc692a6879cf7e29449ed0939074e83209fc42b1a0a5beb7f976dfb26`，执行中未变。覆盖两方向、四倍率、真实鼠标与CDP触摸、任意精度、校准边界、取消／捕获释放、键盘与数值联动、保存重开、范围与固定实体页，屏幕二维码解码通过。代理目视四图，root另目视桌面0°和390px的90°图，横向溢出限制在预览内部。首次`designer-6fT9OV/report.json`因helper未先建立捕获就释放而失败，修正顺序后通过，未为此改产品。浏览器专项只用合成记录、拦截系统打印请求，未访问NAS／业务库或原生系统窗口、真手机、驱动、USB；正式PG18、容器和发布门禁继续执行。

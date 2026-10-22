@@ -68,7 +68,20 @@ function changedPaper(base,values,target){
     const preset=papers.find(([name])=>name===values.paperPreset.value);if(!preset)throw Error('请选择有效纸张规格。');
     [width,height]=[preset[2],preset[3]];
   }
-  return validate({...resize({...base,offsetX:0,offsetY:0},width,height,Number(values.rotation.value)),offsetX:Number(values.offsetX.value),offsetY:Number(values.offsetY.value)});
+  const rotation=Number(values.rotation.value);
+  const layout=width===base.width&&height===base.height&&rotation===(base.rotation??0)?base:resize({...base,offsetX:0,offsetY:0},width,height,rotation);
+  return validate({...layout,offsetX:Number(values.offsetX.value),offsetY:Number(values.offsetY.value)});
+}
+function moveElement(template,field,dx,dy){
+  if(!Number.isFinite(dx)||!Number.isFinite(dy))throw Error('移动距离必须为有限数值。');
+  const value=validate(template),element=value.elements.find(e=>e.field===field);
+  if(!element?.show)throw Error('请选择已显示的标签元素。');
+  const rotated=value.rotation===90;
+  const minX=Math.max(0,rotated?-value.offsetY:-value.offsetX),maxX=Math.min(200,(rotated?value.height-value.offsetY:value.width-value.offsetX)-element.w);
+  const minY=Math.max(0,rotated?value.offsetX:-value.offsetY),maxY=Math.min(200,(rotated?value.width+value.offsetX:value.height-value.offsetY)-element.h);
+  element.x=Math.max(minX,Math.min(maxX,element.x+Math.round((rotated?dy:dx)*10)/10));
+  element.y=Math.max(minY,Math.min(maxY,element.y+Math.round((rotated?-dx:dy)*10)/10));
+  return validate(value);
 }
 function overflow(container){
   const clipped=[];
@@ -163,14 +176,27 @@ function configure(){
   const loaded=load(),dialog=document.createElement('dialog');dialog.id='material-label-designer';dialog.className='mw-dialog mw-wide';dialog.setAttribute('aria-label','标签模板设计');
   dialog.innerHTML=`<form><div class="mw-dialog-head"><h2>标签模板设计</h2><button type="button" data-label="close" aria-label="关闭">×</button></div><div class="mw-dialog-body"><p>模板保存在本浏览器。纸宽为横跨纸卷的宽，纸长为走纸方向的长度，单位为毫米；字号为 pt。内容方向独立设为 0°／90°。标签仅包含二维码与基础信息，使用浏览器的系统打印窗口。</p><p role="status">${h(loaded.notice)}</p><div class="mw-grid">${paperControls(loaded.template)}</div><p>选择规格或内容方向后，文字布局按可用空间适配，二维码保持正方形；内容旋转不会交换实体纸张尺寸。X / Y 从未旋转内容画布的左上角起算，90° 时画布宽高为走纸长 × 纸宽。校准偏移始终沿实体纸张水平／垂直方向，含偏移越界时不能保存或打印。</p><div class="ml-preview-pane"><p role="status" data-label="preview-status"></p><div class="ml-preview" data-label="preview"></div><p role="alert" class="mw-error" data-label="error"></p></div><p>预览使用示例数据与二维码。红框表示示例文字被裁切，可增大文本框或缩小字号；实际打印会检查所选实物的文字，溢出时拒绝打印。打印前仍须试打并回扫。</p><div class="mw-table"><table><thead><tr>${['显示','元素','X','Y','宽','高','字号'].map(v=>'<th>'+v+'</th>').join('')}</tr></thead><tbody>${fields.map(([field,label])=>`<tr data-field="${field}"><td><input aria-label="显示${label}" type="checkbox" name="${field}-show"></td><td>${label}</td>${['x','y','w','h','font'].map(n=>`<td><input aria-label="${label} ${n}" style="width:72px" type="number" name="${field}-${n}" min="${n==='font'?5:n==='w'||n==='h'?1:0}" max="${n==='font'?48:200}" step="any" required></td>`).join('')}</tr>`).join('')}</tbody></table></div><p>每瓶／每件的编码已固定，重印不会生成新流水。</p><label class="mw-field">导入模板 JSON<input data-label="import" type="file" accept=".json,application/json"></label></div><div class="mw-dialog-actions"><button type="button" data-label="reset">恢复 60 × 40 示例</button><button type="button" data-label="export">导出模板 JSON</button><button type="submit" class="primary">保存到本浏览器</button></div></form>`;
   const form=dialog.querySelector('form'),error=dialog.querySelector('[data-label="error"]'),preview=dialog.querySelector('[data-label="preview"]');let current=loaded.template;
+  const tools=document.createElement('div');tools.className='ml-designer-tools';tools.innerHTML=`<label>预览倍率 <select data-label="zoom"><option value="1">100%</option><option value="1.5">150%</option><option value="2" selected>200%</option><option value="3">300%</option></select></label><p data-label="selection" role="status"></p><p>点击并拖拽文字或二维码调整位置，也可修改下方数值。方向键沿纸面移动 0.1 mm，Shift＋方向键移动 1 mm；虚线为距纸边 2 mm 的留白参考，打印时不显示。拖拽到纸边会停止；缩放仅影响此预览。</p>`;
+  preview.before(tools);preview.tabIndex=-1;preview.setAttribute('aria-label','标签排版预览，可选择元素后用方向键移动');
+  const zoom=tools.querySelector('[data-label="zoom"]'),selection=tools.querySelector('[data-label="selection"]');let selected='name',drag;
   const previewStatus=dialog.querySelector('[data-label="preview-status"]'),values=Object.fromEntries(['paperPreset','rotation','width','height','offsetX','offsetY'].map(name=>[name,form.elements.namedItem(name)]));
   let base=copy(current),closed=false,previewReady=false;const images={},urls=[];
   const sample={name:'示例物资',spec:'500 mL',unit:'瓶',code:'LAB-20261019-000001',catalogCode:'MAT-001',regionName:'示例区域',warehouseName:'示例仓库',location:'A柜 / 2层',batch:'B001',expiryDate:'2027-10-19'};
   const read=()=>validate({schema:1,...Object.fromEntries(['width','height','rotation','offsetX','offsetY'].map(n=>[n,Number(form.elements.namedItem(n).value)])),elements:fields.map(([field])=>({field,show:form.elements.namedItem(field+'-show').checked,...Object.fromEntries(['x','y','w','h','font'].map(n=>[n,Number(form.elements.namedItem(field+'-'+n).value)]))}))});
+  function select(field){selected=field;const element=current.elements.find(e=>e.field===field);selection.textContent=`当前元素：${fields.find(([f])=>f===field)[1]}${element.show?` · X ${element.x} / Y ${element.y} mm`:'（已隐藏，请在下方表格配置位置、尺寸并勾选显示）'}`;for(const node of preview.querySelectorAll('.element')){const active=node.dataset.field===field;node.classList.toggle('ml-selected',active);node.setAttribute('aria-pressed',String(active));}for(const row of form.querySelectorAll('tr[data-field]'))row.classList.toggle('ml-selected-row',row.dataset.field===field);}
   function invalid(message){preview.innerHTML='';previewStatus.textContent='预览未更新，请修正下方错误。';error.textContent=message;}
-  function render(updateBase=false){if(closed)return;try{const value=read();preview.innerHTML=`<style>${layoutCss(value,true)}</style>${labelHtml(sample,value,images)}`;const clipped=overflow(preview);error.textContent=clipped.length?'示例文字超出范围：'+clipped.join('、')+'。请调整文本框或字号。':'';previewStatus.textContent=`纸宽 ${value.width} × 走纸长 ${value.height} mm · 内容 ${value.rotation}°${previewReady?' · 输入后立即预览':' · 正在生成二维码预览…'}`;current=value;if(updateBase)base=copy(value);}catch(e){invalid(e.message);}}
+  function render(updateBase=false){if(closed)return;try{const value=read(),scale=Number(zoom.value);preview.innerHTML=`<style>${layoutCss(value,true)}</style><div class="ml-preview-sheet" style="width:${value.width*scale}mm;height:${value.height*scale}mm"><div style="transform:scale(${scale});transform-origin:0 0;width:${value.width}mm">${labelHtml(sample,value,images)}</div></div>`;for(const node of preview.querySelectorAll('.element')){node.tabIndex=0;node.setAttribute('role','button');node.setAttribute('aria-label',fields.find(([f])=>f===node.dataset.field)[1]+'，拖拽或使用方向键移动');}const clipped=overflow(preview);error.textContent=clipped.length?'示例文字超出范围：'+clipped.join('、')+'。请调整文本框或字号。':'';previewStatus.textContent=`纸宽 ${value.width} × 走纸长 ${value.height} mm · 内容 ${value.rotation}°${previewReady?' · 输入后立即预览':' · 正在生成二维码预览…'}`;current=value;if(updateBase)base=copy(value);select(selected);}catch(e){invalid(e.message);}}
   function fillElements(value){for(const e of value.elements){form.elements.namedItem(e.field+'-show').checked=e.show;for(const n of ['x','y','w','h','font'])form.elements.namedItem(e.field+'-'+n).value=e[n];}}
   function fill(value){for(const name of ['width','height','rotation','offsetX','offsetY'])values[name].value=value[name]??0;values.paperPreset.value=paperName(value.width,value.height);fillElements(value);base=copy(value);render();}
+  zoom.oninput=event=>event.stopPropagation();
+  zoom.onchange=event=>{event.stopPropagation();render();};
+  form.onfocusin=event=>{const row=event.target.closest('tr[data-field]');if(row)select(row.dataset.field);};
+  preview.onfocusin=event=>{const node=event.target.closest('.element');if(node)select(node.dataset.field);};
+  preview.onpointerdown=event=>{const node=event.target.closest('.element');if(!node||event.button!==0||drag)return;try{const value=read(),rect=preview.querySelector('.label').getBoundingClientRect();select(node.dataset.field);event.preventDefault();preview.focus({preventScroll:true});preview.setPointerCapture(event.pointerId);drag={id:event.pointerId,field:selected,startX:event.clientX,startY:event.clientY,value,mmX:value.width/rect.width,mmY:value.height/rect.height};}catch(e){error.textContent=e.message;}};
+  preview.onpointermove=event=>{if(!drag||event.pointerId!==drag.id)return;try{fillElements(moveElement(drag.value,drag.field,(event.clientX-drag.startX)*drag.mmX,(event.clientY-drag.startY)*drag.mmY));render(true);}catch(e){error.textContent=e.message;}};
+  const endDrag=event=>{if(!drag||event.pointerId!==drag.id)return;drag=undefined;if(preview.hasPointerCapture(event.pointerId))preview.releasePointerCapture(event.pointerId);};
+  preview.onpointerup=preview.onpointercancel=preview.onlostpointercapture=endDrag;
+  preview.onkeydown=event=>{const direction={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];if(!direction||event.altKey||event.ctrlKey||event.metaKey)return;event.preventDefault();try{const step=event.shiftKey?1:.1;fillElements(moveElement(read(),selected,direction[0]*step,direction[1]*step));render(true);preview.querySelector(`.element[data-field="${selected}"]`)?.focus({preventScroll:true});}catch(e){error.textContent=e.message;}};
   form.oninput=form.onchange=event=>{const name=event.target?.name;if(!Object.hasOwn(values,name)){render(true);return;}try{const value=changedPaper(base,values,name);values.width.value=value.width;values.height.value=value.height;values.paperPreset.value=paperName(value.width,value.height);values.rotation.value=String(value.rotation);fillElements(value);render();}catch(e){invalid(e.message);}};
   form.onsubmit=event=>{event.preventDefault();try{current=read();localStorage.setItem(key,JSON.stringify(current));dialog.close();}catch(e){error.textContent=e.message;}};
   const cleanup=()=>{if(closed)return;closed=true;urls.forEach(url=>URL.revokeObjectURL(url));dialog.remove();if(closeDesigner===close)closeDesigner=undefined;};
@@ -183,5 +209,5 @@ function configure(){
   MaterialScanner.createQr(sample.code).then(blob=>{if(closed)return;const url=URL.createObjectURL(blob);urls.push(url);images.qr=url;previewReady=true;render();}).catch(()=>{if(!closed){previewStatus.textContent='二维码预览生成失败，请刷新页面后重试。';}});
 }
 globalThis.MaterialLabels=Object.freeze({configure,printUnits,printBatch});
-if(typeof module!=='undefined'&&module.exports)module.exports={validate,defaults,labelHtml,layoutCss,rowsFrom,resize};
+if(typeof module!=='undefined'&&module.exports)module.exports={validate,defaults,labelHtml,layoutCss,rowsFrom,resize,moveElement};
 })();

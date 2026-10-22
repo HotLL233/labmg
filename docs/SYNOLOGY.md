@@ -1,15 +1,17 @@
 # 群晖 Docker 部署
 
-当前源码为**0.9.1（打印纸张提示与排查验证版，已公开）**，继续PostgreSQL18。[0.9.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.1)已交付在线／本地两份完整YML、amd64／arm64三镜像TAR等12件，本机全部保存并通过11条摘要及5份冻结源附件核对。真实PG18.6回归177/177、四项容器门禁及公开非TAR附件匿名完整下载通过；ARM64为QEMU，本轮未在目标NAS或USB打印机实测。同一PG18项目更新保留原runtime/、https/、项目名及UID/GID，不提供PG17／SQLite迁移。0.9.0及更早版本保持原样。
+当前源码为**0.9.2（可视化标签排版，开发中，尚未发布）**，继续PostgreSQL18。正式部署暂使用已公开的[0.9.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.1)及下方同版本附件；当前仓库`deploy/`已同步未发布0.9.2，不要与0.9.1镜像混用。本页当前部署步骤仍面向0.9.1，不宣称0.9.2镜像或TAR已经存在。
 
-本版沿用0.9.0撤除BarTender和Windows助手后的系统打印，标签仅打印二维码及基础信息。0.9.1新增醒目纸宽×走纸长、模板来源及未保存提示，并提供手动系统窗口保存PDF排查入口；不会读取驱动纸型或自动选择USB设备。实体纸宽×走纸长固定，内容独立0°／90°旋转，当前纸卷宽38.5mm、走纸长30.5mm，避免驱动再旋转。操作及旧后台清理见[标签打印说明](LABEL_PRINTING.md)。本轮不访问NAS业务库或实际打印设备。
+0.9.1已交付在线／本地两份完整YML、amd64／arm64三镜像TAR等12件，本机全部保存并通过11条摘要及5份冻结源附件核对。该版真实PG18.6回归177/177、四项容器门禁及公开非TAR附件匿名完整下载通过；ARM64为QEMU，这些不是本轮0.9.2结果。同一PG18项目更新保留原runtime/、https/、项目名及UID/GID，不提供PG17／SQLite迁移。0.9.0及更早版本保持原样。
+
+部署版0.9.1沿用0.9.0撤除BarTender和Windows助手后的系统打印，标签仅打印二维码及基础信息，补充醒目纸宽×走纸长、模板来源及未保存提示，并提供手动系统窗口保存PDF排查入口；不会读取驱动纸型或自动选择USB设备。实体纸宽×走纸长固定，内容独立0°／90°旋转，当前纸卷宽38.5mm、走纸长30.5mm，避免驱动再旋转。0.9.2开发中的拖拽、预览倍率与方向键微调不改变部署和持久化方式，正式验收及交付另行记录。2026-10-22用户确认已提供的两方向留白JSON模板打印均正常，不能扩展为所有模板或新设计器已验收。操作及旧后台清理见[标签打印说明](LABEL_PRINTING.md)。本轮不访问NAS业务库或实际打印设备。
 
 ## 两份完整 YML，任选一份
 
 | 方式 | 文件 | 使用条件 |
 | --- | --- | --- |
-| 在线拉取 | [docker-compose.yml](../deploy/docker-compose.yml) | 应用从 GHCR 拉取，数据库与代理从官方镜像仓库拉取 |
-| 本地镜像 | [docker-compose.local.yml](../deploy/docker-compose.local.yml) | 导入目标架构 TAR 内的全部三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.9.1 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.1/docker-compose.yml) | 应用从 GHCR 拉取，数据库与代理从官方镜像仓库拉取 |
+| 本地镜像 | [0.9.1 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.1/docker-compose.local.yml) | 导入目标架构 TAR 内的全部三个镜像，所有服务禁止拉取 |
 
 两份文件都包含应用、PostgreSQL 18、一次性初始化和 HTTPS 代理四个服务，已内置 Caddy 配置。**不用再放 Caddyfile，不用合并 HTTPS YML，也不要求创建 .env。** 在线与本地版不要一起启动；在 Container Manager 项目中选择其中一份内容。如果界面固定要求文件名 docker-compose.yml，可将所选文件复制为此名称。
 

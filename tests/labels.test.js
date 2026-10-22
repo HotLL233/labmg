@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
-const { validate, defaults, labelHtml, layoutCss, rowsFrom, resize } = require('../src/public/material-labels');
+const { validate, defaults, labelHtml, layoutCss, rowsFrom, resize, moveElement } = require('../src/public/material-labels');
 const source = fs.readFileSync(path.join(__dirname, '../src/public/material-labels.js'), 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -127,6 +127,44 @@ test('90 degree layout rotates one content layer and validates calibration again
   template.offsetX=3;assert.throws(()=>validate(template),/含校准偏移/);
   template.offsetX=0;template.offsetY=-2;assert.throws(()=>validate(template),/含校准偏移/);
   template.offsetY=0;template.elements[0].x=25;assert.throws(()=>validate(template),/含校准偏移/);
+});
+
+test('designer movement follows physical axes at both rotations, clamps at paper edges and preserves the source',()=>{
+  for(const rotation of [0,90])for(const [offsetX,offsetY] of [[0,0],[.5,-.5],[-.5,.5]]){
+    const file=path.join(__dirname,`../config/label-templates/label-38.5x30.5-${rotation}deg.json`);
+    const template=JSON.parse(fs.readFileSync(file,'utf8'));Object.assign(template,{offsetX,offsetY});
+    const original=clone(template),start=template.elements.find(e=>e.field==='qr');
+    const moved=moveElement(template,'qr',.5,-.5),qr=moved.elements.find(e=>e.field==='qr');
+    assert.equal(qr.x,start.x+(rotation===90?-.5:.5));assert.equal(qr.y,start.y-.5);
+    assert.equal(qr.w,start.w);assert.equal(qr.h,start.h);assert.deepEqual(template,original);
+    for(const [dx,dy] of [[1000,1000],[-1000,-1000],[1000,-1000],[-1000,1000]]){
+      const bounded=moveElement(template,'qr',dx,dy);assert.deepEqual(validate(bounded),bounded);
+      assert.equal(bounded.width,38.5);assert.equal(bounded.height,30.5);assert.equal(bounded.rotation,rotation);
+      assert.deepEqual(bounded.elements.filter(e=>e.field!=='qr'),template.elements.filter(e=>e.field!=='qr'));
+    }
+  }
+  assert.throws(()=>moveElement(defaults,'qr',NaN,0),/有限数值/);
+  assert.throws(()=>moveElement(defaults,'regionName',1,0),/已显示/);
+  for(const rotation of [0,90]){
+    const precise=JSON.parse(fs.readFileSync(path.join(__dirname,`../config/label-templates/label-38.5x30.5-${rotation}deg.json`),'utf8'));
+    Object.assign(precise.elements[0],{x:2.034567,y:2.076543});
+    const horizontal=moveElement(precise,'name',.3,0).elements[0],vertical=moveElement(precise,'name',0,.3).elements[0];
+    assert.equal(rotation===0?horizontal.y:horizontal.x,rotation===0?2.076543:2.034567);
+    assert.equal(rotation===0?vertical.x:vertical.y,rotation===0?2.034567:2.076543);
+  }
+});
+
+test('printing and calibration without changing paper preserve arbitrary custom positions and sizes',async()=>{
+  const custom=clone(defaults);Object.assign(custom.elements.find(e=>e.field==='qr'),{x:43,w:17,h:16});
+  for(const rotation of [0,90]){
+    const template=rotation===0?custom:JSON.parse(fs.readFileSync(path.join(__dirname,'../config/label-templates/label-38.5x30.5-90deg.json'),'utf8'));
+    if(rotation===90)Object.assign(template.elements.find(e=>e.field==='qr'),{x:15.5});
+    const app=fixture({template});await app.api.printUnits([{code:'CUSTOM-001'}]);const popup=app.popups[0],doc=popup.document;
+    doc.getElementById('print').onclick();assert.equal(popup.printCount,1);assert.equal(doc.getElementById('label-layout').textContent,layoutCss(template));
+    const offset=doc.getElementById('paper-offsetX');offset.value='-0.5';offset.onchange();
+    doc.getElementById('save-paper').onclick();assert.deepEqual(app.saved[0].value.elements,template.elements);
+    doc.getElementById('print').onclick();assert.equal(popup.printCount,2);popup.close();
+  }
 });
 
 test('label content is escaped and preview CSS cannot change other elements or the main print page size', () => {

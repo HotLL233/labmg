@@ -22,8 +22,9 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   }
   fs.mkdirSync(path.join(fixture, 'config'));
   fs.copyFileSync(path.join(root, 'config/.env.example'), path.join(fixture, 'config/.env.example'));
+  fs.cpSync(path.join(root, 'config/label-templates'), path.join(fixture, 'config/label-templates'), { recursive: true });
   for (const name of ['package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
-  for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'deploy/.env', 'deploy/https/data/caddy/pki/authorities/local/root.key', 'deploy/https/config/private.json', 'deploy/runtime/private.json', 'deploy/runtime/uploads/private.txt', 'deploy/backups/private.tar.gz', 'src/runtime/private.txt', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
+  for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'config/private.json', 'config/label-templates/private.txt', 'config/label-templates/.env.json', 'config/label-templates/data/private.json', 'deploy/.env', 'deploy/https/data/caddy/pki/authorities/local/root.key', 'deploy/https/config/private.json', 'deploy/runtime/private.json', 'deploy/runtime/uploads/private.txt', 'deploy/backups/private.tar.gz', 'src/runtime/private.txt', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
     const file = path.join(fixture, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, 'must stay local');
@@ -56,6 +57,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   assert.equal(manifest.size, fs.statSync(archive).size);
   assert.equal(manifest.sourceSha256, crypto.createHash('sha256').update(JSON.stringify(manifest.sources)).digest('hex'));
   assert.ok(manifest.sources.some(source => source.path === 'config/.env.example'));
+  for (const name of ['label-38.5x30.5-0deg.json', 'label-38.5x30.5-90deg.json']) assert.ok(manifest.sources.some(source => source.path === 'config/label-templates/' + name));
   assert.ok(manifest.sources.some(source => source.path === 'deploy/.env.example'));
   assert.ok(manifest.sources.some(source => source.path === 'package-lock.json'));
   const zipHash = digest(archive);
@@ -70,12 +72,13 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   powershell(`Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${quote(archive)}, ${quote(extracted)})`);
   const files = fs.readdirSync(extracted, { recursive: true }).map(name => name.replaceAll('\\', '/'));
-  for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'deploy/docker-compose.https.yml', 'deploy/Caddyfile', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
+  for (const required of ['.github/workflows/publish-image.yml', 'src/server.js', 'scripts/check.js', 'scripts/package-docker.ps1', 'config/.env.example', 'config/label-templates/label-38.5x30.5-0deg.json', 'config/label-templates/label-38.5x30.5-90deg.json', 'deploy/.env.example', 'deploy/Dockerfile', 'deploy/Dockerfile.dockerignore', 'deploy/docker-compose.yml', 'deploy/docker-compose.infrastructure.yml', 'deploy/docker-compose.https.yml', 'deploy/Caddyfile', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'docs/DEVELOPMENT.md', 'docs/SYNOLOGY.md', 'tests/package.test.js', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'start-labos.cmd']) {
     assert.ok(files.includes(required), required);
   }
   assert.ok(files.every(file => !/(^|\/)(var|runtime|backups|https|data|uploads|logs|artifacts|\.git|node_modules)(\/|$)/.test(file)), files.join('\n'));
   assert.ok(files.every(file => !/\.(log|db(-wal|-shm)?)$/i.test(file)), files.join('\n'));
   assert.deepEqual(files.filter(file => path.basename(file).startsWith('.env')).sort(), ['config/.env.example', 'deploy/.env.example']);
+  assert.deepEqual(manifest.sources.filter(source => source.path.startsWith('config/')).map(source => source.path), ['config/.env.example', 'config/label-templates/label-38.5x30.5-0deg.json', 'config/label-templates/label-38.5x30.5-90deg.json']);
   for (const source of manifest.sources) assert.equal(digest(path.join(extracted, source.path)), source.sha256, source.path);
   const launcher = fs.readFileSync(path.join(extracted, 'start-labos.cmd'), 'utf8');
   assert.match(launcher, /npm ci --omit=dev --ignore-scripts/);

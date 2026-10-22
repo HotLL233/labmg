@@ -17,6 +17,7 @@ test('offline packaging saves three matching images and rejects missing PostgreS
   });
   for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'config']) fs.mkdirSync(path.join(fixture, name));
   for (const name of ['scripts/package.ps1', 'scripts/package-docker.ps1', 'deploy/docker-compose.yml', 'deploy/docker-compose.local.yml', 'docs/SYNOLOGY.md', 'docs/SCANNING_HTTPS.md', 'docs/LABEL_PRINTING.md', 'config/.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
+  fs.cpSync(path.join(root, 'config/label-templates'), path.join(fixture, 'config/label-templates'), { recursive: true });
   const commandsFile = path.join(fixture, 'artifacts', 'mock-commands.json');
   const quote = value => "'" + value.replaceAll("'", "''") + "'";
   const run = ({ expected = 0, mismatch = '', badDigest = '', architectures = 'amd64,arm64' } = {}) => {
