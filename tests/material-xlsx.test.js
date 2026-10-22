@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { spawnSync } = require('node:child_process');
 const { unzipSync, zipSync, strToU8, strFromU8 } = require('fflate');
-const { readCatalogWorkbook, CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, readOpeningWorkbook, OPENING_HEADERS, LEGACY_OPENING_HEADERS, excelColumn, importFailure, referenceFeature } = require('../src/material-xlsx');
+const { readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, excelColumn, importFailure, referenceFeature } = require('../src/material-xlsx');
 
 const cell = value => value && typeof value === 'object' ? value : { type: typeof value === 'number' ? Number : String, value };
 const sheet = (name, headers, rows, options = {}) => ({ sheet: name, data: [headers.map(cell), ...rows.map(row => row.map(cell))], ...options });
@@ -18,8 +18,10 @@ test('new Chinese-name and legacy column contracts both parse with explicit shee
   for (const [reader, headers, row] of [
     [readCatalogWorkbook, CATALOG_HEADERS, ['=文字名称', '500 mL', '瓶', '试剂', '逐件']],
     [readCatalogWorkbook, LEGACY_CATALOG_HEADERS, ['0000123', '试剂', '500 mL', '瓶', '试剂', '逐件']],
+    [readCatalogWorkbook, PREVIOUS_CATALOG_HEADERS, ['试剂', '500 mL', '瓶', '试剂', '逐件']],
     [readOpeningWorkbook, OPENING_HEADERS, ['试剂', '500 mL', '瓶', '区域 A', '中心仓库', 2, 12.5, '', '', '柜 A', '']],
-    [readOpeningWorkbook, LEGACY_OPENING_HEADERS, ['0000123', '区域 A', 'MAIN', 2, 12.5, '', '', '柜 A', '']]
+    [readOpeningWorkbook, LEGACY_OPENING_HEADERS, ['0000123', '区域 A', 'MAIN', 2, 12.5, '', '', '柜 A', '']],
+    [readOpeningWorkbook, PREVIOUS_OPENING_HEADERS, ['试剂', '500 mL', '瓶', '区域 A', '中心仓库', 2, 12.5, '', '', '柜 A', '']]
   ]) assert.deepEqual(await reader(upload(await workbook(headers, [row]))), { sheet: '导入明细', headers, rows: [{ row: 2, values: values(headers, row) }] });
   await assert.rejects(readOpeningWorkbook(upload(await workbook(CATALOG_HEADERS, [['试剂', '', '瓶', '试剂', '逐件']]))), /表头不匹配.*期初模板/);
 });
@@ -30,6 +32,13 @@ test('reader selects matching worksheet after reference sheets and keeps physica
   assert.deepEqual(await readCatalogWorkbook(upload(bytes)), { sheet: '物资明细', headers, rows: [{ row: 2, values: values(headers, first) }, { row: 4, values: values(headers, last) }] });
 });
 
+test('manufacturer, batch notes and catalog remarks are literal optional columns in current templates', async () => {
+  const catalogRow = ['试剂', '500 mL', '瓶', '试剂', '数量', '=物资备注'];
+  const openingRow = ['试剂', '500 mL', '瓶', '区域 A', '默认仓库', '1', '2.34', '批次', '', '柜 A', '', '厂家 A', '=批次备注'];
+  assert.deepEqual((await readCatalogWorkbook(upload(await workbook(CATALOG_HEADERS, [catalogRow])))).rows[0].values, values(CATALOG_HEADERS, catalogRow));
+  assert.deepEqual((await readOpeningWorkbook(upload(await workbook(OPENING_HEADERS, [openingRow])))).rows[0].values, values(OPENING_HEADERS, openingRow));
+});
+
 test('header mismatches and unsupported values report sheet, physical row, column, field and original value', async () => {
   const headers = [...CATALOG_HEADERS]; headers[1] = '错误规格'; headers[3] = '错分类';
   await assert.rejects(readCatalogWorkbook(upload(await workbook(headers, [['物资', '500mL', '瓶', '试剂', '数量']]))), failure => {
@@ -37,10 +46,10 @@ test('header mismatches and unsupported values report sheet, physical row, colum
     assert.deepEqual(failure.errors.map(item => [item.sheet, item.row, item.column, item.field, item.value]), [['导入明细', 1, 'B', '规格', '错误规格'], ['导入明细', 1, 'D', '物资分类', '错分类']]);
     return true;
   });
-  const invalid = ['物资', { type: Boolean, value: true }, '瓶', '试剂', '数量', '多余值'];
+  const invalid = ['物资', { type: Boolean, value: true }, '瓶', '试剂', '数量', '物资备注', '多余值'];
   await assert.rejects(readCatalogWorkbook(upload(await workbook(CATALOG_HEADERS, [['正常', '', '瓶', '试剂', '数量'], [], invalid]))), failure => {
     assert.equal(failure.totalErrors, 2);
-    assert.deepEqual(failure.errors.map(item => [item.sheet, item.row, item.column, item.field, item.value]), [['导入明细', 4, 'B', '规格', true], ['导入明细', 4, 'F', '多余列', '多余值']]);
+    assert.deepEqual(failure.errors.map(item => [item.sheet, item.row, item.column, item.field, item.value]), [['导入明细', 4, 'B', '规格', true], ['导入明细', 4, 'G', '多余列', '多余值']]);
     return true;
   });
 });

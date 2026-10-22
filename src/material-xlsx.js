@@ -7,8 +7,10 @@ const { findElement, appendMarkupInsideElement, insertElementMarkupAccordingToOr
 
 const LEGACY_OPENING_HEADERS = ['物资编码', '区域', '仓库编码', '数量', '总金额（元）', '批号', '有效期', '存放位置', '零金额原因'];
 const LEGACY_CATALOG_HEADERS = ['物资编码', '物资名称', '规格', '单位', '物资分类', '管理方式'];
-const OPENING_HEADERS = ['物资名称', '规格', '单位', '区域', '仓库', '数量', '总金额（元）', '批号', '有效期', '存放位置', '零金额原因'];
-const CATALOG_HEADERS = ['物资名称', '规格', '单位', '物资分类', '管理方式'];
+const PREVIOUS_OPENING_HEADERS = ['物资名称', '规格', '单位', '区域', '仓库', '数量', '总金额（元）', '批号', '有效期', '存放位置', '零金额原因'];
+const PREVIOUS_CATALOG_HEADERS = ['物资名称', '规格', '单位', '物资分类', '管理方式'];
+const OPENING_HEADERS = [...PREVIOUS_OPENING_HEADERS, '厂家', '备注'];
+const CATALOG_HEADERS = [...PREVIOUS_CATALOG_HEADERS, '物资备注'];
 const FILE_LIMIT = 5 * 1024 * 1024;
 
 function excelColumn(index) {
@@ -145,8 +147,8 @@ async function readWorkbook(input, headerVersions, label) {
   }
 }
 
-const readOpeningWorkbook = input => readWorkbook(input, [OPENING_HEADERS, LEGACY_OPENING_HEADERS], '期初');
-const readCatalogWorkbook = input => readWorkbook(input, [CATALOG_HEADERS, LEGACY_CATALOG_HEADERS], '物资信息');
+const readOpeningWorkbook = input => readWorkbook(input, [OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS], '期初');
+const readCatalogWorkbook = input => readWorkbook(input, [CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS], '物资信息');
 
 function referenceFeature() {
   const references = sheet => Object.entries(sheet.referenceLists || {}).filter(([, reference]) => reference.count !== 0).map(([column, reference]) => {
@@ -174,4 +176,4 @@ function referenceFeature() {
   } } };
 }
 
-module.exports = { readOpeningWorkbook, OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature };
+module.exports = { readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature };

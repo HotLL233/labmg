@@ -1,4 +1,12 @@
-# 物资 API 合同（0.10.1）
+# 物资 API 合同（0.11.0）
+
+0.11.0 接入库存七列、厂家与两类备注。`GET /stock` 和不带 `detail=1` 的 `GET /stock/batches` 保留原聚合／批次身份；新的 `GET /stock/batches?detail=1` 仅按厂家拆分展示，领用、位置与二维码继续使用原批次。新展示行增加 `firstMovementAt,manufacturer,note,catalogRemark,totalQtyM,amountBasis:'batch-average'`；`totalQtyM` 是该物资全部仓库／区域的合计，分页或区域筛选不会将它改成当前页小计。`GET /stock/manufacturers` 返回 `{items:[厂家名]}` 历史建议，仍须登录并具有物资读取权限。
+
+厂家输入做 NFKC、去首尾空白和连续空白合并，最多200字；批次 `note` 与物资档案 `remark` 各最多2000字。验收、库存调整、期初／补录及对应 Excel 支持厂家／批次备注，验收同次新建和物资信息库导入支持档案备注，复用已有物资不覆盖其备注。
+
+厂家数量分配政策：数量型新出库在原事务内将 `manufacturerAllocations:[{manufacturer,qtyM}]` 记录到流水快照，先分配该流水填写的厂家，再按首次入库顺序分配其他厂家；无该元数据的历史出库仅依同一政策重放展示，不推测或回填历史实物厂家。逐件型按实际发放单件的入库来源追溯。每批明细之和必须等于原余额。金额继续按整批统一计价，厂家行按数量分摊并在末行补尾差，不代表厂家独立采购成本。备份仍为schema6，新分配元数据有严格校验；回退使用升级前备份。
+
+Excel现行中文模板：期初／库存回导为原十一列后新增「厂家、备注」；物资信息原五列后新增「物资备注」。旧十一列、五列和旧编码模板继续可读。有金额权限的库存导出按厂家明细生成可回导页、带厂家建议引用；确认前仍是新草稿，重复导入会增加新库存，须核对。不允许导入覆盖已有档案的不同备注，错误含实际行列及中文字段。下文描述“准备列未接入”和“十一列现行模板”的0.10.1阶段说明已由本段替代，历史验证记录保留。
 
 实现入口：`createMaterials({db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx})`，同步返回 `{handle, backup, restore}`，方法均异步、调用方必须等待。`handle(req,res,url,user)` 处理 `/api/materials` 并返回 `true`，其他路径返回 `false`；错误向 HTTP 层抛出，不能吞掉后提交事务。新业务只使用 PostgreSQL 专表，不写旧 `records`。数据库继续为 PostgreSQL 18，不读取 SQLite；物资 JSON 备份兼容合同继续保留。0.7.0 中文 Excel、自动编码、整批校验与回导已经发布，其后实际 PG18 CI159/159及容器证据见[版本说明](CHANGELOG.md)，替代本页此前“CI尚待执行、镜像未发布”的过期状态。0.8.0 新增打印 API，验证结果单独记录，不复用旧版结论。
 

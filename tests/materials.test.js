@@ -430,7 +430,7 @@ test('catalog XLSX template import and export round-trip literal codes, skip ide
   const exported = await f.request('GET', '/api/materials/catalog/export.xlsx?q=00000123', f.admin);
   const roundTrip = await require('../src/material-xlsx').readCatalogWorkbook({ name: 'round-trip.xlsx', content: exported.bytes.toString('base64') });
   assert.deepEqual(roundTrip.headers, require('../src/material-xlsx').CATALOG_HEADERS);
-  assert.deepEqual(roundTrip.rows, [{ row: 2, values: { '物资名称': '=literal name', '规格': '250 mL', '单位': '瓶', '物资分类': s.category.name, '管理方式': '逐件' } }]);
+  assert.deepEqual(roundTrip.rows, [{ row: 2, values: { '物资名称': '=literal name', '规格': '250 mL', '单位': '瓶', '物资分类': s.category.name, '管理方式': '逐件', '物资备注': '' } }]);
   const conflictBytes = await catalogExcel([['ROLLBACK-XLSX', 'must disappear', 'x', '盒', s.category.name, '数量'], ['00000123', 'different identity', '250 mL', '瓶', s.category.name, '逐件']]);
   const failure = await f.request('POST', '/api/materials/catalog/import', f.admin, { name: 'bad.xlsx', content: conflictBytes.toString('base64') }, 409);
   assert.match(failure.data.error, /第3行B列/);
@@ -441,6 +441,141 @@ test('catalog XLSX template import and export round-trip literal codes, skip ide
   assert.equal((await f.request('GET', '/api/materials/stock', s.material)).data.total, 0);
   assert.equal((await f.request('GET', '/api/materials/stock/units', s.material)).data.total, 0);
   assertNoMoney((await f.request('GET', '/api/materials/catalog', ordinary)).data);
+});
+
+test('manufacturer details preserve legacy batch identity, exact balances, FIFO allocations and last nonempty notes', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'MULTI', expiryDate: '' };
+  const addStock = extra => f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '1', amount: '1.00', requestIdempotencyKey: key(), ...extra }, 201);
+  await addStock({ manufacturer: '  Ａ厂　  实验 ', note: '第一条备注' });
+  await addStock({ manufacturer: 'A厂 实验', note: '' });
+  await addStock({ manufacturer: '乙厂', amount: '2.00', note: '乙厂备注' });
+  await addStock({ manufacturer: '', note: '旧数据无厂家' });
+  const query = '/api/materials/stock/batches?' + new URLSearchParams(identity);
+  const before = (await f.request('GET', query, s.material)).data.items[0];
+  const first = (await f.request('GET', query + '&detail=1', s.material)).data;
+  assert.equal(first.total, 3); assert.deepEqual(first.items.map(row => [row.manufacturer, row.qtyM]), [['A厂 实验', 2000], ['乙厂', 1000], ['', 1000]]);
+  assert.ok(first.items.every(row => row.totalQtyM === 4000 && row.amountBasis === 'batch-average' && row.firstMovementAt));
+  assert.equal(first.items[0].note, '第一条备注'); assert.equal(first.items.reduce((sum, row) => sum + row.amountCents, 0), 500);
+  const page = (await f.request('GET', query + '&detail=1&page=2&pageSize=1', s.material)).data;
+  assert.equal(page.total, 3); assert.equal(page.items[0].manufacturer, '乙厂');
+  const issue = (await f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity: '2.5', purpose: '跨厂家领用', requestIdempotencyKey: key() }, 201)).data.issue;
+  const issued = (await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201)).data.issue;
+  assert.equal(issued.amountCents, 313);
+  const movement = (await f.request('GET', '/api/materials/stock/movements', s.material)).data.items.find(row => row.type === 'issue');
+  assert.deepEqual(movement.snapshot.manufacturerAllocations, [{ manufacturer: 'A厂 实验', qtyM: 2000 }, { manufacturer: '乙厂', qtyM: 500 }]);
+  const after = (await f.request('GET', query + '&detail=1', s.material)).data.items;
+  assert.deepEqual(after.map(row => [row.manufacturer, row.qtyM]), [['乙厂', 500], ['', 1000]]);
+  assert.equal(after.reduce((sum, row) => sum + row.amountCents, 0), 187);
+  const legacy = (await f.request('GET', query, s.material)).data.items[0];
+  assert.equal(legacy.id, before.id); assert.equal(legacy.qrPayload, before.qrPayload); assert.equal(legacy.qtyM, 1500);
+  assert.equal((await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: before.qrPayload })).data.batch.qtyM, 1500);
+  assert.deepEqual((await f.request('GET', '/api/materials/stock/manufacturers', ordinary)).data.items, ['A厂 实验', '乙厂']);
+  assertNoMoney((await f.request('GET', query + '&detail=1', ordinary)).data);
+  await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...identity, direction: 'decrease', quantity: '0.25', amount: '0', reason: '有厂家校核', manufacturer: '乙厂', note: '本次核验备注', requestIdempotencyKey: key() }, 201);
+  const adjusted = (await f.request('GET', query + '&detail=1', s.material)).data.items;
+  assert.equal(adjusted.find(row => row.manufacturer === '乙厂').note, '本次核验备注');
+  assert.equal(adjusted.reduce((sum, row) => sum + row.qtyM, 0), 1250); assert.equal(adjusted.reduce((sum, row) => sum + row.amountCents, 0), 187);
+  for (const manufacturer of ['甲厂', '乙厂', '甲厂']) await addStock({ batch: 'INTERLEAVED', manufacturer });
+  const interleavedIdentity = { ...identity, batch: 'INTERLEAVED' };
+  const interleaved = (await f.request('POST', '/api/materials/issues', ordinary, { ...interleavedIdentity, quantity: '2', purpose: '交错入库FIFO', requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${interleaved.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201);
+  const interleavedMovement = (await f.request('GET', '/api/materials/stock/movements', s.material)).data.items.find(row => row.issueId === interleaved.id);
+  assert.deepEqual(interleavedMovement.snapshot.manufacturerAllocations, [{ manufacturer: '甲厂', qtyM: 1000 }, { manufacturer: '乙厂', qtyM: 1000 }]);
+  const interleavedDetails = (await f.request('GET', '/api/materials/stock/batches?' + new URLSearchParams(interleavedIdentity) + '&detail=1', s.material)).data.items;
+  assert.deepEqual(interleavedDetails.map(row => [row.manufacturer, row.qtyM]), [['甲厂', 1000]]);
+  let order = await f.submit(await f.order(ordinary, f.item(s, { quantity: '6' })), s.material);
+  const acceptedA = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '3', amount: '1.00', manufacturer: '甲厂', batch: 'REVERSE-MIXED' }), 201)).data;
+  order = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(acceptedA.request, { quantity: '3', amount: '1.00', manufacturer: '乙厂', batch: 'REVERSE-MIXED' }), 201)).data.request;
+  const receiptIdentity = { ...identity, warehouse: 'REAGENT', batch: 'REVERSE-MIXED' };
+  const consumed = (await f.request('POST', '/api/materials/issues', ordinary, { ...receiptIdentity, quantity: '2', purpose: '冲正前跨厂余额', requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${consumed.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201);
+  await f.request('POST', `/api/materials/receipts/${acceptedA.receipt.id}/reverse`, s.material, { requestVersion: order.version, version: order.items[0].version, reason: '按旧批次余额冲正', requestIdempotencyKey: key() }, 201);
+  const remaining = (await f.request('GET', '/api/materials/stock/batches?' + new URLSearchParams(receiptIdentity) + '&detail=1', s.material)).data.items;
+  assert.deepEqual(remaining.map(row => [row.manufacturer, row.qtyM, row.amountCents]), [['乙厂', 1000, 33]]);
+});
+
+test('unit manufacturer display follows actual selected source units and preserves their old labels through reversal rules', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  const master = await f.catalog(s.category.id, { code: 'FACTORY-UNIT', trackingMode: 'unit' });
+  let order = await f.submit(await f.order(ordinary, f.item(s, { catalogId: master.id, quantity: '3' })), s.material);
+  const first = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { manufacturer: '甲厂', note: '甲批', quantity: '1', batch: 'UNIT' }), 201)).data;
+  order = first.request;
+  const second = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { manufacturer: '  Ｂ厂 ', note: '乙批', quantity: '1', batch: 'UNIT' }), 201)).data;
+  const identity = { catalogId: master.id, regionId: s.region.id, warehouse: 'REAGENT', batch: 'UNIT', expiryDate: '' };
+  const issue = (await f.request('POST', '/api/materials/issues', ordinary, { ...identity, quantity: '1', purpose: '选后入单件', requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, { version: 1, unitCodes: [second.receipt.units[0].code], requestIdempotencyKey: key() }, 201);
+  const query = '/api/materials/stock/batches?' + new URLSearchParams(identity) + '&detail=1';
+  const details = (await f.request('GET', query, s.material)).data.items;
+  assert.deepEqual(details.map(row => [row.manufacturer, row.qtyM]), [['甲厂', 1000]]);
+  assert.equal((await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: second.receipt.units[0].code })).data.unit.status, 'issued');
+  const current = await f.get(order.id);
+  await f.request('POST', `/api/materials/receipts/${second.receipt.id}/reverse`, s.material, { requestVersion: current.version, version: current.items[0].version, reason: '已发放不能冲正', requestIdempotencyKey: key() }, 409);
+  const reversed = (await f.request('POST', `/api/materials/receipts/${first.receipt.id}/reverse`, s.material, { requestVersion: current.version, version: current.items[0].version, reason: '在库整笔冲正', requestIdempotencyKey: key() }, 201)).data;
+  assert.equal(reversed.receipt.manufacturer, '甲厂'); assert.equal(reversed.receipt.note, '甲批');
+  assert.ok((await f.request('GET', query, s.material)).data.items.every(row => row.qtyM === 0));
+  assert.equal((await f.request('POST', '/api/materials/scan/resolve', ordinary, { code: first.receipt.units[0].code })).data.unit.status, 'void');
+});
+
+test('manufacturer and remarks Excel exports return to drafts with exact quantities and cents and detailed new-field errors', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const master = await f.catalog(s.category.id, { code: 'FACTORY-XLSX', remark: '=档案备注' });
+  const identity = { catalogId: master.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'XLSX-FACTORY', expiryDate: '' };
+  for (const manufacturer of ['甲厂', '乙厂']) await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, quantity: '1', amount: '0.01', manufacturer, note: '=' + manufacturer + '备注', requestIdempotencyKey: key() }, 201);
+  const catalogExport = await f.request('GET', '/api/materials/catalog/export.xlsx?q=FACTORY-XLSX', f.admin);
+  assert.equal((await require('../src/material-xlsx').readCatalogWorkbook({ name: '档案.xlsx', content: catalogExport.bytes.toString('base64') })).rows[0].values['物资备注'], '=档案备注');
+  assert.deepEqual((await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '档案.xlsx', content: catalogExport.bytes.toString('base64') }, 201)).data, { created: 0, skipped: 1 });
+  const conflict = await namedExcel(require('../src/material-xlsx').CATALOG_HEADERS, [[master.name, master.spec, master.unit, s.category.name, '数量', '不同档案备注']]);
+  const conflictFailure = (await f.request('POST', '/api/materials/catalog/import', f.admin, { name: '冲突.xlsx', content: conflict.toString('base64') }, 409)).data;
+  assert.deepEqual(conflictFailure.errors.map(row => [row.row, row.column, row.field]), [[2, 'F', '物资备注']]);
+  const exported = await f.request('GET', '/api/materials/export.xlsx?type=stock&catalogId=' + master.id, s.material);
+  const parsed = await require('../src/material-xlsx').readOpeningWorkbook({ name: '库存.xlsx', content: exported.bytes.toString('base64') });
+  assert.deepEqual(parsed.rows.map(row => [row.values['厂家'], row.values['备注'], row.values['总金额（元）']]), [['甲厂', '=甲厂备注', '0.01'], ['乙厂', '=乙厂备注', '0.01']]);
+  let opening = (await f.request('POST', '/api/materials/openings', s.material, { title: '回导厂家草稿' }, 201)).data;
+  opening = (await f.request('POST', `/api/materials/openings/${opening.id}/import`, s.material, { version: opening.version, name: '库存.xlsx', content: exported.bytes.toString('base64') }, 201)).data;
+  assert.deepEqual(opening.items.map(row => [row.manufacturer, row.note, row.qtyM, row.amountCents]), [['甲厂', '=甲厂备注', 1000, 1], ['乙厂', '=乙厂备注', 1000, 1]]);
+  const draftExport = await f.request('GET', `/api/materials/openings/${opening.id}/export.xlsx`, s.material);
+  const draftParsed = await require('../src/material-xlsx').readOpeningWorkbook({ name: '草稿.xlsx', content: draftExport.bytes.toString('base64') });
+  assert.deepEqual(draftParsed.rows, parsed.rows);
+  const limited = await f.customAccount('FACTORY_EXPORT', ['materials.read', 'materials.export']);
+  const redacted = workbookXml((await f.request('GET', `/api/materials/openings/${opening.id}/export.xlsx`, limited)).bytes).get('xl/worksheets/sheet1.xml');
+  assert.match(redacted, /sqref="K2:K5001"/); assert.doesNotMatch(redacted, /sqref="L2:L5001"/);
+  const invalidRows = [[master.name, master.spec, master.unit, s.region.name, '默认仓库', '1', '1.00', '', '', '', '', '厂'.repeat(201), '备注'.repeat(1001)]];
+  const invalid = await namedExcel(require('../src/material-xlsx').OPENING_HEADERS, invalidRows);
+  const failed = (await f.request('POST', `/api/materials/openings/${opening.id}/import`, s.material, { version: opening.version, name: '错误.xlsx', content: invalid.toString('base64') }, 400)).data;
+  assert.deepEqual(failed.errors.map(row => [row.row, row.column, row.field]), [[2, 'L', '厂家'], [2, 'M', '备注']]);
+  assert.equal((await f.request('GET', `/api/materials/openings/${opening.id}`, s.material)).data.items.length, 2);
+  opening = (await f.request('POST', `/api/materials/openings/${opening.id}/post`, s.material, { version: opening.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  assert.equal(opening.status, 'posted');
+  const details = (await f.request('GET', '/api/materials/stock/batches?detail=1&catalogId=' + master.id, s.material)).data.items;
+  assert.deepEqual(details.map(row => [row.manufacturer, row.qtyM, row.catalogRemark]), [['甲厂', 2000, '=档案备注'], ['乙厂', 2000, '=档案备注']]);
+});
+
+test('schema 6 restores validate allocation metadata and retain compatible snapshots without allocations', { timeout: 60000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'ALLOC-BACKUP', expiryDate: '' };
+  for (const manufacturer of ['甲厂', '乙厂']) await f.request('POST', '/api/materials/stock/opening', s.material, { ...identity, manufacturer, note: manufacturer + '备注', quantity: '2', amount: '1.00', requestIdempotencyKey: key() }, 201);
+  const issue = (await f.request('POST', '/api/materials/issues', s.material, { ...identity, quantity: '3', purpose: '厂家备份', requestIdempotencyKey: key() }, 201)).data.issue;
+  await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, { version: 1, requestIdempotencyKey: key() }, 201);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  const target = await fixture(t), material = await target.account('MATERIAL');
+  const mutate = change => {
+    const payload = structuredClone(backup), movement = payload.data.material_stock_movements.find(row => row.type === 'issue'), snapshot = JSON.parse(movement.snapshot);
+    change(snapshot); movement.snapshot = JSON.stringify(snapshot); return payload;
+  };
+  for (const value of [null, [], [{ manufacturer: '甲厂', qtyM: 3000 }], [{ manufacturer: '甲厂', qtyM: 1000 }, { manufacturer: '甲厂', qtyM: 2000 }], [{ manufacturer: '甲厂', qtyM: Number.MAX_SAFE_INTEGER + 1 }], [{ manufacturer: '甲厂', qtyM: 2000 }, { manufacturer: '乙厂', qtyM: 999 }], [{ manufacturer: '甲厂', qtyM: 2000, extra: 'invalid' }, { manufacturer: '乙厂', qtyM: 1000 }], [{ manufacturer: '甲厂', qtyM: '2000' }, { manufacturer: '乙厂', qtyM: 1000 }]]) {
+    await target.request('POST', '/api/materials/restore', target.admin, mutate(snapshot => { snapshot.manufacturerAllocations = value; }), 400);
+    assert.equal((await target.request('GET', '/api/materials/stock', material)).data.total, 0);
+  }
+  const wrongPositive = structuredClone(backup);
+  wrongPositive.data.material_stock_movements[0].snapshot = JSON.stringify({ ...JSON.parse(wrongPositive.data.material_stock_movements[0].snapshot), manufacturerAllocations: [{ manufacturer: '甲厂', qtyM: 2000 }] });
+  await target.request('POST', '/api/materials/restore', target.admin, wrongPositive, 400);
+  await target.request('POST', '/api/materials/restore', target.admin, backup);
+  assert.deepEqual((await target.request('GET', '/api/materials/stock/batches?detail=1', material)).data.items, (await f.request('GET', '/api/materials/stock/batches?detail=1', s.material)).data.items);
+  const legacyTarget = await fixture(t), legacyMaterial = await legacyTarget.account('MATERIAL');
+  const compatible = mutate(snapshot => { delete snapshot.manufacturerAllocations; });
+  await legacyTarget.request('POST', '/api/materials/restore', legacyTarget.admin, compatible);
+  assert.equal((await legacyTarget.request('GET', '/api/materials/stock/batches?detail=1', legacyMaterial)).data.items[0].qtyM, 1000);
 });
 
 test('catalog import rechecks session and maintenance grants after parsing before opening its write transaction', async t => {
