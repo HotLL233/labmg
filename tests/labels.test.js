@@ -12,7 +12,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 // Only the popup/document APIs used by labels are modeled; real Edge and physical printers are separate checks.
 function fixture({ template, stored, readError = false, saveError = false, createQr, imageFailure = false, textOverflow, onYield } = {}) {
   const urls = new Set(), revoked = [], generated = [], downloads = [], popups = [], saved=[];
-  const node = () => ({ disabled: false, textContent: '', setAttribute() {}, remove() {}, click() { downloads.push(this); } });
+  const node = () => ({ disabled: false, textContent: '', attributes:{}, setAttribute(name,value) { this.attributes[name]=value; }, remove() {}, click() { downloads.push(this); } });
   function popup() {
     const events = {}, controls = {}, status = node();
     const result = {
@@ -215,10 +215,22 @@ test('missing, corrupt and unreadable browser templates expose the 60x40 fallbac
   app.popups[0].close();
 });
 
+test('print controls stay available while paper settings and verbose guidance start collapsed, with visible errors',async()=>{
+  const app=fixture();await app.api.printUnits([{code:'A001'}]);const popup=app.popups[0],doc=popup.document;
+  const settings=doc.html.match(/<details id="paper-settings">([\s\S]*?)<\/details>/)?.[1],help=doc.html.match(/<details id="print-help">([\s\S]*?)<\/details>/)?.[1];
+  assert.match(settings,/<summary>纸张与校准<\/summary>/);assert.match(settings,/id="paper-offsetX"/);
+  assert.match(help,/id="template-status"/);assert.match(help,/id="driver-reminder"/);assert.match(help,/id="pdf-size"/);
+  for(const id of ['from','to','print','test-print','pdf-print','save-paper','status']){assert.doesNotMatch(settings,new RegExp('id="'+id+'"'));assert.doesNotMatch(help,new RegExp('id="'+id+'"'));}
+  assert.doesNotMatch(doc.html,/position:sticky/);assert.match(doc.html,/#status\[role="alert"\]/);
+  assert.equal(doc.getElementById('status').attributes.role,'status');
+  doc.getElementById('from').value='0';doc.getElementById('from').oninput();assert.equal(doc.getElementById('status').attributes.role,'alert');assert.equal(doc.getElementById('print').disabled,true);
+  doc.getElementById('from').value='1';doc.getElementById('from').oninput();assert.equal(doc.getElementById('status').attributes.role,'status');assert.equal(doc.getElementById('print').disabled,false);popup.close();
+});
+
 test('paper and driver reminders follow preset and custom dimensions and saving reports its actual result',async()=>{
   for(const saveError of [false,true]){
     const app=fixture({saveError});await app.api.printUnits([{code:'A001'}]);const popup=app.popups[0],doc=popup.document;
-    assert.match(doc.html,/#paper-summary\{font-size:20px/);
+    assert.match(doc.html,/#paper-summary\{font-size:16px/);
     const preset=doc.getElementById('paper-preset');preset.value='38.5x30.5';preset.onchange();
     assert.match(doc.getElementById('driver-reminder').textContent,/横跨纸卷宽 38.5 mm、走纸长 30.5 mm/);
     assert.match(doc.getElementById('template-status').textContent,/尚未保存/);

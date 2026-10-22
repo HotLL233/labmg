@@ -77,9 +77,16 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
     fsyncSync(fd) { assert.ok(descriptors.has(fd)); },
     closeSync(fd) { assert.ok(descriptors.delete(fd)); }
   };
-  const run = () => vm.runInNewContext(source, {
-    require: name => name === 'node:fs' ? fakeFs : require(name),
-    process: { env: { LABOS_UID: '12345', LABOS_GID: '23456' }, getuid: () => 0 },
+  const httpsCalls = [];
+  const run = host => vm.runInNewContext(source, {
+    require: name => name === 'node:fs' ? fakeFs : name === './https-config' ? {
+      prepareHttpsConfig(options) {
+        assert.match(entries.get(passwordFile)?.content || '', /^[a-f0-9]{64}\n$/, 'HTTPS must run after successful persistent secret validation');
+        httpsCalls.push(options.host);
+        return { host: '192.0.2.20', automatic: true, interface: 'eth0', configPath: root + '/https-config/Caddyfile' };
+      }
+    } : require(name),
+    process: { env: { LABOS_UID: '12345', LABOS_GID: '23456', ...(host === undefined ? {} : { LABOS_HTTPS_HOST: host }) }, getuid: () => 0 },
     console: { log() {} }
   });
   run();
@@ -99,9 +106,14 @@ test('runtime initializer creates one persistent secret and refuses missing, inv
   assert.deepEqual(entries.get(passwordFile), initial, 'restart must keep the same password');
   assert.deepEqual(entries.get(postgresDirectory), postgresBeforeRestart, 'initialization must preserve PostgreSQL ownership and permissions');
   assert.deepEqual(entries.get(postgresDataDirectory), postgresDataBeforeRestart, 'initialization must preserve the PostgreSQL 18 data directory');
+  assert.deepEqual(httpsCalls, [], 'standalone initialization without an HTTPS variable must not inspect container networking');
+  run('auto');
+  run('0.0.0.0');
+  assert.deepEqual(httpsCalls, ['auto', '0.0.0.0'], 'Compose init must forward automatic and legacy wildcard requests after the original secret checks');
   entries.delete(passwordFile);
   entries.set(postgresDataDirectory + '/PG_VERSION', { kind: 'file', content: '18\n' });
-  assert.throws(run, /password file is missing/);
+  assert.throws(() => run('auto'), /password file is missing/);
+  assert.deepEqual(httpsCalls, ['auto', '0.0.0.0'], 'HTTPS must not run after a PostgreSQL secret safety failure');
   assert.equal(entries.has(passwordFile), false, 'an existing PostgreSQL database must never receive a generated replacement password');
   entries.set(passwordFile, { ...initial, content: 'corrupt-fixture' });
   assert.throws(run, /password file is invalid/);

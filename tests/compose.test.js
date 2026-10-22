@@ -74,6 +74,8 @@ test('online and local Compose files independently preserve PostgreSQL 18 runtim
     assert.equal(postgres.depends_on['labos-init'].condition, 'service_completed_successfully');
     assert.equal(configuration.services.labos.user, `${overrides.LABOS_UID || '1000'}:${overrides.LABOS_GID || '1000'}`);
     assert.equal(configuration.services['labos-init'].user, '0:0');
+    assert.equal(configuration.services['labos-init'].network_mode, 'host');
+    assert.equal(configuration.services['labos-init'].environment.LABOS_HTTPS_HOST, overrides.LABOS_HTTPS_HOST || 'auto');
     assert.equal(configuration.services['labos-init'].environment.LABOS_UID, overrides.LABOS_UID || '1000');
     assert.equal(configuration.services['labos-init'].environment.LABOS_GID, overrides.LABOS_GID || '1000');
     assert.equal(String(configuration.services.labos.ports[0].published), overrides.LABOS_PORT || '3000');

@@ -7,7 +7,7 @@ const { test } = require('node:test');
 const root = path.resolve(__dirname, '..');
 const available = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
 
-test('both complete Compose files configure HTTPS from one inline host without external files', {
+test('both complete Compose files default to host-network discovery and a generated read-only HTTPS configuration', {
   skip: available.error?.code === 'ENOENT' ? 'Docker CLI is not installed' : false
 }, t => {
   assert.ifError(available.error);
@@ -32,56 +32,54 @@ test('both complete Compose files configure HTTPS from one inline host without e
     return JSON.parse(result.stdout);
   }
   const check = (configuration, fixture, host, overrides = {}) => {
+    const init = configuration.services['labos-init'];
     const proxy = configuration.services['labos-https'];
+    assert.equal(init.network_mode, 'host');
+    assert.equal(init.ports, undefined, 'the one-shot initializer must not expose a listener');
+    assert.equal(init.environment.LABOS_HTTPS_HOST, host);
     assert.equal(proxy.image, 'caddy:2.11.7-alpine');
-    assert.equal(proxy.environment.LABOS_HTTPS_HOST, host);
+    assert.equal(proxy.environment.LABOS_HTTPS_HOST, undefined, 'only init resolves the host');
     assert.equal(proxy.environment.XDG_DATA_HOME, '/var/lib/labos-https/data');
     assert.equal(proxy.environment.XDG_CONFIG_HOME, '/var/lib/labos-https/config');
     assert.equal(proxy.ports[0].target, 443);
     assert.equal(String(proxy.ports[0].published), overrides.LABOS_HTTPS_PORT || '8443');
     assert.equal(String(configuration.services.labos.ports[0].published), overrides.LABOS_PORT || '3000');
     assert.equal(proxy.depends_on.labos.condition, 'service_started');
+    assert.equal(proxy.depends_on['labos-init'].condition, 'service_completed_successfully');
     for (const service of ['labos', 'labos-init']) {
       assert.equal(path.resolve(configuration.services[service].volumes[0].source), overrides.LABOS_DATA_DIR || path.join(fixture, 'runtime'));
     }
-    assert.equal(proxy.volumes.length, 1, 'Caddy must create its subdirectories within a single adjacent root bind');
-    assert.equal(proxy.volumes[0].type, 'bind');
-    assert.equal(path.resolve(proxy.volumes[0].source), path.join(fixture, 'https'));
-    assert.equal(proxy.volumes[0].target, '/var/lib/labos-https');
-    assert.deepEqual(proxy.entrypoint, ['/bin/sh', '-ec']);
-    assert.equal(proxy.command.length, 1, 'the shell must receive the entire inline script as one argument');
-    const command = proxy.command[0];
-    assert.match(command, /case "\$\$LABOS_HTTPS_HOST" in/);
-    assert.match(command, /""\|CHANGE_ME\|/);
-    assert.match(command, /mkdir -p \/var\/lib\/labos-https\/data \/var\/lib\/labos-https\/config/);
-    const heredoc = command.match(/cat > (\/tmp\/[A-Za-z0-9.-]+) <<'([A-Z_]+)'\n([\s\S]*?)\n\2\n/);
-    assert.ok(heredoc, 'a quoted heredoc must preserve Caddy placeholders through shell execution');
-    assert.match(heredoc[3], /^\s+default_sni \{\$\$LABOS_HTTPS_HOST\}$/m);
-    assert.match(heredoc[3], /^https:\/\/\{\$\$LABOS_HTTPS_HOST\}:443 \{$/m);
-    assert.match(heredoc[3], /^\s+tls internal$/m);
-    assert.match(heredoc[3], /^\s+reverse_proxy labos:3000$/m);
-    assert.doesNotMatch(heredoc[3], /(?<!\$)\$(?!\$)/, 'Caddy dollar signs must remain escaped in normalized Compose output');
-    assert.ok(command.endsWith(`exec caddy run --config ${heredoc[1]} --adapter caddyfile\n`), 'exec must hand signals to the real Caddy process');
+    assert.equal(proxy.volumes.length, 2, 'Caddy preserves its CA and separately reads init output');
+    const certificates = proxy.volumes.find(mount => mount.target === '/var/lib/labos-https');
+    assert.equal(certificates.type, 'bind');
+    assert.equal(path.resolve(certificates.source), path.join(fixture, 'https'));
+    const generated = proxy.volumes.find(mount => mount.target === '/etc/labos-https');
+    assert.equal(generated.type, 'bind');
+    assert.equal(path.resolve(generated.source), path.join(overrides.LABOS_DATA_DIR || path.join(fixture, 'runtime'), 'https-config'));
+    assert.equal(generated.read_only, true);
+    assert.equal(proxy.entrypoint ?? undefined, undefined, 'use the official image without a shell wrapper');
+    assert.deepEqual(proxy.command, ['caddy', 'run', '--config', '/etc/labos-https/Caddyfile', '--adapter', 'caddyfile']);
   };
   for (const [kind, name] of [['online', 'docker-compose.yml'], ['local', 'docker-compose.local.yml']]) {
     const fixture = path.join(directory, kind);
     fs.mkdirSync(fixture);
     const composeFile = path.join(fixture, 'docker-compose.yml');
     const source = fs.readFileSync(path.join(root, 'deploy', name), 'utf8');
-    assert.equal((source.match(/^\s+LABOS_HTTPS_HOST:\s*"\$\{LABOS_HTTPS_HOST:-CHANGE_ME\}"/gm) || []).length, 1, 'only one inline host field should need editing');
+    assert.equal((source.match(/^\s+LABOS_HTTPS_HOST:\s*"\$\{LABOS_HTTPS_HOST:-auto\}"/gm) || []).length, 1, 'automatic discovery must be the default in one place');
     assert.doesNotMatch(source, /^\s*(?:configs|include|extends|env_file):/m);
     assert.match(source, /^\s+- "\.\/https:\/var\/lib\/labos-https"$/m);
     fs.writeFileSync(composeFile, source);
     assert.deepEqual(fs.readdirSync(fixture), ['docker-compose.yml']);
-    check(configure(fixture), fixture, 'CHANGE_ME');
+    check(configure(fixture), fixture, 'auto');
     for (const [host, overrides] of [
       ['192.0.2.10', {}],
       ['nas.example.test', { LABOS_HTTPS_PORT: '9443', LABOS_PORT: '3456', LABOS_DATA_DIR: path.join(directory, 'original-data'), LABOS_UID: '12345', LABOS_GID: '23456' }]
     ]) {
-      fs.writeFileSync(composeFile, source.replace(/(^\s+LABOS_HTTPS_HOST:\s*"\$\{LABOS_HTTPS_HOST:-)CHANGE_ME(\}")/m, (_, prefix, suffix) => prefix + host + suffix));
+      fs.writeFileSync(composeFile, source.replace(/(^\s+LABOS_HTTPS_HOST:\s*"\$\{LABOS_HTTPS_HOST:-)auto(\}")/m, (_, prefix, suffix) => prefix + host + suffix));
       check(configure(fixture, overrides), fixture, host, overrides);
     }
     check(configure(fixture, { LABOS_HTTPS_HOST: 'override.example.test' }), fixture, 'override.example.test');
+    check(configure(fixture, { LABOS_HTTPS_HOST: '0.0.0.0' }), fixture, '0.0.0.0');
     assert.deepEqual(fs.readdirSync(fixture), ['docker-compose.yml'], 'parsing must not create certificates, data, .env or a Caddyfile');
   }
   assert.equal(fs.existsSync(path.join(directory, 'original-data')), false);

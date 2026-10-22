@@ -1,19 +1,21 @@
 # 本地版：先导入本架构三镜像 TAR；全部服务禁止拉取，只使用已上传的镜像。
-# 只需将下面 LABOS_HTTPS_HOST 的 CHANGE_ME 改为群晖局域网 IPv4 或主机名。
+# 自动识别群晖主局域网 IPv4，无需手填 IP；手机仍须信任本实例根证书。
 # 无需另放 .env 或 Caddyfile；已有 .env 的数据路径及 UID/GID 覆盖仍有效。
 # 首次安装使用全新 PostgreSQL 18；已有 PG18 更新保留 runtime/、https/，手机须信任根证书。
 version: '3.8'
 
 services:
   labos-init:
-    image: "labos:0.9.2"
+    image: "labos:0.9.3"
     pull_policy: never
     user: "0:0"
     restart: "no"
+    network_mode: host
     command: ["node", "src/init-runtime.js"]
     environment:
       LABOS_UID: "${LABOS_UID:-1000}"
       LABOS_GID: "${LABOS_GID:-1000}"
+      LABOS_HTTPS_HOST: "${LABOS_HTTPS_HOST:-auto}"
     healthcheck:
       disable: true
     volumes:
@@ -46,7 +48,7 @@ services:
         max-file: "3"
 
   labos:
-    image: "labos:0.9.2"
+    image: "labos:0.9.3"
     pull_policy: never
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:
@@ -80,39 +82,19 @@ services:
     pull_policy: never
     restart: unless-stopped
     depends_on:
+      labos-init:
+        condition: service_completed_successfully
       labos:
         condition: service_started
     ports:
       - "${LABOS_HTTPS_PORT:-8443}:443"
     environment:
-      LABOS_HTTPS_HOST: "${LABOS_HTTPS_HOST:-CHANGE_ME}" # 改成群晖实际 IP，例如 192.168.1.10；不带协议、端口、路径。
       XDG_DATA_HOME: /var/lib/labos-https/data
       XDG_CONFIG_HOME: /var/lib/labos-https/config
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        case "$$LABOS_HTTPS_HOST" in
-          ""|CHANGE_ME|*://*|*/*|*:*|*[!A-Za-z0-9.-]*)
-            echo '请在 YML 中将 LABOS_HTTPS_HOST 改为群晖 IPv4 或主机名，不含协议、端口、路径。' >&2
-            exit 1
-            ;;
-        esac
-        mkdir -p /var/lib/labos-https/data /var/lib/labos-https/config
-        cat > /tmp/labos-Caddyfile <<'LABOS_CADDY'
-        {
-            admin off
-            auto_https disable_redirects
-            skip_install_trust
-            default_sni {$$LABOS_HTTPS_HOST}
-        }
-        https://{$$LABOS_HTTPS_HOST}:443 {
-            tls internal
-            reverse_proxy labos:3000
-        }
-        LABOS_CADDY
-        exec caddy run --config /tmp/labos-Caddyfile --adapter caddyfile
+    command: ["caddy", "run", "--config", "/etc/labos-https/Caddyfile", "--adapter", "caddyfile"]
     volumes:
       - "./https:/var/lib/labos-https"
+      - "${LABOS_DATA_DIR:-./runtime}/https-config:/etc/labos-https:ro"
     logging:
       driver: json-file
       options:

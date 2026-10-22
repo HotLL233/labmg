@@ -58,4 +58,9 @@ try {
     fs.closeSync(secret);
   }
 }
+if (Object.hasOwn(process.env, 'LABOS_HTTPS_HOST')) {
+  const { prepareHttpsConfig } = require('./https-config');
+  const selected = prepareHttpsConfig({ host: process.env.LABOS_HTTPS_HOST });
+  console.log(`HTTPS host: ${selected.host} (${selected.automatic ? `auto, interface ${selected.interface}` : 'explicit'}); configuration: ${selected.configPath}`);
+}
 console.log('Runtime directories are ready');

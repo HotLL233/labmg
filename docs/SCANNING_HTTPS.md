@@ -1,6 +1,6 @@
 # 手机实时扫码与群晖 HTTPS
 
-**0.6.2 及后续版本**的在线、本地两份完整 YML 都已内置 HTTPS，不再需要两个 YML 合并或额外 Caddyfile。当前 **0.7.0 已公开验证版**提供配套镜像及两架构三镜像 TAR，下载见 [0.7.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.7.0)。本版云端已通过无 SNI 且严格校验本实例 CA 的 HTTPS 生命周期，不能代替真手机证书信任和相机验收。数据库继续使用 PostgreSQL 18，同一 PG18 项目更新保留完整 runtime/ 和 https/；发布状态以[版本说明](CHANGELOG.md)为准。
+当前源码为**0.9.3（开发中，未发布）**，在线、本地两份完整YML默认自动识别一个主局域网IPv4并生成HTTPS配置，无需手填IP、另放Caddyfile或合并YML。该版镜像与TAR尚未交付；正式部署暂使用[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)的同版本配套文件，其手填IP步骤不适用于当前自动识别配置。数据库继续使用PostgreSQL18，同一PG18项目更新保留完整`runtime/`和`https/`；实际发布及验证以[版本说明](CHANGELOG.md)为准，旧容器门禁不作为0.9.3或真手机验收。
 
 ## 为什么 HTTP 不能实时扫码
 
@@ -8,33 +8,37 @@
 
 ## 一个 YML 启用 HTTPS
 
-应用已经监听 `0.0.0.0:3000`，HTTPS 代理监听 `:443`，均不需要限定到某一张网卡。`LABOS_HTTPS_HOST` 配置手机实际访问的 IP／主机名，用于请求匹配和证书；它不是监听地址，不能用 `0.0.0.0` 代替实际访问地址。
+应用监听`0.0.0.0:3000`，HTTPS代理监听`:443`。只有一次性`labos-init`使用宿主机网络来识别地址，应用与代理仍在Compose网络。`LABOS_HTTPS_HOST`决定请求匹配和证书名称，默认`auto`；空值、旧`CHANGE_ME`及`0.0.0.0`也作为自动识别输入，不会将`0.0.0.0`写成证书名称。手机始终使用识别出的实际地址。
 
-1. 在线选择 [docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择 [docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
-2. 在所选 YML 的 LABOS_HTTPS_HOST 行，将 CHANGE_ME 改为群晖实际 IPv4 或主机名，例如 192.168.1.10。只填写地址本身，不带协议、端口或路径；默认 HTTPS 端口是 8443。未修改时 HTTPS 代理会明确报错，HTTP 应用仍可启动。
-3. 在 File Station 先创建 YML 旁的 `https/` 父目录，再启动项目。2026-10-19 的 DS918+ 实测缺少该父目录时拒绝 bind 挂载，不能依赖自动创建；已有目录保留。配置已内联生成，HTTPS 代理会创建内部 data/、config/，无需预建这两个子目录。保留整份 https/，其中包含当前实例的 CA 及私钥。PostgreSQL 与附件仍在单独的 runtime/。
+1. 在线选择[docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择[docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一。当前文件需要尚未交付的同版0.9.3镜像；部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
+2. 默认保留`labos-init`的`LABOS_HTTPS_HOST=auto`。初始化排除回环、Docker／桥接、VPN和链路本地地址，结合默认路由选择一个主局域网IPv4；缺少合适地址或多网卡仍无法确定时明确失败。需固定另一地址或主机名时，在该服务手动指定实际IPv4或主机名，不带协议、端口、路径；同目录`.env`或项目环境可能覆盖默认值。建议为群晖保留固定IP，默认HTTPS端口8443。
+3. 在File Station先创建YML旁的`runtime/`、`https/`父目录；2026-10-19的DS918+实测缺少`https/`时拒绝bind挂载，不能依赖自动创建。取得配套镜像后启动，查看`labos-init`日志的`HTTPS host: <实际地址> (auto, interface <网卡>)`。初始化生成`runtime/https-config/Caddyfile`，代理从只读目录加载；自定义LABOS_DATA_DIR时配置位于该运行目录下。代理继续创建`https/data/`、`https/config/`，保留整份`https/`内的实例CA及私钥。
 4. 将下列公开根证书传到手机并安装、信任。只传 root.crt，不要导出 .key 或整份 https/data/。
 
 ~~~text
 YML所在目录/https/data/caddy/pki/authorities/local/root.crt
 ~~~
 
-可从自己的群晖 File Station 下载该文件并通过可信方式传到手机。部署完成后根证书才会生成；找不到时先查看 labos-https 日志和 IP 设置。
+可从自己的群晖File Station下载该文件并通过可信方式传到手机。部署完成后根证书才会生成；找不到时先查看`labos-init`和`labos-https`日志，以及生成配置中的实际地址。
 
 - iPhone / iPad：安装描述文件后，到“设置 → 通用 → 关于本机 → 证书信任设置”，对该根证书开启“完全信任”。仅安装描述文件仍不够。
 - Android：在系统设置搜索“安装 CA 证书”，安装上述根证书；不要选择 Wi-Fi 或客户端证书。菜单随品牌和系统版本不同，设备管理策略可能需要管理员允许。
 
-5. 用 Safari / Chrome 等完整浏览器直接打开 https://群晖实际IP:8443，确保没有证书警告，允许网站及系统相机权限，再点击“开启后置摄像头”。浏览器地址必须与 YML 中设置的 IP/主机名相同；仅在警告页面点击继续访问不能代替信任。HTTP 与 HTTPS 来源不同，可能需要重新登录。
+5. 用Safari／Chrome等完整浏览器直接打开日志所示实际地址的`https://<地址>:8443`，确保没有证书警告，允许网站及系统相机权限，再点击“开启后置摄像头”。默认只为选定地址配置证书，不能假定其他网卡IP也可访问；`0.0.0.0`不是手机访问地址。仅在警告页继续访问不能代替信任。HTTP与HTTPS来源不同，可能需要重新登录。
 
-准备父目录后，一份 YML 可以启动服务并生成证书；手机的根证书信任及首次相机授权需要在设备上操作。后续保留原 https/ 时沿用原 CA；更换 IP 或重新生成 CA 后需重新核对证书信任。不要在旧 HTTP 页面的内嵌框架里打开系统。
+准备父目录及配套镜像后，一份YML负责生成配置和证书；手机根证书信任及首次相机授权仍须在设备上操作。更换IP后重新执行初始化并重建代理，保留原`https/`沿用CA，核对新证书名称；重新生成CA则须重新安装信任。不要在旧HTTP页面的内嵌框架里打开系统。
 
 ## 仍无法调用相机时
 
-若仅 `labos-https` 反复重启，先在 NAS 终端查看 `sudo docker logs --tail 30 labos-labos-https-1`（容器名按项目替换）。日志提示修改 `LABOS_HTTPS_HOST` 时，检查容器实际环境和 YML 的 `environment` 行；默认值仍为 `CHANGE_ME` 会退出并自动重启，应用／数据库可能正常。只修改配置行中的地址，保留脚本 `case` 中拒绝 `CHANGE_ME` 的检查；同目录 `.env` 或项目环境变量可能覆盖 YML 默认值。改好后校验配置并仅重建 `labos-https`，保留 `runtime/` 和 `https/`。2026-10-20 的 0.7.0 现场故障即为占位值未修改，修正后已恢复严格可信 HTTPS 200，不需要重打镜像。
+0.9.3先看`labos-init`退出码和日志。地址无法确定时，在该服务指定实际地址，校验Compose配置后重新执行初始化、重建代理，保留`runtime/`和`https/`。代理异常时再检查其日志及`runtime/https-config/Caddyfile`是否生成、是否包含预期地址，不手改只读挂载文件代替修正初始化输入。
+
+本轮先只读检查发现现有0.9.2配置把`0.0.0.0`用作证书／站点名称，HTTPS曾返回200但正文为空。2026-10-22已备份实际YML到`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅将该主机默认值改为实际IPv4并重建代理，应用／PostgreSQL容器及原CA保持不变。独立客户端使用同一CA、空SNI及严格IP身份校验后，HTTP／HTTPS公共根页均返回200、2788字节、相同SHA256，证书SAN包含实际IP。证据为`artifacts/cache/0.9.3/nas-https-restoration.json`。此结果补充先前“尚未现场修复”状态；0.9.3自动识别代码仍未部署到该NAS，手机相机及USB未验。不能只凭状态码认定页面可用，仍须核对证书名称和非空应用正文。
 
 按顺序确认 HTTPS 地址及端口、证书无警告、当前根证书已完全信任，再检查浏览器和系统相机权限、其他应用占用。若提示扫码组件加载失败，检查本站 /vendor/zxing-wasm/3.1.5/index.js 和 WASM 的加载情况。群晖防火墙需允许局域网访问所选 HTTPS 端口。
 
 源码、配置与自动化容器验证的结果见版本记录。2026-10-19 已在用户 DS918+ 及独立局域网客户端验证 HTTPS 接口返回 200，并严格校验本实例根证书；尚未在用户手机安装 CA 或完成实际扫码，不把服务端或桌面客户端通过写成物理相机验收。
+
+历史补充：2026-10-20的0.7.0现场曾因`CHANGE_ME`未修改导致代理循环退出，填写实际地址、仅重建旧代理后恢复严格可信HTTPS 200。旧脚本拒绝占位值的操作仅适用于该版；0.9.3已由初始化自动识别及显式失败替代，不能照搬“只重建代理”来重新生成配置。
 
 ## 历史：0.6.1 及更早的可选 HTTPS overlay
 

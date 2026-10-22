@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.9.2（可视化标签排版，已公开验证版）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载同版本两份YML之一及配套附件；旧版发布和验证记录保留，0.9.1的PG18、Edge及容器结果不作为本轮结果，实际状态见[版本说明](CHANGELOG.md)。
+本源码版本为 **0.9.3（打印预览与自动 HTTPS，开发中）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。本版尚未冻结或发布；已公开交付仍为[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)，不能把当前未发布YML与旧镜像混用。实际状态见[版本说明](CHANGELOG.md)，旧版验证不作为本轮结果。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -21,7 +21,7 @@ config/
   label-templates/     可导入的标签布局示例，使用前备份当前模板并试打
 deploy/
   Dockerfile           Node 24 非 root 应用镜像
-  docker-compose.yml   在线完整配置：应用、PG18、初始化、内联 HTTPS
+  docker-compose.yml   在线完整配置：应用、PG18、初始化、自动 HTTPS
   docker-compose.local.yml  本地镜像完整配置，四个服务禁止拉取
   .env.example         可选 Compose 变量覆盖示例
   docker-compose.infrastructure.yml  旧 PostgreSQL、MinIO 示例
@@ -51,6 +51,14 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.9.3：打印预览与自动 HTTPS（开发中，2026-10-22）
+
+在 `feature/v0.9.3-print-preview-auto-https` 开发，缓存统一 `artifacts/cache/0.9.3/`，交付目标 `artifacts/releases/0.9.3/`，main与既有交付保持原样。打印页长文和纸张／校准默认折叠，顶部不再固定；按钮缩短为“试打首张／系统打印／保存 PDF／保存设置”，错误仍在折叠区外可见。模板和实体纸／内容旋转逻辑不变。
+
+两份YML默认 `LABOS_HTTPS_HOST=auto`，一次性init使用host网络读取Linux接口及默认路由，无网络监听；默认路由有效接口最低metric优先，过滤Docker／VPN／回环地址，歧义时报错并允许显式IP或域名覆盖。旧0.0.0.0／CHANGE_ME归自动。PG秘密文件检查完成后才原子生成 `runtime/https-config/Caddyfile`；Caddy等待init并只读挂载该目录，直接执行官方镜像中的 `caddy run`。不再通过YML内联shell写配置，不需要额外准备.env或Caddyfile。只选择一个主IPv4，变更主IP后重新启动项目生成新配置；保留原runtime/、https/与CA，手机仍须信任本实例CA。Docker Desktop网络不作为NAS自动发现验收。
+
+当前标签28/28、HTTPS／初始化／Compose／标签受影响合跑39/39及39份JS语法通过；该轮后纠正Caddy命令并补充Linux预检，待重跑。真实Edge188项、6单页PDF及6图通过；两尺寸视口首屏均完整显示标签，不是原生窗口或USB试打。首次Compose entrypoint断言失败及更正保留，官方镜像无ENTRYPOINT的事实已复核，真实Linux安全写入、正式PG18和四项容器门禁仍待执行。本轮NAS仅只读根页诊断，尚未现场修复。
 
 ## 0.9.2：可视化标签排版（已公开，2026-10-22）
 
@@ -504,3 +512,9 @@ Remove-Item Env:LABOS_DOCKER_IMAGE
 该检查在 `artifacts/cache/<version>/docker-test-*` 使用独立 Compose 项目、选定 YML 的副本及旁边的 `runtime/`、`https/`，验证自动创建、数据库健康依赖、非 root、首次设置、登录和业务数据在容器重建后的持久化；不使用日常业务库或真实 `var/`。清理只针对有本次项目标记的临时目录。`tests/compose.test.js` 另用 Compose CLI 做不依赖 Docker 引擎的配置解析检查；配置解析不等于实际容器或 NAS 验收。NAS 的实际 DSM/内核/目录权限和容量还需在目标设备确认。具体部署步骤见 [群晖 Docker 部署](SYNOLOGY.md)。
 
 切回历史标签或部署旧版本前，先停止服务，备份完整运行目录及当前部署配置。历史版本的数据目录和启动方式可能不同，应按该版本说明运行；新旧版本不要共用生产数据目录。恢复代码不代表恢复数据，数据库兼容性也需要单独验证。
+
+## 0.9.3 开发阶段补充（2026-10-22）
+
+最终受影响合跑42项中41通过、0失败、1本机Docker条件跳过，包含两项打包回归；最终离线发布helper总自检29 CJS、3内联、30旧摘要保护及12／11／7交付清单通过，真实冻结ZIP及正式容器仍待后续执行。本轮不启动本机专用数据库，完整业务回归采用本版正式PG18云端运行，不沿用旧计数。
+
+现有NAS的0.9.2 HTTPS已单独恢复：实际YML的0.0.0.0默认值改为本机LAN IP，备份后仅重建proxy。app／PG容器ID及CA保持不变，独立LAN客户端在同实例CA、空SNI和IP身份严格校验下，HTTP／HTTPS根页都200／2788字节且正文SHA相同，证书SAN匹配实际IP。证据`artifacts/cache/0.9.3/nas-https-restoration.json`，这补充本文件上方早期未现场修改状态；并非0.9.3 auto在NAS已部署或手机相机已验收。

@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.9.2（可视化标签排版，已公开验证版）**。新增标签字段拖拽、选中高亮、预览倍率和方向键微调，保留固定实体纸张与内容0°／90°旋转的几何设计。正式部署从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载同版本配套附件，在线／本地两份YML任选一份。实际状态见[版本说明](docs/CHANGELOG.md)。
+本源码版本：**0.9.3（开发中，未发布）**。打印页默认折叠纸张设置和长说明，让标签预览、范围与打印按钮先显示；完整YML由初始化器自动识别一个主局域网IPv4并生成HTTPS配置。0.9.3镜像和离线包尚未交付，当前正式部署仍从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载其同版本附件，不能与当前`deploy/`的0.9.3文件混用。实际状态见[版本说明](docs/CHANGELOG.md)。
 
 0.9.2真实PG18.6回归179/179、37JS、四项容器门禁通过，最终设计器真实Edge238项、4份PDF／4图通过。12件完整交付共488902906字节已保存在`artifacts/releases/0.9.2/`，11条摘要、5份冻结源附件及双TAR三镜像／六config核对通过；包含两份YML、amd64／arm64三镜像TAR和携带两份留白JSON的源码包。公开后12件元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过；不代表匿名全量TAR或浏览器Release界面验收。附件文档保留源码冻结快照，发布后补记见当前仓库文档。上一0.9.1的12件、PG18.6回归177/177、Edge286项及全部旧版验证保持原有范围，不作为0.9.2重复测试。浏览器不能读取驱动纸型或自动指定USB打印机，驱动纸张和实际送料仍须试打。操作见[标签打印说明](docs/LABEL_PRINTING.md)。
 
@@ -19,7 +19,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.9.2/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.9.3/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -30,7 +30,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.9.2/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.9.3/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -50,16 +50,18 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。从0.9.2 Release下载同版本配套文件；在线镜像为`ghcr.io/hotll233/labmg:0.9.2`，本地三镜像包使用`labos:0.9.2`：
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前源码配置面向未发布的0.9.3，须配套同版镜像；以下0.9.2链接保留为上一已发布版本的部署入口：
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
 | 在线拉取 | [0.9.2 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
 | 本地导入 | [0.9.2 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-发布后从同版本 Release 下载配套文件，在所选 YML 中把 `CHANGE_ME` 改成群晖实际 IPv4 或主机名，例如 `192.168.1.10`，不带协议、端口或路径。首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
+0.9.3的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
-数据自动保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令。HTTPS 证书保存在旁边的 `https/data/`，代理自动创建内部目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
+首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，不重新初始化。本次不提供 PostgreSQL 主版本迁移。
+
+数据保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令，`https-config/Caddyfile`是0.9.3初始化生成的代理配置。HTTPS证书继续保存在旁边的`https/data/`；群晖首次部署先创建`runtime/`与`https/`父目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 
 每架构离线 TAR 包含应用、PostgreSQL 18 和 Caddy 三个镜像；导入一份后使用本地 YML，服务无需联网拉取镜像。发布状态与实际验证以 Release 为准。
 
@@ -69,9 +71,9 @@ npm test
 
 0.9.2的“标签模板”支持拖拽字段，预览可选100%／150%／200%／300%，默认200%；选中元素后在预览内使用方向键沿实体纸面移动0.1mm，Shift为1mm。2mm留白虚线只作编辑参考，尺寸和字号仍通过数值修改，缩放不改变输出尺寸。沿用当前浏览器、当前访问地址的schema1模板及JSON导入导出；拖拽和键盘移动到边界停止，手填越界及实际文字溢出仍会拒绝。2026-10-22用户确认此前提供的38.5×30.5mm两方向留白JSON模板均正常打印；该反馈只覆盖这两份模板，不代表本轮新设计器或所有纸型已验收。
 
-沿用0.9.1的提示，明确显示是否读到当前浏览器、当前访问地址下的已保存模板；没有模板、模板无效或存储不可读时提示已从60×40mm示例载入初始布局，不覆盖原设置，后续以当前纸张设置为准。改动后需点击“记住纸张与布局”供下次使用。“保存 PDF（系统窗口）”仍打开打印窗口，由用户手动选择浏览器“另存为 PDF”，不自动导出文件；这与Windows“Microsoft Print to PDF”是不同输出路径。PDF检查不能代替实物试打或排除全部程序问题。
+0.9.3打印页将尺寸、内容方向与偏移收进默认折叠的“纸张与校准”，将模板来源、驱动与PDF长说明收进“打印帮助”。起止张及“试打首张／系统打印／保存 PDF／保存设置”始终可见，状态和错误显示在折叠区外，工具区随页面滚动。没有模板、模板无效或存储不可读时仍从60×40mm示例载入初始布局，不覆盖原设置；展开帮助查看来源，按实际纸卷修改并保存。“保存 PDF”仍打开系统窗口，由用户选择浏览器“另存为 PDF”，不自动导出文件；Windows“Microsoft Print to PDF”是另一输出路径。标签Node28/28及真实隔离Edge188项、6份单页PDF／6图通过，仅覆盖合成记录和拦截的打印请求，不代替原生窗口或USB试打。
 
-手机实时相机需要受信任的 HTTPS、系统与浏览器相机授权；普通群晖 IP 的 HTTP 地址保留拍照／选图和手输。可按[扫码 HTTPS 配置](docs/SCANNING_HTTPS.md)启用 Caddy 并在手机信任证书。实际 NAS、手机及 USB 标签打印仍需现场确认。
+手机实时相机需要受信任的 HTTPS、系统与浏览器相机授权；普通群晖 IP 的 HTTP 地址保留拍照／选图和手输。现有0.9.2 NAS已于2026-10-22修正代理地址并恢复严格可信HTTPS，应用、数据库与CA保持原样；0.9.3自动识别尚未部署到该NAS，手机相机及USB打印仍待现场确认。证书安装和本次恢复结果见[扫码 HTTPS 配置](docs/SCANNING_HTTPS.md)。
 
 ## 目录与版本管理
 

@@ -97,13 +97,16 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
       '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos',
       '${LABOS_DATA_DIR:-./runtime}/postgres:/var/lib/postgresql',
       '${LABOS_DATA_DIR:-./runtime}/secrets:/run/labos-secrets:ro',
-      '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos'
+      '${LABOS_DATA_DIR:-./runtime}:/var/lib/labos',
+      '${LABOS_DATA_DIR:-./runtime}/https-config:/etc/labos-https:ro'
     ], 'runtime mounts must retain the legacy-compatible short bind syntax');
     assert.match(composeSource, /^\s+- "\.\/https:\/var\/lib\/labos-https"\s*$/m);
     assert.doesNotMatch(composeSource, /^\s+(?:create_host_path|type):/m);
     // Compose normalization may omit create_host_path: true because it is the default.
     assert.notEqual(mount.bind?.create_host_path, false);
     assert.deepEqual(configuration.services['labos-init'].volumes.find(item => item.target === '/var/lib/labos'), mount);
+    assert.equal(configuration.services['labos-init'].network_mode, 'host');
+    assert.equal(configuration.services['labos-init'].environment.LABOS_HTTPS_HOST, '127.0.0.1');
     const databaseConfiguration = configuration.services.postgres;
     assert.equal(databaseConfiguration.image, 'postgres:18-bookworm');
     assert.equal(databaseConfiguration.ports, undefined, 'PostgreSQL must stay on the internal network');
@@ -120,6 +123,12 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const httpsConfiguration = configuration.services['labos-https'];
     assert.equal(httpsConfiguration.image, 'caddy:2.11.7-alpine');
     assert.equal(path.resolve(httpsConfiguration.volumes.find(item => item.target === '/var/lib/labos-https').source), path.join(directory, 'https'));
+    const httpsConfigMount = httpsConfiguration.volumes.find(item => item.target === '/etc/labos-https');
+    assert.equal(path.resolve(httpsConfigMount.source), path.join(runtime, 'https-config'));
+    assert.equal(httpsConfigMount.read_only, true);
+    assert.equal(httpsConfiguration.depends_on['labos-init'].condition, 'service_completed_successfully');
+    assert.equal(httpsConfiguration.entrypoint ?? undefined, undefined);
+    assert.deepEqual(httpsConfiguration.command, ['caddy', 'run', '--config', '/etc/labos-https/Caddyfile', '--adapter', 'caddyfile']);
     const httpsImage = JSON.parse(await docker(['image', 'inspect', httpsConfiguration.image]))[0];
     assert.equal(httpsImage.Architecture, metadata.Architecture, 'preload the Caddy image for the application architecture before an offline test');
     assert.equal(await projectContainers(), '');
@@ -162,6 +171,27 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
         assert.deepEqual(metadata(guarded),guardedBefore,'a rejected symlink target must retain ownership and permissions');
         assert.deepEqual(fs.readFileSync(guarded+'/marker'),guardedBytes,'a rejected symlink target must retain its files');
         assert.deepEqual(fs.readFileSync(password),secret,'a rejected PostgreSQL directory must not replace the database password');
+        const {writeHttpsConfig}=require('./src/https-config');
+        const https='/tmp/https-config-preflight';fs.mkdirSync(https);
+        const config=writeHttpsConfig(https,'first configuration');
+        assert.deepEqual(metadata(https+'/https-config'),{uid:0,gid:0,mode:0o755});
+        assert.deepEqual(metadata(config),{uid:0,gid:0,mode:0o644});
+        const oldConfig=fs.openSync(config,'r');
+        writeHttpsConfig(https,'second configuration');
+        assert.equal(fs.readFileSync(config,'utf8'),'second configuration');
+        assert.equal(fs.readFileSync(oldConfig,'utf8'),'first configuration','replace config atomically');fs.closeSync(oldConfig);
+        fs.chownSync(config,uid,gid);
+        assert.throws(()=>writeHttpsConfig(https,'rejected'),/root-owned/);
+        assert.equal(fs.readFileSync(config,'utf8'),'second configuration');
+        fs.chownSync(config,0,0);fs.renameSync(config,config+'.kept');
+        fs.symlinkSync(guarded+'/marker',config);
+        assert.throws(()=>writeHttpsConfig(https,'rejected'),/regular root-owned/);
+        assert.deepEqual(fs.readFileSync(guarded+'/marker'),guardedBytes);
+        fs.unlinkSync(config);fs.renameSync(config+'.kept',config);
+        fs.renameSync(https+'/https-config',https+'/kept');fs.symlinkSync(guarded,https+'/https-config','dir');
+        assert.throws(()=>writeHttpsConfig(https,'rejected'));
+        assert.deepEqual(metadata(guarded),guardedBefore);
+        assert.deepEqual(fs.readFileSync(guarded+'/marker'),guardedBytes);
       `], 90000);
     console.log('Runtime initializer preflight passed: PostgreSQL directory creation, ownership preservation and symlink rejection');
     const start = async () => {

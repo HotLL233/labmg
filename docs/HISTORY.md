@@ -683,3 +683,19 @@ Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check
 公开后`github-release-verification.json`为passed：12件官方元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过；两TAR完整下载另由本机报告证明，不称匿名全量TAR或浏览器Release界面验收。
 
 后补仅改当前文档，不重打冻结ZIP／镜像、替换发布附件或移动标签；附件中的指南保留源码冻结时的阶段快照。0.9.1及全部旧记录继续保留。本轮未访问NAS或业务库，未打开原生系统打印窗口、操作驱动、USB打印机或真手机，物理送料及长期容量仍须现场验收。
+
+## 2026-10-22：0.9.3 打印预览与自动 HTTPS 开发
+
+用户反馈0.9.2打印文字遮挡预览、HTTPS异常，并要求YML自动使用群晖本机IP。从`2aebddec0db9c0d47867f0da92881d95d78659b3`建立`feature/v0.9.3-print-preview-auto-https`，所有本轮缓存隔离至`artifacts/cache/0.9.3/`，不改main或旧交付。打印页将纸张校准与长文帮助收起、移除固定悬浮，错误保留在折叠区外；未改实体纸／旋转、模板schema或打印接口。
+
+只读探测现有NAS：HTTP公共根页200且正文正常；HTTPS严格连接报本机不信任签发者，仅诊断忽略信任后返回Caddy的200空正文。证书实际SAN为0.0.0.0，与用户访问IP不匹配，证据保留`nas-public-endpoint-probe.json`、`nas-public-tls-certificate.json`；这不是可信TLS通过，本轮尚未写入NAS。无交互SSH公钥认证失败，未改变服务状态。
+
+两YML改为一次性root init使用host网络选择主LAN IPv4，PG原secret检查后写`runtime/https-config/Caddyfile`，Caddy依赖init完成并只读挂载配置；auto、空、旧CHANGE_ME及0.0.0.0均走自动，保留显式覆盖与歧义拒绝。默认只发布一个主IPv4，保留PG18、runtime/、https/及CA路径。VM测试不代替Linux的/proc目录FD与真实容器验证。
+
+本轮标签Node28/28，真实隔离Edge188项、6单页PDF、6张桌面／390px图和0异常通过，首标签在两个视口均初屏完整可见；报告`labels/compact-5TqojI/report.json`。39份JS语法通过。受影响首次合跑因Compose规范化entrypoint为null导致断言失败，更正兼容缺省值后39/39通过，原`affected-tests-first-attempt.txt`保留。独立官方镜像复核又发现caddy:2.11.7-alpine没有ENTRYPOINT、CMD须带caddy，已在尚未运行的配置及断言修正，并补充真实Linux安全文件写入预检；这些改动仍须最终重跑，不写成容器启动已通过。
+
+发布helper从0.9.2隔离准备，首次总自检因CHANGELOG尚未声明0.9.3停止，失败保留；不绕过断言。源码尚未冻结、构建或公开，新版PG18、自动网络探测、严格可信无SNI TLS及本机完整交付继续执行。未调用原生打印窗口、USB打印机或业务库。
+
+0.9.3冻结前补充：最终受影响合跑42项中41通过、0失败、1本机Docker条件跳过，含两项独立打包回归；日志`affected-tests-final.txt`。本轮没有为未改动业务重启专用本机数据库，正式PG18完整回归交由本版云端实际执行。最终离线helper总自检03:52:58Z通过，29份CJS／3段workflow内联／30旧摘要保护及12附件、11摘要、7初始输入通过；真实源码ZIP全src与Git逐文件核验仍待冻结后执行。
+
+2026-10-22现有NAS HTTPS随后已恢复：通过已授权OpenSSH登录，仅把实际0.9.2 YML中的默认host从0.0.0.0改为NAS局域网IP，先备份`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅重建HTTPS代理。远端命令核对应用／PG容器ID及CA摘要不变，两者保持healthy。独立LAN客户端使用与当前NAS一致的CA（SHA256 `7593d8aa4e02b7898ccd5580b7d1fbfe8f02d4a0fb968f7e75a9365c726ac2ca`）严格校验链及IP身份、空SNI访问成功：HTTP／HTTPS根页都200、2788字节、正文SHA一致；新证书SAN为实际IP。报告`nas-https-restoration.json`补充上方“尚未写入NAS”的早期状态。未登录应用或读业务正文，未重建应用／数据库，未在NAS部署0.9.3；新版auto和目标GUI首次创建路径仍须独立验证，手机相机及USB未验。
