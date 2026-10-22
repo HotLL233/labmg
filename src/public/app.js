@@ -8,13 +8,63 @@ const menuDef=m=>{const n=navConfig.find(x=>x.target===m&&x.visible!==0);return 
 const can=permission=>Boolean(currentUser?.permissions?.includes('*')||currentUser?.permissions?.includes(permission));
 function canOpen(module){if(module==='materials')return Boolean(currentUser);if(module==='management'||module==='permissions')return can('permissions.read');if(module==='datahub')return ['export.read','backup.read','backup.restore'].some(can);return can(module+'.read')}
 function applyPermissions(){document.querySelectorAll('[data-permission]').forEach(x=>x.hidden=!can(x.dataset.permission));$('#add').style.display=current!=='materials'&&C[current]&&can(current+'.write')?'':'none';for(const id of ['global-from','global-to']){const node=$('#'+id);if(node)node.style.display=current==='materials'?'none':''}}
+// 同一张表在手机上转为卡片，字段名统一取自表头。
+function labelTable(root){
+  (root||document).querySelectorAll('table').forEach(table=>{
+    const headers=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());
+    if(!headers.length)return;
+    table.querySelectorAll('tbody tr').forEach(tr=>{
+      const cells=[...tr.children];
+      if(cells.some(td=>td.hasAttribute('colspan'))||cells.length!==headers.length)return;
+      cells.forEach((td,i)=>{
+        const select=i===0&&['checkbox','radio'].includes(td.querySelector('input')?.type);
+        td.classList.toggle('cell-select',select);
+        td.classList.toggle('cell-act',i===cells.length-1&&(/操作|档案/.test(headers[i])||Boolean(td.querySelector('button'))));
+        const label=headers[i]||(i===0?headers[1]:'');
+        if(select||!label)td.removeAttribute('data-label');
+        else td.setAttribute('data-label',label);
+      });
+    });
+  });
+}
+function setDrawer(open){
+  document.body.classList.toggle('drawer-open',open);
+  $('#menu-toggle').setAttribute('aria-expanded',String(open));
+  $('.layout>main').inert=open;
+  const side=$('#sidebar');
+  if(open){
+    side.setAttribute('role','dialog');side.setAttribute('aria-modal','true');
+    $('#drawer-close').focus();
+  }else{
+    side.removeAttribute('role');side.removeAttribute('aria-modal');
+    $('#menu-toggle').focus();
+  }
+}
+function setupDrawer(){
+  $('#menu-toggle').onclick=()=>setDrawer(true);
+  $('#drawer-close').onclick=$('.scrim').onclick=()=>setDrawer(false);
+  document.addEventListener('keydown',event=>{
+    if(!document.body.classList.contains('drawer-open'))return;
+    if(event.key==='Escape'){event.preventDefault();setDrawer(false);return;}
+    if(event.key==='Tab'){
+      const buttons=[...$('#sidebar').querySelectorAll('button')];
+      const first=buttons[0],last=buttons.at(-1);
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    }
+  });
+  window.addEventListener('resize',()=>{
+    if(document.body.classList.contains('drawer-open')&&!$('#menu-toggle').getClientRects().length)setDrawer(false);
+  });
+}
 function field(n,l,type='text',opts=[],v=''){
   if(type==='select')return `<div class="field"><label for="field_${esc(n)}">${esc(l)}</label><select id="field_${esc(n)}" name="${esc(n)}">${opts.map(x=>{const [value,label]=Array.isArray(x)?x:[x,x];return `<option value="${esc(value)}" ${value===v?'selected':''}>${esc(label)}</option>`}).join('')}</select></div>`;
   return `<div class="field"><label for="field_${esc(n)}">${esc(l)}</label><input id="field_${esc(n)}" name="${esc(n)}" type="${esc(type)}" value="${esc(v)}" ${n==='title'?'required':''}></div>`;
 }
-function shell(){document.body.insertAdjacentHTML('afterbegin',`<div class="layout"><aside class="side"><div class="brand"><i>L</i><div><strong>LabOS</strong><small>实验室综合管理系统</small></div></div><nav class="nav"></nav><div class="side-foot"><span class="online">●</span>本地服务运行中</div></aside><main><header><div><h1 id="title">工作台</h1><p id="subtitle">${esc(menuDef('dashboard')[2])}</p></div><div class="actions"><input id="search" placeholder="搜索名称、编号、负责人"><button id="add" class="primary">＋ 新建记录</button><button id="logout" class="ghost">退出</button></div></header><section id="page" class="page"></section></main></div>`);const entries=navConfig.filter(x=>x.visible!==0&&canOpen(x.target)).sort((a,b)=>a.sort_order-b.sort_order||a.key.localeCompare(b.key));$('.nav').innerHTML=(entries.length?entries:Object.entries(M).filter(([key])=>canOpen(key)).map(([key,v])=>({key,label:v[0],icon:v[1],description:v[2],target:key,visible:1,sort_order:0}))).map(n=>`<button data-nav="${esc(n.target)}" class="${n.target==='dashboard'?'active':''}" title="${esc(n.description||'')}"><span>${esc(n.icon)}</span><b>${esc(n.label)}</b></button>`).join('');$('.nav').onclick=e=>{const n=e.target.closest('[data-nav]');if(n)go(n.dataset.nav)};$('#add').onclick=()=>openEditor();$('#logout').onclick=async()=>{await call('/api/auth/logout');location.reload()};$('#search').oninput=()=>{clearTimeout(window.st);window.st=setTimeout(()=>load(),250)}}
+function shell(){document.body.insertAdjacentHTML('afterbegin',`<div class="layout"><aside id="sidebar" class="side" aria-label="主导航"><button type="button" id="drawer-close" class="drawer-close" aria-label="关闭菜单">关闭菜单</button><div class="brand"><i>L</i><div><strong>LabOS</strong><small>实验室综合管理系统</small></div></div><nav class="nav"></nav><div class="side-foot"><span class="online">●</span>本地服务运行中</div></aside><button type="button" class="scrim" tabindex="-1" aria-label="关闭菜单"></button><main><header><div class="header-heading"><button type="button" id="menu-toggle" class="menu-toggle ghost" aria-controls="sidebar" aria-expanded="false">菜单</button><div><h1 id="title">工作台</h1><p id="subtitle">${esc(menuDef('dashboard')[2])}</p></div></div><div class="actions"><input id="search" placeholder="搜索名称、编号、负责人"><button id="add" class="primary">＋ 新建记录</button><button id="logout" class="ghost">退出</button></div></header><section id="page" class="page"></section></main></div>`);const entries=navConfig.filter(x=>x.visible!==0&&canOpen(x.target)).sort((a,b)=>a.sort_order-b.sort_order||a.key.localeCompare(b.key));$('.nav').innerHTML=(entries.length?entries:Object.entries(M).filter(([key])=>canOpen(key)).map(([key,v])=>({key,label:v[0],icon:v[1],description:v[2],target:key,visible:1,sort_order:0}))).map(n=>`<button data-nav="${esc(n.target)}" class="${n.target==='dashboard'?'active':''}" aria-label="${esc(n.label)}" title="${esc(n.label)}${n.description?' · '+esc(n.description):''}"><span>${esc(n.icon)}</span><b>${esc(n.label)}</b></button>`).join('');setupDrawer();$('.nav').onclick=e=>{const n=e.target.closest('[data-nav]');if(n)go(n.dataset.nav)};$('#add').onclick=()=>openEditor();$('#logout').onclick=async()=>{await call('/api/auth/logout');location.reload()};$('#search').oninput=()=>{clearTimeout(window.st);window.st=setTimeout(()=>load(),250)}}
 async function go(module){
   if(!M[module]||!canOpen(module)){toast('没有权限查看该页面');return}
+  if(document.body.classList.contains('drawer-open'))setDrawer(false);
   clearTimeout(window.st);
   if(current!==module)$('#search').value='';
   current=module;
@@ -38,7 +88,7 @@ async function load(){
     if(request===loadSequence&&current===module)applyPermissions();
   }catch(error){if(request===loadSequence&&current===module){$('#page').innerHTML=`<div class="empty">${esc(error.message)}</div>`;toast(error.message)}}
 }
-function renderRecords(){$('#page').innerHTML=`<div class="toolbar"><span>共 ${items.length} 条记录</span><button class="ghost" id="csv" data-permission="export.read">导出 CSV</button></div><div class="table"><table><thead><tr><th>名称 / 编号</th><th>类别</th><th>状态</th><th>负责人</th>${current==='finance'?'<th>金额</th>':''}${['assets','materials'].includes(current)?'<th>数量/原值</th>':''}<th>日期</th><th>操作</th></tr></thead><tbody>${items.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${esc(r.code||'未设置编号')}</small></td><td>${esc(r.category||'-')}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.owner||'-')}</td>${current==='finance'?`<td>¥${Number(r.amount).toLocaleString()}</td>`:''}${['assets','materials'].includes(current)?`<td>${current==='assets'?'¥'+Number(r.amount).toLocaleString():r.quantity}</td>`:''}<td>${esc(r.due_date||r.updated_at.slice(0,10))}</td><td class="ops"><button onclick="show(${r.id})">查看</button><button data-permission="${current}.write" onclick="openEditor(${r.id})">编辑</button><button class="danger" data-permission="${current}.delete" onclick="del(${r.id})">删除</button></td></tr>`).join('')}</tbody></table>${items.length?'':'<div class="empty">暂无数据，点击右上角新建记录。</div>'}</div>`;$('#csv').onclick=csv}
+function renderRecords(){$('#page').innerHTML=`<div class="toolbar"><span>共 ${items.length} 条记录</span><button class="ghost" id="csv" data-permission="export.read">导出 CSV</button></div><div class="table"><table><thead><tr><th>名称 / 编号</th><th>类别</th><th>状态</th><th>负责人</th>${current==='finance'?'<th>金额</th>':''}${['assets','materials'].includes(current)?'<th>数量/原值</th>':''}<th>日期</th><th>操作</th></tr></thead><tbody>${items.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${esc(r.code||'未设置编号')}</small></td><td>${esc(r.category||'-')}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.owner||'-')}</td>${current==='finance'?`<td>¥${Number(r.amount).toLocaleString()}</td>`:''}${['assets','materials'].includes(current)?`<td>${current==='assets'?'¥'+Number(r.amount).toLocaleString():r.quantity}</td>`:''}<td>${esc(r.due_date||r.updated_at.slice(0,10))}</td><td class="ops"><button onclick="show(${r.id})">查看</button><button data-permission="${current}.write" onclick="openEditor(${r.id})">编辑</button><button class="danger" data-permission="${current}.delete" onclick="del(${r.id})">删除</button></td></tr>`).join('')}</tbody></table>${items.length?'':'<div class="empty">暂无数据，点击右上角新建记录。</div>'}</div>`;labelTable($('#page'));$('#csv').onclick=csv}
 window.openEditor=id=>{
   if(current==='materials')return toast('旧物资台账仅供查询，请在物资申报中录入');
   if(!C[current]||!can(current+'.write'))return toast('没有新增或编辑权限');

@@ -1,0 +1,39 @@
+:root{
+  --c-navy:var(--navy);
+  --c-primary-500:var(--blue);
+  --c-bg:var(--bg);
+  --c-line:var(--line);
+  --c-text:var(--text);
+  --c-text-2:var(--muted);
+  --c-success:var(--green);
+  --c-danger:var(--red);
+  --c-primary-50:#eef4ff;
+  --c-subtle:#fafbfd;
+  --c-surface:#fff;
+  --c-text-3:#8a98ab;
+  --fs-page:22px;
+  --fs-panel:18px;
+  --fs-body:14px;
+  --fs-label:13px;
+  --fs-note:12px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+  --sp-5:20px; --sp-6:24px; --sp-7:32px;
+  --h-control:36px;
+  --h-row:44px;
+  --h-row-2:64px;
+  --r-sm:8px; --r-md:12px; --r-lg:14px;
+  --ring:0 0 0 3px #2c6df63d;
+}
+
+.page .table th{font-size:var(--fs-label);padding:10px 14px}
+.page .table td{font-size:var(--fs-body);padding:11px 14px}
+.page .table td:has(> strong){line-height:1.35}
+.pill{font-size:var(--fs-label);padding:3px 9px;border-radius:20px;font-weight:500}
+.mw-badge,.mw-toolbar label,.mw-field label{font-size:var(--fs-label)}
+.ms-files input{font-size:var(--fs-label)}
+td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw-version{font-size:var(--fs-note)}
+.page .table .num,.page .table td.num{text-align:right;font-variant-numeric:tabular-nums}
+:is(button,input,select,textarea,a,[tabindex]):focus-visible{
+  outline:2px solid var(--c-primary-500);outline-offset:2px;box-shadow:var(--ring)
+}
+.side :is(button,a):focus-visible{outline-color:#7fa9ff}

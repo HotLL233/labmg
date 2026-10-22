@@ -31,6 +31,16 @@
 - 2026-10-17 用户要求物资管理下新增申报、验收、库存三个入口：全员在新建申报表中增加物资，物资管理员提交后整单禁止编辑，保留历史及 Excel 导出；验收录入数量金额、标记并入库，库存有期初且同类合并。要求先给可行方案和 HTML UI 示例，未要求直接完成生产业务或发布新版镜像。初稿提交后全员只读的规则由下条同日新指令替代，保留本条作为需求历史。
 - 同日用户补充：管理员可创建物资分类，其他人员添加时可选分类和归属；异步确认归属指“区域”。提交后改为**仅物资管理员可进行修改编辑**，替代此前所有角色永久禁止编辑的要求。
 
+## 当前开发：UI T1／T2（未发布，2026-10-22）
+
+用户要求先执行node scripts/ui-audit.js，再按T1→T2推进，T2早于T3／T4。本轮在feature/ui-t1-t2隔离开发，公开部署仍取0.10.1，未改业务版本、旧YML、镜像、标签或NAS。采用用户提供的UI施工卡及原审计脚本，保留外部AGENTS／优化方案／原型草稿，不顺手展开T3／T4、底部导航、库存七列或新功能。
+
+初始审计2通过／5警告／0失败；T1新增tokens.css并最后加载，品牌令牌映射旧变量、7处11px由覆盖层接管，原styles.css／material.css／material-scan.css不改。T1阶段按要求跑--strict，5通过／3失败：原脚本同时检查T2，剩余卡片化／labelTable／responsive加载三项真实未完成，保留t1-strict.txt，未改脚本放宽或伪造通过。随后T2完成后严格审计8通过／0警告／0失败，普通审计同样通过。
+
+T2新增responsive.css：≤767px业务表格转卡片，字段名统一由app.js的labelTable从表头注入，colspan及列数不符行跳过、首列勾选独立定位、末列操作识别；≤390px单列，768–1279px为72px图标侧栏，≥1280px沿用245px。物资公共table只叠加table类、loadPage与showView集中注入，其他异步／直接重绘调用同步补齐，不创建第二份手机模板。手机同一侧栏DOM变抽屉，含遮罩、Escape／Tab圈、焦点归还、main inert与resize恢复。responsive仅screen生效，打印标签设计器与独立二维码打印CSS保留。
+
+VM前端51/51通过；真实Edge最终mobile-third.tap 1/1通过，10截图位于artifacts/cache/ui-t1-t2/mobile-layout-p42fQD/，覆盖390／768／1440、1024／1279／1280侧栏边界、五类非空物资表与字典详情、字号computed style、菜单键盘／焦点／resize和print media。首次mobile-first.tap发现visibility过渡导致焦点未进入菜单，原失败保留；改为仅transform过渡后第二轮通过，再加实际字号断言后的第三轮通过。root已目视390库存与768档案两图。最终npm test共209项，208通过、0失败、1本机Docker条件跳过，含真实Edge；43JS语法通过。数据库为专用PG17.11，已fast停止，不冒充PG18门禁。模拟API浏览器测试不代替真手机、原生打印窗口或USB验收。
+
 ## 最新公开：0.10.1 申报与验收解耦（2026-10-22）
 
 0.10.1已公开为prerelease，Release420407248，源码冻结5d59622b022426125d585939adffbdbda623baf9／v0.10.1，注解对象068abdf66d6f23f2f2346c4fb3aa39c32384adb9。构建39738793787／job119690738651原日志确认真实PostgreSQL18.6回归203/203、0失败／跳过、42JS通过，双架构索引sha256:d290d6af9b834bbc4bb5c311153513c6a0c3a0c4fbbcdba78cdf1cfd039eaec7。正式验证39739183865四项门禁通过，同次PG18六项与原三份TAP独立复读，自动HTTPS、无效输入保留配置、严格空SNI／本实例CA及账号重建保留通过；ARM64为QEMU，不是真实ARM64硬件。
@@ -743,3 +753,6 @@ GitHub Ubuntu runner `39018688259` / ops `7a3efd5865a1729e503e834dd480801aaa0189
 
 
 0.10.1冻结前补充：42JS与Compose／源码打包／离线打包受影响测试3/3通过；独立静态审查确认7个COPY来源共60文件获准，84个敏感／额外路径探针被排除，src和SQL保持冻结0.10.0原字节。该白名单审查只针对当前固定规则，不等同真实BuildKit构建，最终以本版CI和门禁为准。
+
+
+UI T1/T2最终回归：npm test共209项，208通过、0失败、1本机Docker条件跳过，真实Edge布局用例包含在此整轮；node scripts/check.js检查43份JS通过，默认／--strict审计8通过／0警告／0失败。数据库为本轮专用127.0.0.1:54920的PostgreSQL17.11，不冒充PG18／容器门禁；已按精确data目录fast停止并保留缓存，postgres-stop-report.json为exit0。本轮未发布UI镜像或更新NAS，T3/T4待下一步；不改旧版本标签、镜像或YML。

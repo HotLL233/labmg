@@ -18,7 +18,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
 }, async t => {
   const { chromium } = require(browserModule);
   const executablePath = process.env.LABOS_TEST_BROWSER_PATH;
-  const cache = path.join(root, 'artifacts/cache', require('../package.json').version);
+  const cache = path.join(root, 'artifacts/cache/ui-t1-t2');
   fs.mkdirSync(cache, { recursive: true });
   const screenshots = fs.mkdtempSync(path.join(cache, 'mobile-layout-'));
   t.diagnostic('Layout screenshots: ' + screenshots);
@@ -37,6 +37,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const page = await browser.newPage();
+  page.setDefaultTimeout(10000);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const labels = { dashboard: '工作台', archives: '资料档案', templates: '电子模板', finance: '收支管理', assets: '设备管理',
@@ -48,6 +49,16 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     category: '', owner: '合成人员', due_date: '2026-10-19', created_at: '2026-10-19', updated_at: '2026-10-19',
     status: '草稿', amount: 20, quantity: 2, data: { asset_stage: '建档', quality_section: '质量手册', is_current: '是', access_roles: 'ADMIN' } });
   const roles = [{ role: 'ADMIN', permissions: ['*'] }, { role: 'MATERIAL', permissions: ['materials.read'] }];
+  const material = { id: 1, catalogId: 1, name: '布局检查物资' + 'M'.repeat(80), code: 'SYNTHETIC-MATERIAL-1', spec: '500 mL', unit: '瓶',
+    categoryId: 1, categoryName: '合成分类', regionId: 1, regionName: '合成区域', warehouse: 'MAIN', trackingMode: 'unit', qtyM: 1000, amountCents: 2000 };
+  const materialLists = {
+    categories: [{ id: 1, name: '合成分类' }], regions: [{ id: 1, name: '合成区域' }], catalog: [{ ...material, stockQtyM: 1000, localQtyM: 1000 }],
+    requests: [{ id: 101, no: 'SYNTHETIC-REQUEST-1', title: '合成申报单' + 'R'.repeat(80), creatorName: '合成人员', itemCount: 1, createdAt: '2026-10-22', status: 'draft', revision: 0 }],
+    acceptance: [{ ...material, id: 201, requestId: 101, requestNo: 'SYNTHETIC-REQUEST-1', requestRevision: 1, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 1000, receiptStatus: 'pending' }],
+    stock: [{ ...material, lastMovementAt: '2026-10-22' }],
+    issues: [{ ...material, id: 301, no: 'SYNTHETIC-ISSUE-1', creatorName: '合成人员', purpose: '合成领用用途' + 'I'.repeat(80), snapshot: material, status: 'pending', createdAt: '2026-10-22', canIssue: true, canReject: true, canCancel: true }],
+    openings: [{ id: 401, no: 'SYNTHETIC-OPENING-1', title: '合成期初单' + 'O'.repeat(80), date: '2026-10-22', kind: 'opening', status: 'draft', itemCount: 1, unitCount: 0, creatorName: '合成人员', createdAt: '2026-10-22' }]
+  };
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     const results = {
@@ -58,11 +69,15 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       '/api/users': [user], '/api/files': [{ id: 1, original_name: '长附件名' + 'Z'.repeat(80) + '.txt', size: 1 }],
       '/api/trash': [{ ...record('archives'), deleted_at: '2026-10-19' }],
       '/api/audit': [{ id: 1, created_at: '2026-10-19', display_name: '合成人员', action: 'VIEW', entity: 'records', detail: '合成日志' }],
-      '/api/materials/meta': { capabilities: { createRequest: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
+      '/api/materials/meta': { capabilities: { createRequest: true, receive: true, createIssue: true, manageCategories: true, manageRegions: true,
+        manageCatalog: true, viewAmount: true, export: true, initialize: true, adjustStock: true, issueStock: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
     };
     let body = results[url.pathname] ?? [];
     if (url.pathname === '/api/records') body = [record(url.searchParams.get('module'))];
-    if (url.pathname.startsWith('/api/materials/') && url.pathname !== '/api/materials/meta') body = { items: [], total: 0, page: 1, pageSize: 50 };
+    if (url.pathname.startsWith('/api/materials/') && url.pathname !== '/api/materials/meta') {
+      const items = materialLists[url.pathname.slice('/api/materials/'.length)] || [];
+      body = { items, total: items.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 };
+    }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -78,36 +93,129 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(result.pageWidth <= result.width + 1, `${label}: page overflow ${JSON.stringify(result)}`);
     assert.deepEqual(result.outside, [], `${label}: controls must remain inside the viewport`);
   };
+  const navigate = async module => {
+    if (page.viewportSize().width < 768) await page.locator('#menu-toggle').click();
+    const button = page.locator(`.nav [data-nav="${module}"]`).first();
+    await button.click();
+    await page.waitForFunction(module => current === module && ![...document.querySelectorAll('#page .empty,#page .mw-empty')]
+      .some(node => node.textContent.includes('正在加载')), module);
+    assert.equal(await page.locator('body').evaluate(node => node.classList.contains('drawer-open')), false, 'navigation closes the drawer');
+    assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false, 'navigation restores the main controls');
+    return button;
+  };
+  const checkTables = async (label, selector = '#page .table') => {
+    const tables = await page.locator(selector).evaluateAll(nodes => nodes.map(container => {
+      const table = container.querySelector('table'), headers = [...table.querySelectorAll('thead th')].map(node => node.textContent.trim());
+      const rows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('[colspan]'));
+      return { containerWidth: container.clientWidth, scrollWidth: container.scrollWidth, tableWidth: table.getBoundingClientRect().width,
+        display: getComputedStyle(table).display, headerDisplay: getComputedStyle(table.querySelector('thead')).display,
+        rows: rows.map(row => ({ display: getComputedStyle(row).display, fields: [...row.children].map((cell, index) => ({
+          expected: headers[index] || (index === 0 ? headers[1] : ''), label: cell.getAttribute('data-label'),
+          before: getComputedStyle(cell, '::before').content, selection: cell.classList.contains('cell-select')
+        })) })) };
+    }));
+    for (const table of tables) {
+      assert.ok(table.rows.length, `${label}: fixture must exercise nonempty rows`);
+      if (page.viewportSize().width < 768) {
+        assert.equal(table.display, 'block', `${label}: table becomes a card list`);
+        assert.equal(table.headerDisplay, 'none', `${label}: card labels replace the header`);
+        assert.ok(table.scrollWidth <= table.containerWidth + 1, `${label}: cards must not scroll horizontally`);
+        assert.ok(table.tableWidth <= table.containerWidth + 1, `${label}: card width stays within its container`);
+        for (const row of table.rows) {
+          assert.equal(row.display, 'grid', `${label}: one DOM row becomes one card`);
+          for (const field of row.fields) if (!field.selection && field.expected) {
+            assert.equal(field.label, field.expected, `${label}: field label comes from its header`);
+            assert.equal(field.before, JSON.stringify(field.expected), `${label}: CSS displays the field label`);
+          }
+        }
+      } else {
+        assert.equal(table.display, 'table', `${label}: larger screens retain the original table`);
+        assert.equal(table.headerDisplay, 'table-header-group', `${label}: larger screens retain column headings`);
+      }
+    }
+  };
+  const checkDrawer = async () => {
+    await page.locator('#menu-toggle').click();
+    assert.equal(await page.locator('#menu-toggle').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#sidebar').getAttribute('aria-modal'), 'true');
+    assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), true);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'drawer-close');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.nav), 'trash', 'reverse Tab wraps to the final navigation item');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'drawer-close', 'Tab wraps to the drawer close control');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#menu-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('#sidebar').getAttribute('aria-modal'), null);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-toggle', 'Escape returns focus to the menu trigger');
+    assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false);
+    await page.locator('#menu-toggle').click();
+    await page.locator('.scrim').click({ position: { x: 385, y: 300 } });
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-toggle', 'scrim click returns focus');
+    assert.equal(await page.locator('body').evaluate(node => node.classList.contains('drawer-open')), false);
+    await page.locator('#menu-toggle').click();
+    await page.setViewportSize({ width: 768, height: 844 });
+    await page.waitForFunction(() => !document.body.classList.contains('drawer-open'));
+    assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false, 'resizing out of drawer mode restores main interaction');
+    await page.setViewportSize({ width: 390, height: 844 });
+  };
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto(base); await page.locator('.nav button').last().waitFor();
+    await page.goto(base); await page.locator('.nav button').last().waitFor({ state: 'attached' });
     await page.evaluate(() => setupDateFilters());
+    if (width === 390) await checkDrawer();
+    if (width >= 768) assert.equal(await page.locator('.side').evaluate(node => node.getBoundingClientRect().width), width === 768 ? 72 : 245, `${width}px sidebar width`);
     for (const module of Object.keys(labels)) {
-      const button = page.locator(`[data-nav="${module}"]`).first();
-      await button.click();
-      await page.waitForFunction(module => current === module && !document.querySelector('#page .empty')?.textContent.includes('正在加载'), module);
+      const button = await navigate(module);
       await checkLayout(`${width}px ${module}`);
+      await checkTables(`${width}px ${module}`);
+      const fonts = module === 'finance' ? [['#page th', '13px'], ['#page td', '14px'], ['#page .pill', '13px']]
+        : module === 'materials' ? [['#page .mw-badge', '13px'], ['#page .mw-toolbar label', '13px'], ['#page .mw small', '12px']] : [];
+      for (const [selector, size] of fonts) assert.equal(await page.locator(selector).first().evaluate(node => getComputedStyle(node).fontSize), size, `${width}px ${selector} uses the T1 font size`);
       if (width < 900 && ['dashboard', 'archives'].includes(module)) await page.screenshot({ path: path.join(screenshots, `${width}-${module}.png`), fullPage: true });
       if (module === 'finance' && width < 900) {
         const table = page.locator('#page .table');
-        assert.ok(await table.evaluate(node => node.scrollWidth > node.clientWidth), 'wide tables scroll inside their own container');
+        if (width === 768) assert.ok(await table.evaluate(node => node.scrollWidth > node.clientWidth), 'tablet wide tables scroll inside their own container');
+        else assert.ok(await table.evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'phone cards do not need horizontal scrolling');
         const edit = table.locator('.ops button').nth(1);
         await edit.click();
         await page.locator('#editor').waitFor({ state: 'visible' });
         assert.equal(await page.locator('#edit-title').textContent(), '编辑记录', 'scrolled table actions remain clickable');
         await page.evaluate(() => editor.close());
       }
-      if (width <= 900) {
+      if (width < 768) {
         assert.notEqual(await button.locator('b').evaluate(node => getComputedStyle(node).display), 'none', 'mobile menus retain Chinese labels');
         assert.ok((await button.boundingBox()).height >= 44, 'navigation remains touchable');
+      } else if (width === 768) {
+        assert.equal(await button.locator('b').evaluate(node => getComputedStyle(node).display), 'none', 'tablet navigation is an icon rail');
+        assert.ok((await button.boundingBox()).height >= 44, 'icon rail targets remain touchable');
       }
     }
+    await navigate('materials');
+    for (const materialPage of ['requests', 'acceptance', 'inventory', 'issues', 'openings']) {
+      await page.locator(`.mw-nav [data-page="${materialPage}"]`).click();
+      await page.waitForFunction(() => document.querySelector('#mw-filters') && !document.querySelector('#page .mw-empty'));
+      await checkLayout(`${width}px materials ${materialPage}`);
+      await checkTables(`${width}px materials ${materialPage}`);
+      if (width === 390 && ['acceptance', 'inventory'].includes(materialPage)) await page.screenshot({ path: path.join(screenshots, `${width}-materials-${materialPage}.png`), fullPage: true });
+    }
+    await page.locator('#page [data-mw="dictionaries"]').click();
+    await page.locator('#mw-view').waitFor({ state: 'visible' });
+    await checkTables(`${width}px material catalog dialog`, '#mw-view .table');
+    assert.ok(await page.locator('#mw-view').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog dialog keeps scrolling inside its table');
+    await page.locator('#mw-view [data-mw="close-view"]').first().click();
+    await page.locator('#page [data-mw="label-template"]').click();
+    await page.locator('#material-label-designer').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#material-label-designer table').evaluate(node => getComputedStyle(node).display), 'table', 'label design coordinates retain their table layout');
+    assert.equal(await page.locator('#material-label-designer thead').evaluate(node => getComputedStyle(node).display), 'table-header-group', 'label designer does not use business card labels');
+    await page.locator('#material-label-designer [data-label="close"]').click();
     for (const section of ['accounts', 'roles', 'nav', 'dashboard']) {
-      await page.locator('[data-nav="management"]').first().click();
+      await navigate('management');
       await page.locator(`[data-mcard="${section}"]`).waitFor();
       await page.locator(`[data-mcard="${section}"]`).click();
       await page.waitForFunction(() => !document.querySelector('[data-mcard]'));
       await checkLayout(`${width}px management ${section}`);
+      await checkTables(`${width}px management ${section}`);
       if (width < 900 && section === 'accounts') await page.screenshot({ path: path.join(screenshots, `${width}-accounts.png`), fullPage: true });
     }
     await page.evaluate(() => go('assets')); await page.locator('#asset-add').click();
@@ -128,7 +236,22 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(await page.locator('#login').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'first setup form stays within the dialog');
     await page.evaluate(() => login.close());
   }
+  for (const width of [1024, 1279, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    const expected = width < 1280 ? 72 : 245;
+    assert.equal(await page.locator('.side').evaluate(node => node.getBoundingClientRect().width), expected, `${width}px sidebar breakpoint`);
+    assert.equal(await page.locator('.layout>main').evaluate(node => node.getBoundingClientRect().left), expected, `${width}px main offset matches the sidebar`);
+    await checkLayout(`${width}px breakpoint`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await navigate('finance');
   await page.emulateMedia({ media: 'print' });
   assert.equal(await page.locator('#editor').evaluate(node => getComputedStyle(node).maxHeight), 'none', 'screen dialog height limits do not truncate printing');
+  const printTable = await page.locator('#page .table table').evaluate(table => ({
+    table: getComputedStyle(table).display, head: getComputedStyle(table.querySelector('thead')).display,
+    body: getComputedStyle(table.querySelector('tbody')).display, row: getComputedStyle(table.querySelector('tbody tr')).display,
+    before: getComputedStyle(table.querySelector('tbody td'), '::before').content
+  }));
+  assert.deepEqual(printTable, { table: 'table', head: 'table-header-group', body: 'table-row-group', row: 'table-row', before: 'none' }, '390px print media retains every original column without phone card labels');
   assert.deepEqual(errors, [], 'actual module scripts run without browser errors');
 });

@@ -4,6 +4,12 @@
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
+## 当前UI施工：T1→T2（未发布）
+
+分支feature/ui-t1-t2，阶段缓存artifacts/cache/ui-t1-t2/，公开版本仍为0.10.1。界面按[UI施工卡](UI_施工卡.md)施工，令牌与响应式各用新CSS覆盖，原压缩规则不改；业务表格由labelTable集中注入字段名，不按屏宽维护第二套模板。T2先于T3／T4，本轮只交付T1／T2，不改库存字段或验收事务。
+
+交付自查先跑node scripts/ui-audit.js，再跑--strict；原strict同时包含T1/T2，因此T1阶段会真实报尚未实施的T2三项失败，不能把它写成T1全局通过。T2完成后的默认／严格审计均8通过／0警告／0失败。浏览器检查包含390／768／1440与1024／1279／1280侧栏边界、真实computed字号、卡片字段、抽屉键盘／焦点及打印media。全套结果和未验证边界记在MEMORY／HISTORY，不把浏览器mock写成目标手机／USB验收。
+
 ## 目录约定
 
 ```text

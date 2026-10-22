@@ -768,3 +768,15 @@ B3加法字段同时触及严格备份，因此升schema6并保留严格schema1�
 源码同步首次网络失败后重试、证据导入首次漏--zip、分段工具初次缺输入的记录均保留。分段下载attempt-twLIF4总体failed：amd6459段完整，arm64仅13段后网络超时。后续复用工具blob-reuse-download-IwIjEl通过，ARM64复用旧0.9.4已验证层238232155字节、实际下载4198821字节，完整官方大小／SHA256一致后才创建正式TAR，不改旧包，不称全包网络重新下载。本机12件共489027423字节，11摘要、5份独立源附件和冻结ZIP逐字节一致，两架构三镜像TAR和六config均核验通过。
 
 Release420407248已公开prerelease；公开后12件元数据与11摘要一致，10个非TAR附件898911字节由官方API匿名完整下载通过，双TAR完整文件另有本机报告。当前README、DEVELOPMENT及三份部署／打印指南入口改为0.10.1，MATERIAL_API补齐显式关联、验收同事务选档／建档、权限与schema6合同；仅后补当前文档，不重打源码ZIP、镜像、发布附件或移动标签。外部AGENTS、优化方案、.workbuddy与新增UI资料保留；未在NAS部署，真手机／USB与长期容量未验。
+
+
+## 2026-10-22：UI T1→T2施工与阶段验证
+
+用户要求先跑ui-audit，再按T1→T2推进。初始2通过／5警告／0失败，独立feature/ui-t1-t2从0.10.1基线开发。新增tokens.css、responsive.css，保持三份原压缩样式原字节；表格统一从thead取data-label，各通用模块渲染调用及物资两个中心调用接入，共用同一DOM。手机卡片与抽屉、768–1279图标侧栏按施工卡处理，不先做T3／T4。
+
+T1完成后的--strict真实5通过／3失败，全部为尚未完成的T2检查，原日志保留；未更改原审计逻辑。T2完成后默认／严格均8通过／0警告／0失败。前端VM51/51，真实Edge首次因visibility过渡导致打开菜单后焦点仍在body而失败，保留mobile-first.tap；取消visibility过渡、只保留transform后第二轮通过，再增加实际字号断言第三轮1/1通过。10截图mobile-layout-p42fQD，root目视390库存及768档案；覆盖五类非空物资表／字典详情、390／768／1440、侧栏1024／1279／1280、菜单键盘／焦点／resize、print媒体及标签设计器不被卡片化。
+
+上一轮0.10.1发布后文档已单独提交8c5bb75并通过官方API快进同步develop及原feature，主分支和旧标签核对未变。本轮UI仍在独立分支／未发布，不重打0.10.1附件；保留AGENTS、优化方案、.workbuddy和额外原型等外部编辑。所有命令由WindowsApps PowerShell7.6.7的pwsh执行，未调用旧powershell.exe。全套回归随后追加实际结果；未操作NAS、真手机、原生打印窗口或USB。
+
+
+UI T1/T2最终回归：npm test共209项，208通过、0失败、1本机Docker条件跳过，真实Edge布局用例包含在此整轮；node scripts/check.js检查43份JS通过，默认／--strict审计8通过／0警告／0失败。数据库为本轮专用127.0.0.1:54920的PostgreSQL17.11，不冒充PG18／容器门禁；已按精确data目录fast停止并保留缓存，postgres-stop-report.json为exit0。本轮未发布UI镜像或更新NAS，T3/T4待下一步；不改旧版本标签、镜像或YML。

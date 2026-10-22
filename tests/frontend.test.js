@@ -19,6 +19,7 @@ class Element {
     this.classes = new Set((attrs.class || '').split(/\s+/));
     this.classList = {
       add: key => this.classes.add(key), remove: key => this.classes.delete(key),
+      contains: key => this.classes.has(key),
       toggle: (key, enabled) => enabled ? this.classes.add(key) : this.classes.delete(key)
     };
     for (const [name, value] of Object.entries(attrs)) {
@@ -29,6 +30,8 @@ class Element {
   set id(value) { this.attrs.id = value; }
   get name() { return this.attrs.name; }
   set name(value) { this.attrs.name = value; }
+  get type() { return this.attrs.type || (this.tagName === 'input' ? 'text' : ''); }
+  set type(value) { this.attrs.type = value; }
   get elements() { return Object.fromEntries(this.querySelectorAll('[name]').map(node => [node.name, node])); }
   get value() {
     if (this._value !== undefined) return this._value;
@@ -54,6 +57,8 @@ class Element {
   remove() { if(this.parent)this.parent.children.splice(this.parent.children.indexOf(this),1); }
   contains(node) { return node===this||this.children.some(child=>child.contains(node)); }
   addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
+  hasAttribute(name) { return Object.hasOwn(this.attrs, name); }
+  getAttribute(name) { return this.hasAttribute(name) ? this.attrs[name] : null; }
   setAttribute(name, value) { this.attrs[name] = value; }
   removeAttribute(name) { delete this.attrs[name]; }
   insertBefore(child, before) {
@@ -99,6 +104,7 @@ class Element {
   showModal() { this.open = true; }
   close() { this.open = false; }
   click() { return this.onclick?.(); }
+  focus() { let owner = this; while (owner.parent) owner = owner.parent; owner.activeElement = this; }
 }
 
 function parse(html, parent) {
@@ -229,6 +235,37 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     }
   };
 }
+
+test('table labels follow headers while group rows, selection cells and status columns retain their roles', async () => {
+  const app = await browser();
+  app.$('#page').innerHTML = `
+    <table id="labels-basic"><thead><tr><th> 名称 </th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <tr><td>合成物资</td><td>在库</td><td><button>编辑</button></td></tr>
+      <tr><td colspan="3">分组标题</td></tr><tr><td>不完整行</td><td>跳过</td></tr>
+    </tbody></table>
+    <table id="labels-selection"><thead><tr><th></th><th>物资名称</th><th>操作</th></tr></thead><tbody>
+      <tr><td><input type="checkbox"></td><td>合成物资</td><td><button>查看</button></td></tr>
+      <tr><td><input type="radio"></td><td>另一物资</td><td><button>查看</button></td></tr>
+    </tbody></table>
+    <table id="labels-status"><thead><tr><th>名称</th><th>状态</th></tr></thead><tbody><tr><td>合成实物</td><td>已领用</td></tr></tbody></table>
+    <table id="labels-button"><thead><tr><th>名称</th><th>记录</th></tr></thead><tbody><tr><td>合成实物</td><td><button>查看记录</button></td></tr></tbody></table>`;
+  app.run("labelTable($('#page'))");
+  const rows = app.$('#labels-basic').querySelectorAll('tbody tr');
+  assert.deepEqual(rows[0].children.map(td => td.getAttribute('data-label')), ['名称', '状态', '操作']);
+  assert.equal(rows[0].children[2].classList.contains('cell-act'), true);
+  assert.ok(rows.slice(1).every(row => row.children.every(td => !td.hasAttribute('data-label'))), 'colspan and mismatched rows must be skipped');
+  for (const row of app.$('#labels-selection').querySelectorAll('tbody tr')) {
+    assert.equal(row.children[0].hasAttribute('data-label'), false, 'selection controls do not receive a duplicate field label');
+    assert.equal(row.children[0].classList.contains('cell-select'), true);
+    assert.equal(row.children[1].getAttribute('data-label'), '物资名称');
+  }
+  const status = app.$('#labels-status').querySelectorAll('tbody tr')[0].children[1];
+  assert.equal(status.getAttribute('data-label'), '状态');
+  assert.equal(status.classList.contains('cell-act'), false, 'a final status cell is data rather than an action');
+  assert.equal(app.$('#labels-button').querySelectorAll('tbody tr')[0].children[1].classList.contains('cell-act'), true);
+  app.run('labelTable()');
+  assert.deepEqual(rows[0].children.map(td => td.getAttribute('data-label')), ['名称', '状态', '操作'], 'repeated labelling preserves existing values');
+});
 
 test('first launch creates an administrator once and clears passwords before entering', async () => {
   const app = await browser(null, { setupRequired: true, setupUsername: 'lab-admin' });
