@@ -1,6 +1,8 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.10.1（已公开验证版，2026-10-22）**。本轮实现申报与验收解耦：申报仅在显式选择时关联物资信息，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。正式部署从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版本镜像及两份YML，完整交付保存在`artifacts/releases/0.10.1/`。
+本源码版本：**0.11.0（开发候选，2026-10-22）**。本轮在已完成的 T1 令牌排版、T2 手机卡片和侧栏适配基础上，补齐 T3 验收物资信息区块、T4 库存七列，以及厂家、批次备注、物资信息库备注与 Excel 回导。最终测试、双架构镜像、两份 YML、离线包和 Release 尚待本轮实际门禁及交付；缓存和交付目标分别为 `artifacts/cache/0.11.0/`、`artifacts/releases/0.11.0/`，不把目标路径存在当作已发布。发布前日常部署仍使用下方 0.10.1 配套交付。
+
+上一公开基线 **0.10.1** 实现申报与验收解耦：申报仅在显式选择时关联物资信息，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。正式部署从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版本镜像及两份YML，完整交付保存在`artifacts/releases/0.10.1/`。下段数字和标识只属于该公开基线。
 
 0.10.1冻结于`5d59622`／`v0.10.1`，公开prerelease为Release420407248。真实PostgreSQL18.6回归203/203、42份JS检查和四项容器发布门禁通过；ARM64容器使用QEMU。12件交付共489027423字节、11条摘要及两架构三镜像包已在本机核对，10个非TAR附件共898911字节经官方API匿名完整下载通过；TAR另由本机完整大小、SHA256及结构报告证明，ARM64包通过复用已核验旧镜像层补齐。原下载超时记录保留，不称匿名全量TAR或真机验收。发布附件保留冻结快照，后补文档不重打包或移动标签。详见[版本说明](docs/CHANGELOG.md)。
 
@@ -31,7 +33,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.10.1/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/0.11.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -42,7 +44,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.10.1/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/0.11.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -60,16 +62,18 @@ npm test
 
 库存按物资、仓库和区域合并，保留批次、有效期、存放位置和来源；领用由人员申请，物资管理员确认发放才扣库存。逐件管理发放时选择具体在库实物；申请不预占库存，不支持开瓶余量或同一申请部分发放。接口与 Excel 规则见[物资 API](docs/MATERIAL_API.md)。
 
+0.11.0 本轮库存列表按“入库时间、名称、数量、规格、单位、厂家、备注”七列排布，同一物资显示跨仓库／区域总量；仓库、区域、位置、批次和领用操作保留在详情中。厂家只作库存来源展示，不改变物资或批次身份，领用仍按实际批次办理。验收、期初／补录可填写厂家和批次备注；物资信息库另有独立的物资备注。库存与信息库 Excel 新列随导出保留，旧模板继续兼容；原样回导仍须核对草稿，不能作为重复入库去重机制。手机端共用桌面数据与操作，只以 CSS 将表格排为卡片。
+
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。从0.10.1 Release下载同版本配套文件；在线应用镜像为`ghcr.io/hotll233/labmg:0.10.1`，本地三镜像包使用`labos:0.10.1`：
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前仓库配置面向 0.11.0 候选：在线应用镜像为 `ghcr.io/hotll233/labmg:0.11.0`，本地三镜像包使用 `labos:0.11.0`。本轮镜像及下载须待实际发布后使用；发布前继续从上方 0.10.1 Release 下载其配套文件，不将新配置与旧应用标签混用。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.10.1 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.10.1/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.10.1 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.10.1/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.11.0 候选 docker-compose.yml](deploy/docker-compose.yml) | 发布后应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.11.0 候选 docker-compose.local.yml](deploy/docker-compose.local.yml) | 发布后先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-0.10.1的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
+0.11.0 候选的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
 首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；schema6物资备份不能交0.9.4恢复，需回退时使用升级前数据库副本。本次不提供 PostgreSQL 主版本迁移。
 
