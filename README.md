@@ -1,8 +1,10 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.11.0（开发候选，2026-10-22）**。本轮在已完成的 T1 令牌排版、T2 手机卡片和侧栏适配基础上，补齐 T3 验收物资信息区块、T4 库存七列，以及厂家、批次备注、物资信息库备注与 Excel 回导。最终测试、双架构镜像、两份 YML、离线包和 Release 尚待本轮实际门禁及交付；缓存和交付目标分别为 `artifacts/cache/0.11.0/`、`artifacts/releases/0.11.0/`，不把目标路径存在当作已发布。发布前日常部署仍使用下方 0.10.1 配套交付。
+本源码版本：**0.11.0（验证版，2026-10-22）**。本轮完成 T1 令牌排版、T2 手机卡片和侧栏适配、T3 验收物资信息区块、T4 库存七列，以及厂家、批次备注、物资信息库备注与 Excel 回导。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，提供双架构镜像、两份 YML、离线包与源码；完整交付保存在 `artifacts/releases/0.11.0/`。
 
-上一公开基线 **0.10.1** 实现申报与验收解耦：申报仅在显式选择时关联物资信息，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。正式部署从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版本镜像及两份YML，完整交付保存在`artifacts/releases/0.10.1/`。下段数字和标识只属于该公开基线。
+0.11.0已公开为prerelease（Release420498064），冻结于`20423ca`／`v0.11.0`。真实PostgreSQL18.6回归212/212、43份JS检查和四项容器发布门禁通过；ARM64使用QEMU。本机`artifacts/releases/0.11.0/`完整12件共489108457字节，11条摘要、5份源附件与冻结ZIP逐字节一致，双TAR三镜像／六份config核验通过；10个非TAR附件共965609字节经官方API匿名完整下载通过。TAR另有本机完整摘要及结构证据，不称匿名全量TAR或目标NAS、真手机、USB验收。附件保留冻结快照，后补文档不重打资产或移动标签。
+
+上一公开基线 **0.10.1** 实现申报与验收解耦：申报仅在显式选择时关联物资信息，验收时可选择已有物资或现场建档；增加有序加法迁移和物资备份格式兼容。该版历史交付从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版本镜像及两份YML，完整交付保存在`artifacts/releases/0.10.1/`。下段数字和标识只属于该公开基线。
 
 0.10.1冻结于`5d59622`／`v0.10.1`，公开prerelease为Release420407248。真实PostgreSQL18.6回归203/203、42份JS检查和四项容器发布门禁通过；ARM64容器使用QEMU。12件交付共489027423字节、11条摘要及两架构三镜像包已在本机核对，10个非TAR附件共898911字节经官方API匿名完整下载通过；TAR另由本机完整大小、SHA256及结构报告证明，ARM64包通过复用已核验旧镜像层补齐。原下载超时记录保留，不称匿名全量TAR或真机验收。发布附件保留冻结快照，后补文档不重打包或移动标签。详见[版本说明](docs/CHANGELOG.md)。
 
@@ -66,14 +68,14 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前仓库配置面向 0.11.0 候选：在线应用镜像为 `ghcr.io/hotll233/labmg:0.11.0`，本地三镜像包使用 `labos:0.11.0`。本轮镜像及下载须待实际发布后使用；发布前继续从上方 0.10.1 Release 下载其配套文件，不将新配置与旧应用标签混用。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前正式配置为0.11.0：在线应用镜像为 `ghcr.io/hotll233/labmg:0.11.0`，本地三镜像包使用 `labos:0.11.0`。从[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)下载同版本镜像和配套文件。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.11.0 候选 docker-compose.yml](deploy/docker-compose.yml) | 发布后应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.11.0 候选 docker-compose.local.yml](deploy/docker-compose.local.yml) | 发布后先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.11.0 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.11.0 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
-0.11.0 候选的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
+0.11.0的[在线YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.yml)与[本地YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.local.yml)继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
 首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；schema6物资备份不能交0.9.4恢复，需回退时使用升级前数据库副本。本次不提供 PostgreSQL 主版本迁移。
 

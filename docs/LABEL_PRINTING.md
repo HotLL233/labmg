@@ -1,6 +1,6 @@
 # 系统打印与二维码标签
 
-本指南当前源码面向 **0.11.0（开发候选，2026-10-22）**。本轮在 T1/T2 排版与手机卡片基础上补齐 T3 验收信息区块、T4 库存七列，并接入厂家、批次备注、物资备注及 Excel 回导。候选交付目标为 `artifacts/releases/0.11.0/`，两份配置见[在线 YML](../deploy/docker-compose.yml)和[本地 YML](../deploy/docker-compose.local.yml)，实际镜像及发布尚待本轮门禁；发布前日常部署继续使用下方0.10.1整套文件。标签仍只含二维码和基础信息，保留系统打印窗口、实体纸尺寸、0°／90°内容旋转和原校准值，不增加 BarTender 或打印机直连服务。
+本指南当前源码面向 **0.11.0（验证版，2026-10-22）**。本轮完成 T1–T4 双端界面、验收信息区块、库存七列及厂家／备注Excel配套。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，完整交付位于 `artifacts/releases/0.11.0/`，两份配置见[在线 YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.yml)和[本地 YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.local.yml)。真实PG18.6回归、四项发布门禁、本机12件与公开后10个非TAR附件匿名下载核验通过，结果见[版本说明](CHANGELOG.md)；附件指南保留冻结快照，以下为后补入口。标签仍只含二维码和基础信息，保留系统打印窗口、实体纸尺寸、0°／90°内容旋转及原校准值；本轮结果不替代原生窗口、USB或任意模板实物验收。
 
 上一公开基线 **0.10.1** 从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版镜像及YML。该版增加申报与验收解耦及PG18应用schema加法迁移；打印界面、系统打印方式、二维码和实体纸／内容旋转数学沿用0.9.4。升级前备份并保留原 `runtime/`、`https/`；schema6物资备份不能交0.9.4恢复，需回退恢复时使用升级前数据库副本。下段为该版真实结果，不作为0.11.0验证。
 

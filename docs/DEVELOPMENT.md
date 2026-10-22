@@ -1,12 +1,14 @@
 # 开发与版本管理
 
-已公开源码版本为 **0.10.1（验证版，2026-10-22）**，实现申报与验收解耦及加法数据库迁移。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署取[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。真实PG18.6回归203/203、42JS及四项发布门禁已通过，12件本地交付及公开附件核验详见下文和[版本说明](CHANGELOG.md)。后续UI按T1→T2推进，在开发分支进行，不将尚未完成的界面施工记入0.10.1冻结交付。
+已公开源码版本为 **0.11.0（验证版，2026-10-22）**，完成T1–T4双端界面、库存七列及厂家／备注Excel配套。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署取[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。真实PG18.6回归212/212、43JS及四项发布门禁通过，交付与有限验收边界见下文和[版本说明](CHANGELOG.md)。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
-## 当前开发：0.11.0 库存信息与双端界面优化（2026-10-22，未发布）
+## 最新公开：0.11.0 库存信息与双端界面优化（2026-10-22）
 
-用户要求完成本次开发（包括UI）。本轮从616af65的T1/T2阶段继续，分支feature/v0.11.0-material-ui-inventory，实施T3验收就地匹配／新建界面及T4／批次C库存七列、厂家／备注与Excel配套；不将后续D/E/F路线图写成本轮完成。版本、缓存与交付目标分别0.11.0、artifacts/cache/0.11.0/、artifacts/releases/0.11.0/。完成后继续交付GHCR双架构镜像、两份完整YML、双架构三镜像TAR、源码及GitHub Release；正式验证与发布均待实际执行。当前公开仍为0.10.1。保留原PG18数据／HTTPS目录、旧标签和附件，不自动升级NAS。
+用户要求完成本次开发（包括UI）。本轮从616af65的T1/T2阶段继续，分支feature/v0.11.0-material-ui-inventory，完成T3验收就地匹配／新建界面及T4／批次C库存七列、厂家／备注与Excel配套；后续D/E/F路线图不属于本轮。版本、缓存与交付分别为0.11.0、artifacts/cache/0.11.0/、artifacts/releases/0.11.0/。GHCR双架构镜像、两份完整YML、双架构三镜像TAR、源码及GitHub Release均已交付。保留原PG18数据／HTTPS目录、旧标签和附件，未自动升级NAS；下列阶段记录的待验证状态由本节实际发布结果补充。
+
+0.11.0已公开为prerelease（Release420498064），冻结于`20423ca`／`v0.11.0`。真实PostgreSQL18.6回归212/212、43份JS检查和四项容器发布门禁通过；ARM64使用QEMU。本机`artifacts/releases/0.11.0/`完整12件共489108457字节，11条摘要、5份源附件与冻结ZIP逐字节一致，双TAR三镜像／六份config核验通过；10个非TAR附件共965609字节经官方API匿名完整下载通过。TAR另有本机完整摘要及结构证据，不称匿名全量TAR或目标NAS、真手机、USB验收。附件保留冻结快照，后补文档不重打资产或移动标签。
 
 验收复用已有事务内选档／建档，新增具名物资信息区块；库存七列通过detail=1展示厂家，原默认批次身份、领用、位置、二维码与整批计价保持。数量型厂家分配写在新负流水快照，历史缺省只读重放，逐件追溯真实来源；金额按当前量分摊补尾差。厂家、批次备注与档案备注同时纳入表单／Excel，十三／六列兼容旧模板。具体合同见MATERIAL_API，schema6严格校验同步，未改旧迁移或添加运行依赖。
 
@@ -14,7 +16,9 @@ Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.
 
 上述review两边界修后已完成最终整轮：node --test --test-concurrency=2 tests/*.test.js（与npm test相同文件集合）217项216通过／0失败／1本机Docker条件跳过，含真实Edge全站布局；43JS、普通／严格审计8/0/0通过。T3/T4最终专项144断言／12图／0异常、VM54/54、后端专项4/4及XLSX10/10，首次失败保留且未加宽超时。测试PG17.11已核对精确目录／54930后fast停止。后端33517e9与UI da3acbe独立提交；正式PG18、双架构镜像和四门禁以本版新run为准，不能借用旧证据。
 
-## 当前UI施工：T1→T2（未发布）
+## 历史UI施工：T1→T2（已整合至0.11.0）
+
+以下保留T1/T2独立施工阶段记录；其后已按顺序完成T3/T4并纳入0.11.0公开交付。
 
 分支feature/ui-t1-t2，阶段缓存artifacts/cache/ui-t1-t2/，公开版本仍为0.10.1。界面按[UI施工卡](UI_施工卡.md)施工，令牌与响应式各用新CSS覆盖，原压缩规则不改；业务表格由labelTable集中注入字段名，不按屏宽维护第二套模板。T2先于T3／T4，本轮只交付T1／T2，不改库存字段或验收事务。
 

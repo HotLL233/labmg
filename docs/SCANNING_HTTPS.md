@@ -1,6 +1,6 @@
 # 手机实时扫码与群晖 HTTPS
 
-本指南当前配置面向 **0.11.0（开发候选，2026-10-22）**。本轮 T1–T4 优化手机卡片、侧栏、验收信息区块及库存七列，并接入厂家、批次备注和物资备注；实时扫码仍需手机信任 HTTPS，不因界面更新免除证书及相机授权。候选交付目标为 `artifacts/releases/0.11.0/`，正式镜像和门禁尚待本轮实际结果；发布前日常部署仍使用下方0.10.1整套配套文件。
+本指南当前配置面向 **0.11.0（验证版，2026-10-22）**。本轮完成 T1–T4 手机卡片、侧栏、验收信息区块、库存七列及厂家／备注配套。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，完整交付位于 `artifacts/releases/0.11.0/`；真实PG18.6回归、四项发布门禁、本机12件与公开后10个非TAR附件匿名下载核验通过，结果见[版本说明](CHANGELOG.md)。附件指南保留冻结快照，以下为后补入口。实时扫码仍需手机信任本实例HTTPS及授权相机，本轮未操作真手机。
 
 上一公开基线 **0.10.1** 从[0.10.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.10.1)下载同版镜像及YML，默认自动识别主局域网IP；升级前备份并保留原 `runtime/`、`https/`。该版增加申报与验收解耦及PG18应用schema加法迁移，自动HTTPS沿用0.9.4；schema6物资备份不能交0.9.4恢复，需回退恢复时使用升级前数据库副本。下段为该版实际结果，不作为0.11.0验证。
 
@@ -8,7 +8,7 @@
 
 以下保留0.9.4已公开版本的部署与验证记录，不作为本轮新结果。
 
-0.9.4发布时，在线、本地两份完整YML已默认自动识别一个主局域网IPv4并生成HTTPS配置，无需手填IP、另放Caddyfile或合并YML。旧配套文件保留在[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)；下列保留该版验证历史。当前操作配置面向0.11.0候选，发布前正式入口仍为上方0.10.1配套交付。同一PG18项目更新继续保留完整`runtime/`和`https/`，容器门禁不代替真手机验收。
+0.9.4发布时，在线、本地两份完整YML已默认自动识别一个主局域网IPv4并生成HTTPS配置，无需手填IP、另放Caddyfile或合并YML。旧配套文件保留在[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)；下列保留该版验证历史。当前操作配置使用上方0.11.0配套交付。同一PG18项目更新继续保留完整`runtime/`和`https/`，容器门禁不代替真手机验收。
 
 0.9.3真实CI回归189/189、39份JS检查通过，但容器Gate1在新增测试脚本漏声明uid/gid处失败，未测到后续功能断言；该版保留为未公开冻结候选。0.9.4修正该声明，当时交付仍待本轮门禁（最终结果见下文），不能用0.9.3候选替代正式部署版。
 
@@ -26,7 +26,7 @@
 
 应用监听`0.0.0.0:3000`，HTTPS代理监听`:443`。只有一次性`labos-init`使用宿主机网络来识别地址，应用与代理仍在Compose网络。`LABOS_HTTPS_HOST`决定请求匹配和证书名称，默认`auto`；空值、旧`CHANGE_ME`及`0.0.0.0`也作为自动识别输入，不会将`0.0.0.0`写成证书名称。手机始终使用识别出的实际地址。
 
-1. 0.11.0实际发布后，在线选择[配套 docker-compose.yml](../deploy/docker-compose.yml)，本地导入选择[配套 docker-compose.local.yml](../deploy/docker-compose.local.yml)，两者任选其一，使用同版镜像；交付目标为`artifacts/releases/0.11.0/`。发布前继续使用上方0.10.1 Release中的同版文件。部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
+1. 从0.11.0 Release选择[在线 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.yml)或[本地 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.local.yml)，两者任选其一，使用同版镜像；本机完整交付位于`artifacts/releases/0.11.0/`。部署及三镜像包导入见[群晖部署](SYNOLOGY.md)。
 2. 默认保留`labos-init`的`LABOS_HTTPS_HOST=auto`。初始化排除回环、Docker／桥接、VPN和链路本地地址，结合默认路由选择一个主局域网IPv4；缺少合适地址或多网卡仍无法确定时明确失败。需固定另一地址或主机名时，在该服务手动指定实际IPv4或主机名，不带协议、端口、路径；同目录`.env`或项目环境可能覆盖默认值。建议为群晖保留固定IP，默认HTTPS端口8443。
 3. 在File Station先创建YML旁的`runtime/`、`https/`父目录；2026-10-19的DS918+实测缺少`https/`时拒绝bind挂载，不能依赖自动创建。取得配套镜像后启动，查看`labos-init`日志的`HTTPS host: <实际地址> (auto, interface <网卡>)`。初始化生成`runtime/https-config/Caddyfile`，代理从只读目录加载；自定义LABOS_DATA_DIR时配置位于该运行目录下。代理继续创建`https/data/`、`https/config/`，保留整份`https/`内的实例CA及私钥。
 4. 将下列公开根证书传到手机并安装、信任。只传 root.crt，不要导出 .key 或整份 https/data/。
@@ -46,7 +46,7 @@ YML所在目录/https/data/caddy/pki/authorities/local/root.crt
 
 ## 仍无法调用相机时
 
-使用0.11.0候选或0.10.1的自动配置时，先看`labos-init`退出码和日志。地址无法确定时，在该服务指定实际地址，校验Compose配置后重新执行初始化、重建代理，保留`runtime/`和`https/`。代理异常时再检查其日志及`runtime/https-config/Caddyfile`是否生成、是否包含预期地址，不手改只读挂载文件代替修正初始化输入。
+使用0.11.0或0.10.1的自动配置时，先看`labos-init`退出码和日志。地址无法确定时，在该服务指定实际地址，校验Compose配置后重新执行初始化、重建代理，保留`runtime/`和`https/`。代理异常时再检查其日志及`runtime/https-config/Caddyfile`是否生成、是否包含预期地址，不手改只读挂载文件代替修正初始化输入。
 
 本轮先只读检查发现现有0.9.2配置把`0.0.0.0`用作证书／站点名称，HTTPS曾返回200但正文为空。2026-10-22已备份实际YML到`runtime/logs/maintenance/https-host-20261022T035237Z/docker-compose.yml`，仅将该主机默认值改为实际IPv4并重建代理，应用／PostgreSQL容器及原CA保持不变。独立客户端使用同一CA、空SNI及严格IP身份校验后，HTTP／HTTPS公共根页均返回200、2788字节、相同SHA256，证书SAN包含实际IP。证据为`artifacts/cache/0.9.3/nas-https-restoration.json`。此结果补充先前“尚未现场修复”状态；0.9.4自动识别代码仍未部署到该NAS，手机相机及USB未验。不能只凭状态码认定页面可用，仍须核对证书名称和非空应用正文。
 
