@@ -178,7 +178,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
-    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings'].includes(url.pathname)) {
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/manufacturers', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings'].includes(url.pathname)) {
       const entries = state.materialLists[url.pathname.slice('/api/materials'.length)] || [];
       return response({ items: entries, total: entries.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
     }
@@ -1371,4 +1371,94 @@ test('changing declaration identity clears its association and receipt reload bl
   fill({ quantity: '1', amount: '2' }); await submit(); assert.equal(writes, 1);
   Object.assign(item, { catalogId: 5, version: 2 }); request.version++; await click('[data-mw=reload-form]');
   assert.equal(app.$('#mw-save').disabled, true); await submit(); assert.equal(writes, 1); assert.equal(app.$('#mw-fields [name=catalogId]').value, 'new');
+});
+
+test('receipt identity section shows linked details and preserves an unlinked declaration while selecting or creating a catalog', async () => {
+  const { app, row, item, request, click, fill, submit } = await materialApp();
+  request.status = 'submitted';
+  await click({ dataset: { mw: 'receive', request: '101', item: '11' } });
+  assert.equal(app.$('#mw-fields legend').textContent, '物资信息');
+  assert.match(app.$('#mw-fields .mw-receipt-match').textContent, /已关联物资信息/);
+  assert.match(app.$('#mw-fields .mw-receipt-match').textContent, /合成物资 · 测试规格 · 件/);
+  assert.equal(app.$('#mw-fields [name=catalogId]'), null);
+  await click('[data-mw=cancel]'); item.catalogId = null; item.name = '申报原名称'; item.spec = '申报原规格';
+  app.state.materialLists['/stock/manufacturers'] = ['历史厂家', '厂家<img src=x>'];
+  await click({ dataset: { mw: 'refresh' } });
+  await click({ dataset: { mw: 'receive', request: '101', item: '11' } });
+  assert.match(app.$('#mw-fields .mw-sub').textContent, /申报：申报原名称.*申报原规格/);
+  assert.equal(app.$('#mw-fields [name=catalogQuery]').value, item.name);
+  assert.equal(app.$('#mw-fields img'), null);
+  assert.equal(app.$('#mw-manufacturers').querySelectorAll('option').length, 2);
+  fill({ catalogId: '5' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.match(app.$('#mw-receipt-match').textContent, /已选择：合成物资/);
+  assert.equal(app.$('#mw-fields [name=remark]').disabled, true);
+  fill({ catalogId: 'new' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.match(app.$('#mw-receipt-match').textContent, /与本次验收一并保存/);
+  assert.equal(app.$('#mw-fields [name=name]').value, item.name);
+  assert.equal(app.$('#mw-fields [name=spec]').value, item.spec);
+  assert.equal(app.$('#mw-fields [name=remark]').disabled, false);
+  let sent;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/receipts' && method === 'POST') { sent = body; return { body: { request } }; }
+  };
+  fill({ quantity: '1', amount: '2', manufacturer: '新厂家', note: '本批次说明', remark: '物资档案说明' });
+  await submit();
+  assert.equal(sent.manufacturer, '新厂家'); assert.equal(sent.note, '本批次说明');
+  assert.equal(sent.newCatalog.remark, '物资档案说明'); assert.equal(sent.newCatalog.name, item.name);
+  assert.equal(sent.locationVersion, 0); assert.equal(row.name, '合成物资');
+  assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname.endsWith('/catalog')), false);
+});
+
+test('inventory has seven labeled columns, server totals and expandable legacy actions without exposing unescaped metadata', async () => {
+  const { app, row, click } = await materialApp();
+  const first = { ...row, firstMovementAt: '2026-10-01T01:02:03Z', totalQtyM: 19000, manufacturer: '厂家甲', note: '批次备注', catalogRemark: '档案<img src=x>', qtyM: 2000 };
+  const second = { ...first, manufacturer: '', note: '', qtyM: 3000 };
+  app.state.materialResponse = ({ url }) => {
+    if (url.pathname === '/api/materials/stock/batches' && url.searchParams.get('detail') === '1') {
+      return { body: { items: [first, second], total: 51, page: Number(url.searchParams.get('page')), pageSize: 50 } };
+    }
+  };
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  assert.deepEqual(app.$('#page').querySelectorAll('thead th').map(node => node.textContent), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
+  const body = app.$('#page tbody'), groups = body.querySelectorAll('.stock-group-head');
+  assert.equal(groups.length, 1); assert.match(groups[0].textContent, /该物资合计（全部仓库／区域）：19 件/);
+  assert.equal(groups[0].querySelector('td').getAttribute('data-label'), null);
+  const rows = body.children.filter(node => !node.classes.has('stock-group-head'));
+  for (const current of rows) assert.deepEqual(current.children.map(node => node.getAttribute('data-label')), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
+  assert.equal(rows[0].children[2].classes.has('num'), true);
+  assert.equal(rows[0].children[0].textContent, '2026-10-01 01:02:03');
+  assert.equal(rows[0].children[5].textContent, '厂家甲'); assert.equal(rows[0].children[6].textContent, '批次备注');
+  assert.equal(rows[1].children[5].textContent, '—'); assert.equal(rows[1].children[6].textContent, '—');
+  assert.match(rows[0].querySelector('details').textContent, /档案备注：档案<img src=x>.*领用按实际批次办理/);
+  assert.equal(app.$('#page img'), null);
+  for (const action of ['stock-issue', 'batches', 'movements', 'opening-list', 'adjustment', 'export']) assert.ok(app.$(`[data-mw=${action}]`));
+  await click('[data-mw=next]');
+  const lookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1);
+  assert.equal(lookup.url.searchParams.get('detail'), '1'); assert.equal(lookup.url.searchParams.get('page'), '2');
+  await click('[data-mw=stock-issue]');
+  const batchLookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1);
+  assert.equal(batchLookup.url.searchParams.has('detail'), false); assert.equal(batchLookup.url.searchParams.has('manufacturer'), false);
+  assert.equal(batchLookup.url.searchParams.get('catalogId'), '5'); assert.equal(batchLookup.url.searchParams.get('regionId'), '2');
+});
+
+test('adjustments and opening drafts send manufacturer and batch notes through their existing versioned writes', async () => {
+  for (const mode of ['adjustment', 'opening']) {
+    const { app, row, click, fill, submit } = await materialApp();
+    const opening = { id: 81, no: 'QC-81', kind: 'opening', title: '期初', date: '2026-10-22', version: 3, status: 'draft', items: [] };
+    let sent;
+    app.state.materialResponse = ({ url, method, body }) => {
+      if (url.pathname === '/api/materials/openings/81' && method === 'GET') return { body: opening };
+      if (method === 'POST' && ['/api/materials/stock/adjustments', '/api/materials/openings/81/items'].includes(url.pathname)) {
+        sent = body; return { body: mode === 'opening' ? opening : { movement: { id: 81 } } };
+      }
+    };
+    if (mode === 'adjustment') { await click({ dataset: { mw: 'page', page: 'inventory' } }); await click('[data-mw=adjustment]'); }
+    else { await click({ dataset: { mw: 'opening-detail', id: '81' } }); await click('[data-mw=opening-add-item]'); }
+    fill({ catalogId: '5', code: row.code, name: row.name, spec: row.spec, unit: row.unit, categoryId: '1', regionId: '2', warehouse: 'MAIN', quantity: '1', amount: '2', manufacturer: '填写厂家', note: '本批说明' });
+    if (mode === 'adjustment') fill({ reason: '盘点新增' }); else await click('[data-mw=position-read]');
+    await submit();
+    assert.equal(sent.manufacturer, '填写厂家'); assert.equal(sent.note, '本批说明');
+    if (mode === 'opening') { assert.equal(sent.version, 3); assert.equal(sent.locationVersion, 1); }
+    else { assert.equal(sent.reason, '盘点新增'); assert.ok(sent.requestIdempotencyKey); }
+  }
 });

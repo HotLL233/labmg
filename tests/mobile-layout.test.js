@@ -18,7 +18,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
 }, async t => {
   const { chromium } = require(browserModule);
   const executablePath = process.env.LABOS_TEST_BROWSER_PATH;
-  const cache = path.join(root, 'artifacts/cache/ui-t1-t2');
+  const cache = path.join(root, 'artifacts/cache', require('../package.json').version);
   fs.mkdirSync(cache, { recursive: true });
   const screenshots = fs.mkdtempSync(path.join(cache, 'mobile-layout-'));
   t.diagnostic('Layout screenshots: ' + screenshots);
@@ -56,6 +56,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     requests: [{ id: 101, no: 'SYNTHETIC-REQUEST-1', title: '合成申报单' + 'R'.repeat(80), creatorName: '合成人员', itemCount: 1, createdAt: '2026-10-22', status: 'draft', revision: 0 }],
     acceptance: [{ ...material, id: 201, requestId: 101, requestNo: 'SYNTHETIC-REQUEST-1', requestRevision: 1, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 1000, receiptStatus: 'pending' }],
     stock: [{ ...material, lastMovementAt: '2026-10-22' }],
+    'stock/batches': ['合成厂家甲', '合成厂家乙'].map((manufacturer, index) => ({ ...material, qtyM: (index + 1) * 1000,
+      manufacturer, note: '合成批次备注' + 'N'.repeat(80), catalogRemark: '合成档案备注', totalQtyM: 3000,
+      firstMovementAt: '2026-10-22T01:02:03Z', batch: 'SYNTHETIC-BATCH', expiryDate: '', location: '合成柜第2层', locationVersion: 1 })),
+    'stock/manufacturers': ['合成厂家甲', '合成厂家乙'],
     issues: [{ ...material, id: 301, no: 'SYNTHETIC-ISSUE-1', creatorName: '合成人员', purpose: '合成领用用途' + 'I'.repeat(80), snapshot: material, status: 'pending', createdAt: '2026-10-22', canIssue: true, canReject: true, canCancel: true }],
     openings: [{ id: 401, no: 'SYNTHETIC-OPENING-1', title: '合成期初单' + 'O'.repeat(80), date: '2026-10-22', kind: 'opening', status: 'draft', itemCount: 1, unitCount: 0, creatorName: '合成人员', createdAt: '2026-10-22' }]
   };
@@ -197,7 +201,20 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       await page.waitForFunction(() => document.querySelector('#mw-filters') && !document.querySelector('#page .mw-empty'));
       await checkLayout(`${width}px materials ${materialPage}`);
       await checkTables(`${width}px materials ${materialPage}`);
-      if (width === 390 && ['acceptance', 'inventory'].includes(materialPage)) await page.screenshot({ path: path.join(screenshots, `${width}-materials-${materialPage}.png`), fullPage: true });
+      if (materialPage === 'inventory') {
+        assert.deepEqual(await page.locator('#page .table thead th').allTextContents(), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
+        assert.equal(await page.locator('.stock-group-head').count(), 1, 'same material shares one total heading');
+        assert.match(await page.locator('.stock-group-head').textContent(), /全部仓库／区域.*3 瓶/);
+        assert.equal(await page.locator('#page td.num').count(), 2, 'manufacturer detail keeps two numeric quantity rows');
+        assert.deepEqual(await page.locator('#page tbody tr:not(.stock-group-head) td:nth-child(6)').allTextContents(), ['合成厂家甲', '合成厂家乙']);
+        const details = page.locator('.stock-detail').first();
+        await details.locator('summary').click();
+        assert.match(await details.textContent(), /合成柜第2层/);
+        assert.match(await details.textContent(), /合成档案备注/);
+        assert.equal(await details.locator('[data-mw="stock-issue"]').isVisible(), true, 'issue action remains reachable in batch details');
+        await checkLayout(`${width}px expanded stock detail`);
+      }
+      if ([390, 1440].includes(width) && ['acceptance', 'inventory'].includes(materialPage)) await page.screenshot({ path: path.join(screenshots, `${width}-materials-${materialPage}.png`), fullPage: true });
     }
     await page.locator('#page [data-mw="dictionaries"]').click();
     await page.locator('#mw-view').waitFor({ state: 'visible' });
