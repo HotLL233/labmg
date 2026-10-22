@@ -14,6 +14,14 @@ T3/T4已接入同套DOM：验收具名物资信息区块与同次选档／建档
 
 上述边界已修：按实际入库lot顺序分配、同一helper回放保存分配和旧缺省；下拉从实际中文表头定位。修后专项4/4、XLSX10/10，最终完整217项216通过／0失败／1本机Docker条件跳过（含真实Edge全站布局），43JS和两种审计8/0/0通过。最终UI专项t3-t4-4xZHAm为144断言／12图／0异常，VM54/54；全站布局mobile-layout-0TaBZF，root及代理已目视关键图。最终源码测试日志full-final.tap，专用PG17.11已核对路径／端口fast停止；未修改超时或放宽审计。后端33517e9、UI da3acbe分开提交，最终版本配置／文档与正式PG18及镜像交付继续进行。
 
+## 0.11.0 发布后补记：手机端页头折行修复（2026-10-22，未发布）
+
+发布复核时在390px截图`mobile-layout-0TaBZF/390-archives.png`发现页头「菜单」按钮被挤成竖排两字：`.header-heading`为flex容器，`.menu-toggle`未锁`white-space`且`flex-shrink`默认可压缩，操作区（日期、搜索、新建、退出）变多即被压塌。既有`checkLayout`只断言页面不横向溢出且控件留在视口内，**不检查标签是否折行**，故217项回归全绿仍带此缺陷——属测试盲区，不是回归。
+
+修法最小：`responsive.css`手机段加`.menu-toggle{white-space:nowrap;flex-shrink:0}`，未改压缩原文件`styles.css`。同时补断言：`checkLayout`新增`wrapped`判定，用`Range`逐行矩形按`top`去重，行数>1即判折行；只查`.layout>main>header`内控件，排除`#page`按钮——首版误纳入导致档案页8处卡片按钮（标题+可见记录数，本就多行）误报，已收窄。已做反向验证：临时移除修复后测试精确报`390px archives: control labels must stay on one line`并指出`#menu-toggle`/`菜单`；恢复后布局测试1/1通过、默认与严格审计8通过／0警告／0失败、43JS通过。
+
+同一轮补齐文档入口（此前为未提交状态）：`AGENTS.md`第4行要求涉及`src/public/`先读`docs/UI_施工卡.md`并在交付前跑`node scripts/ui-audit.js`；`docs/优化方案.md`阅读顺序加入施工卡、硬约束第9条补审计命令。未改版本号、未重打镜像或资产、未移动标签，本条属未发布补丁。
+
 ## 维护规则
 
 - 任务开始时阅读本文件及 [开发与版本管理](DEVELOPMENT.md)，以代码、Git 和实际验证结果核对当前状态。

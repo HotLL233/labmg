@@ -1,6 +1,7 @@
 # 项目维护约定
 
 - 开始任务前读取 `docs/MEMORY.md` 和 `docs/DEVELOPMENT.md`；需要历史背景时查看 `docs/HISTORY.md`，发布信息查看 `docs/CHANGELOG.md`。
+- **涉及界面（`src/public/`）的任务，动手前必须读 `docs/UI_施工卡.md`**：它把 `docs/UI_DESIGN_SYSTEM.md` 的设计规范转成了文件级、选择器级的施工指令，照卡施工即可，不要自行按规范做设计判断。交付前运行 `node scripts/ui-audit.js` 自查。
 - 记录与代码或 Git 状态冲突时先核实，并注明更正；不要将计划、静态分析或有限测试写成已实现、已修复或全面验证。
 - 完成有意义的工作后，更新 `docs/MEMORY.md` 的当前状态与新记忆，在 `docs/HISTORY.md` 追加开发事件，并将对外变更记入 `docs/CHANGELOG.md` 的“未发布”部分。
 - 保留历史需求、决策和验证记录；旧结论失效时标明被哪次决策或修复替代，不直接抹去历史。不记录密钥、真实密码、会话令牌或业务数据正文。

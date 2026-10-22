@@ -798,3 +798,11 @@ UI T1/T2最终回归：npm test共209项，208通过、0失败、1本机Docker�
 本机artifacts/releases/0.11.0/完整12件共489108457字节，11摘要、5源附件与冻结ZIP逐字节一致；双TAR各含labos:0.11.0、PostgreSQL18、Caddy三镜像，六份config架构／摘要通过。blob-reuse-download-sR8B5X/report.json为passed：ARM64复用经核验旧blob 238232155字节、实际下载4205989字节；amd64复用241501948字节、实际下载4202756字节，各53条目，均经官方整包大小／SHA256一致后创建正式TAR。旧包未改，不能称双包重新全量网络下载。
 
 Release420498064已公开为prerelease，github-release-verification.json为passed：12件官方元数据与11摘要一致，10非TAR附件共965609字节通过官方API匿名完整下载。TAR完整文件由本机独立报告证明，不称匿名全量TAR或浏览器Release页验收。保留冻结附件及所有早期阶段／失败记录，后补文档不重打镜像、ZIP、附件或移动标签；未升级NAS、操作真手机／USB或完成长期容量验收。
+
+## 2026-10-22：0.11.0 发布后手机端页头折行修复（未发布补丁）
+
+发布复核逐张目视`artifacts/cache/0.11.0/mobile-layout-0TaBZF/`的12张截图，发现390px档案页与库存页页头「菜单」按钮被挤成竖排两字，其余尺寸与页面正常；同批次`390-materials-inventory.png`中页头出现在页面中部、`768-dashboard.png`中侧栏只到一屏即断，经核为`fullPage:true`截图时sticky／fixed元素按当前视口渲染的伪影，非布局缺陷（判据：同批无滚动页面位置正常），未按bug处理。
+
+根因为`.header-heading`为flex容器而`.menu-toggle`未锁`white-space`且`flex-shrink`默认可压缩，操作区增多即压塌；既有`checkLayout`只断言页面不横向溢出与控件留在视口内，不校验标签折行，故全量217项通过仍带此缺陷。修复在`responsive.css`手机段追加`.menu-toggle{white-space:nowrap;flex-shrink:0}`，未改压缩原文件`styles.css`；`checkLayout`新增`wrapped`行盒断言（`Range`逐行矩形按`top`去重，行数>1判折行），范围限定`.layout>main>header`，排除`#page`内本就多行的卡片按钮（首版误纳入导致档案页8处误报）。
+
+反向验证：临时移除修复后测试报`390px archives: control labels must stay on one line`并定位`#menu-toggle`／`菜单`；恢复后真实浏览器布局测试1/1通过（17935ms）、默认与严格UI审计8通过／0警告／0失败、43份JS语法通过。同轮补齐`AGENTS.md`第4行的UI施工卡入口与审计要求、`docs/优化方案.md`阅读顺序第4项及硬约束第9条审计命令（此前为工作区未提交状态）。未改版本号、未重打镜像或发布资产、未移动标签。
