@@ -3,6 +3,10 @@
 !package-lock.json
 !src
 !src/**
+!migrations
+!migrations/*.sql
+!scripts
+!scripts/migrate.js
 !docs
 !docs/licenses
 !docs/licenses/**

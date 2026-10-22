@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.10.0（开发中，未发布）**，在0.9.4基线上进行申报与验收解耦及加法数据库迁移。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署目前仍取[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。0.9.4的四门禁和12件交付核验保持原范围，不作为0.10.0验证，实际状态见[版本说明](CHANGELOG.md)。
+本源码版本为 **0.10.1（开发中，未发布）**，在0.9.4基线上进行申报与验收解耦及加法数据库迁移。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署目前仍取[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。0.9.4的四门禁和12件交付核验保持原范围，不作为0.10.1验证，实际状态见[版本说明](CHANGELOG.md)。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -53,6 +53,12 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.10.1：镜像迁移文件打包修正（开发中，2026-10-22）
+
+基线为冻结0.10.0源码df333454，分支feature/v0.10.1-docker-migration-context，缓存与交付分别使用artifacts/cache/0.10.1/和artifacts/releases/0.10.1/。0.10.0构建39737147202／job119685406558的真实PG18.6回归203/203及42JS通过，但Docker上下文白名单遗漏migrations与scripts/migrate.js，双架构COPY失败，未生成本版镜像。保留v0.10.0及未公开草稿Release420395938，不移动标签或覆盖已冻结附件。
+
+0.10.1只补Dockerfile.dockerignore中迁移SQL及CLI的最小白名单，同步版本及说明；业务源码、SQL与测试保持0.10.0原字节。正式PG18、双架构构建和四项发布门禁将重新运行，不能把失败构建的回归结果称为0.10.1交付通过。本轮未操作NAS或真实打印设备。
 
 ## 0.10.0：申报模糊、验收完善（开发中，2026-10-22）
 

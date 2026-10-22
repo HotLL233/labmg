@@ -749,3 +749,13 @@ B3加法字段同时触及严格备份，因此升schema6并保留严格schema1�
 本机完整full-local-tests.txt为208项207通过、0失败、1本机Docker条件跳过，包含已安装Edge的全站布局；check-final.txt为42JS。独立后端最终49/49、VM50/50、迁移3/3；PG为隔离17.11，不称PG18。物资后端初次权限fixture比较、旧错误文案断言失败日志保留，修正测试后通过。B4独立Edge94项、6图、0异常，material-ui/b4-m3OnqB/report.json绑定前端SHA；IPqa85与w3CkvT两次helper异步等待失败保留，只修等待未为helper改产品，代理目视6图且root另看2图。真实API事务在后端测试单独验证，浏览器mock不能替代NAS或真实手机。
 
 独立迁移集成审查未发现阻断项，旧fixture与v0.9.4 SCHEMA原字节一致。helper离线总自检30CJS、3workflow、30旧helper摘要及12附件／11摘要／7输入通过。本版尚未冻结或正式PG18／镜像门禁，不改main、旧发布或NAS。
+
+
+## 2026-10-22：0.10.0构建失败与0.10.1修正
+
+0.10.0冻结源码df333454e0d0f899b7e0f8509f3ebd615f16e544，注解标签对象52e333f301c2819fe664f189654f5a99bf994256，feature与develop已同步。构建39737147202／job119685406558原日志确认真实PG18.6回归203/203、42JS通过，双架构COPY失败于Dockerfile.dockerignore遗漏migrations与scripts/migrate.js；未生成镜像，7附件草稿Release420395938保持未公开。原日志actions-39737147202-job-119685406558-failed.log保留在0.10.0缓存，不抹去失败或移动标签。
+
+从df333454建立feature/v0.10.1-docker-migration-context；仅添加最小迁移SQL／CLI白名单，同步版本与说明，业务／SQL／测试不变。新helper独立隔离准备，冻结前检查额外覆盖实际Docker COPY上下文；源码打包使用干净detached worktree，避免混入外部未跟踪的.workbuddy/和两份UI草稿。0.10.1正式构建与四门禁仍待执行，未升级NAS。
+
+
+0.10.1冻结前补充：42JS与Compose／源码打包／离线打包受影响测试3/3通过；独立静态审查确认7个COPY来源共60文件获准，84个敏感／额外路径探针被排除，src和SQL保持冻结0.10.0原字节。该白名单审查只针对当前固定规则，不等同真实BuildKit构建，最终以本版CI和门禁为准。
