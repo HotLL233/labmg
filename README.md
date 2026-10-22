@@ -1,8 +1,14 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.9.4（开发中，未发布）**。打印页默认折叠纸张设置和长说明，让标签预览、范围与打印按钮先显示；完整YML由初始化器自动识别一个主局域网IPv4并生成HTTPS配置。0.9.4镜像和离线包尚未交付，当前正式部署仍从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载其同版本附件，不能与当前`deploy/`的0.9.4文件混用。实际状态见[版本说明](docs/CHANGELOG.md)。
+本源码版本：**0.9.4（已公开验证版）**。打印页默认折叠纸张设置和长说明，让标签预览、范围与打印按钮先显示；完整YML由初始化器自动识别一个主局域网IPv4并生成HTTPS配置。正式部署从[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)下载同版本镜像、YML与附件，在线／本地两份YML任选一份。实际状态见[版本说明](docs/CHANGELOG.md)。
 
-0.9.3冻结于`9260b1e`（标签对象`e5b068a`），真实CI回归189/189与39份JS检查通过，但容器Gate1中的新增检查脚本漏声明uid/gid，测试在功能断言前失败，保留为未公开候选，不移动旧标签或作为正式部署入口。0.9.4修正该测试声明，交付仍须通过本轮门禁；打印界面源码保持不变，沿用0.9.3同文件的188项浏览器证据，没有将其写作0.9.4新跑结果。当前缓存集中`artifacts/cache/0.9.4/`，交付目标为`artifacts/releases/0.9.4/`，不改旧版本产物。
+0.9.3冻结于`9260b1e`（标签对象`e5b068a`），真实CI回归189/189与39份JS检查通过，但容器Gate1中的新增检查脚本漏声明uid/gid，测试在功能断言前失败，保留为未公开候选，不移动旧标签或作为正式部署入口。0.9.4修正该测试声明，当时交付仍待本轮门禁（最终结果见下文）；打印界面源码保持不变，沿用0.9.3同文件的188项浏览器证据，没有将其写作0.9.4新跑结果。当前缓存集中`artifacts/cache/0.9.4/`，完整交付保存在`artifacts/releases/0.9.4/`，不改旧版本产物。
+
+0.9.4随后冻结于`6cf1832`／`v0.9.4`。真实构建`39721357612`／job`119635298190`通过PG18.6回归189/189及39份JS检查，amd64／arm64索引为`sha256:bef066e0ca2a56dcf90254dd0d52d84c6edd0272e177de4f6aba35824e290b9a`。早期验证`39721760553`／运维提交`5e7884d`的Gate1在线、Gate2同次PG六项和Gate3双架构离线检查通过；Gate4在初始配置后出现`ERR_ASSERTION`，清理通过，该次未通过全部门禁。该失败阶段由下段最终结果补充，记录继续保留。
+
+最终正式验证`39723219247`／运维提交`79703f3af60662749a058c0721beb8a447696d3d`四门禁全部通过。官方证据、三份原TAP各1项通过／root初始化标记各1、同次PG六项，以及自动地址、旧`0.0.0.0`、非法输入、显式覆盖和原CA严格可信空SNI均经独立复核。前两轮Gate4失败来自未提交缓存helper错误限定只能有一条`default_sni`，实际两条均为相同主IP；仅修正helper为非空且逐条严格匹配，并补正反例，产品及冻结源码未改。门禁结果不替代手机、原生系统窗口或USB验收。
+
+[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)随后已公开为prerelease（420303017）。本机完整12件共488932977字节，11条摘要及5份源附件与冻结ZIP逐字节匹配，双TAR各含三个镜像、六份config核对通过。两架构分别59／58段下载后通过官方全包SHA256，少量网络重试记录保留。发布后`github-release-verification.json`为passed：12件官方资产元数据与11摘要一致，10个非TAR附件全部经官方API匿名完整下载通过；双TAR完整下载另由本机报告证明，不代表匿名全量TAR或浏览器Release界面验收。源码附件保留冻结快照，后补事实见当前文档，不重打资产或移动标签。
 
 0.9.2真实PG18.6回归179/179、37JS、四项容器门禁通过，最终设计器真实Edge238项、4份PDF／4图通过。12件完整交付共488902906字节已保存在`artifacts/releases/0.9.2/`，11条摘要、5份冻结源附件及双TAR三镜像／六config核对通过；包含两份YML、amd64／arm64三镜像TAR和携带两份留白JSON的源码包。公开后12件元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过；不代表匿名全量TAR或浏览器Release界面验收。附件文档保留源码冻结快照，发布后补记见当前仓库文档。上一0.9.1的12件、PG18.6回归177/177、Edge286项及全部旧版验证保持原有范围，不作为0.9.2重复测试。浏览器不能读取驱动纸型或自动指定USB打印机，驱动纸张和实际送料仍须试打。操作见[标签打印说明](docs/LABEL_PRINTING.md)。
 
@@ -52,12 +58,12 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前源码配置面向未发布的0.9.4，须配套同版镜像；以下0.9.2链接保留为上一已发布版本的部署入口：
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。从0.9.4 Release下载同版本配套文件；在线应用镜像为`ghcr.io/hotll233/labmg:0.9.4`，本地三镜像包使用`labos:0.9.4`：
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.9.2 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.9.2 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.9.4 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.9.4 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
 0.9.4的[在线YML](deploy/docker-compose.yml)与[本地YML](deploy/docker-compose.local.yml)默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 

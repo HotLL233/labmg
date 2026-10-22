@@ -1,8 +1,14 @@
 # 群晖 Docker 部署
 
-当前源码为**0.9.4（开发中，未发布）**，继续PostgreSQL18。本页当前步骤面向0.9.4源码配置；该版镜像和TAR尚未交付，不能直接用未发布配置更新现有项目。正式部署暂从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载其同版本附件，不混用0.9.2镜像与当前0.9.4 YML。发布附件内指南保留源码冻结快照，后补事实以当前仓库文档及版本记录为准。
+当前源码为**0.9.4（已公开验证版）**，继续PostgreSQL18。本页当前步骤面向0.9.4；正式部署从[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)下载同版本配套镜像、YML和附件，不混用不同版本镜像与配置。发布附件内指南保留源码冻结快照，后补事实以当前仓库文档及版本记录为准。
 
-0.9.3虽通过真实CI回归189/189及39份JS检查，容器Gate1因新增测试脚本漏声明uid/gid而在功能断言前失败，保留为未公开冻结候选；0.9.4修正测试，交付仍须通过本轮门禁，不移动旧标签。当前最新公开部署版仍为0.9.2。
+0.9.3虽通过真实CI回归189/189及39份JS检查，容器Gate1因新增测试脚本漏声明uid/gid而在功能断言前失败，保留为未公开冻结候选；0.9.4修正测试，当时交付仍待本轮门禁（最终结果见下文），不移动旧标签。该阶段最新公开部署版为0.9.2，已由下方0.9.4发布结果补充。
+
+0.9.4已冻结于`6cf1832`／`v0.9.4`，真实构建`39721357612`／job`119635298190`通过PG18.6回归189/189、39份JS及amd64／arm64镜像构建。早期验证`39721760553`／运维提交`5e7884d`的在线、同次PG六项、双架构离线三门禁通过；第四项HTTPS门禁在初始配置后出现`ERR_ASSERTION`，清理通过。该失败阶段由下段结果补充，仍保留原记录。
+
+最终验证`39723219247`／运维提交`79703f3af60662749a058c0721beb8a447696d3d`四门禁全部通过；三份原TAP各1项通过及root初始化标记各1、同次PG六项、自动／旧零地址／非法输入／显式覆盖及原CA空SNI证据已独立复核。此前两轮Gate4失败是缓存helper错误限制`default_sni`条数，修正为非空且每条匹配同一主IP并补正反例，产品及冻结源码未改。不将云端容器门禁当作实际群晖或手机验收。
+
+0.9.4随后已公开为prerelease（Release420303017）。本机`artifacts/releases/0.9.4/`完整12件共488932977字节，11条摘要及5份源附件与冻结ZIP逐字节匹配，双TAR各三镜像／六config通过。两架构59／58段完整下载均通过官方全包SHA256，网络重试记录保留。发布后12件官方资产元数据、11摘要及10个非TAR附件的匿名完整下载核验均通过；TAR由本机全量报告另证，不称匿名全量TAR或浏览器Release界面验收。
 
 0.9.2已交付在线／本地两份完整YML、amd64／arm64三镜像TAR等12件共488902906字节，本机全部保存并通过11条摘要及5份冻结源附件核对；双TAR三镜像及六config核对通过。公开后12件元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过，TAR另有本机完整下载核验。该版真实PG18.6回归179/179、37JS和四项容器门禁通过，ARM64为QEMU。旧0.9.1及更早验证保持其原有范围。同一PG18项目更新保留原runtime/、https/、项目名及UID/GID，不提供PG17／SQLite迁移，旧版产物保持原样。
 
@@ -14,8 +20,8 @@
 
 | 方式 | 文件 | 使用条件 |
 | --- | --- | --- |
-| 在线拉取 | [开发中 docker-compose.yml](../deploy/docker-compose.yml) | 配套0.9.4镜像交付后，应用从GHCR拉取，数据库与代理从官方镜像仓库拉取 |
-| 本地镜像 | [开发中 docker-compose.local.yml](../deploy/docker-compose.local.yml) | 配套0.9.4 TAR交付并导入全部三个镜像后使用，所有服务禁止拉取 |
+| 在线拉取 | [0.9.4 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.yml) | 应用从GHCR拉取，数据库与代理从官方镜像仓库拉取 |
+| 本地镜像 | [0.9.4 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.9.4/docker-compose.local.yml) | 导入本架构TAR内全部三个镜像后使用，所有服务禁止拉取 |
 
 两份文件都包含应用、PostgreSQL 18、一次性初始化和 HTTPS 代理四个服务。0.9.4只有`labos-init`使用宿主机网络，自动选择一个主局域网IPv4并生成`runtime/https-config/Caddyfile`，代理只读加载；应用和代理仍在Compose网络。**不用手写Caddyfile，不用合并HTTPS YML，也不要求创建.env。** 在线与本地版不要一起启动；在Container Manager项目中选择其中一份。如果界面固定要求文件名docker-compose.yml，可复制为此名称。上一已发布版附件仍见[0.9.2在线YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.yml)和[本地YML](https://github.com/HotLL233/labmg/releases/download/v0.9.2/docker-compose.local.yml)，其手填IP步骤保留在该版指南中。
 
@@ -23,11 +29,11 @@
 
 1. 在群晖建立新的项目目录，将所选 YML 放入其中；本轮使用空的 PostgreSQL 18 数据目录。在 File Station 先创建 YML 旁的 `runtime/`、`https/` 两个父目录，避免 DSM 拒绝不存在的 bind 路径；已有部署保留原目录内容。
 2. 默认保留`labos-init`中的`LABOS_HTTPS_HOST=auto`，无需手填IP；空值、旧`CHANGE_ME`及`0.0.0.0`也按自动识别处理。识别排除回环、Docker／桥接、VPN及链路本地地址，优先按默认路由选主接口。无可用地址或多网卡仍无法确定时初始化明确报错；此时在该服务中指定实际IPv4或主机名，不填协议、端口、路径。已有`.env`或项目环境可能覆盖默认值。建议保留固定IP；默认HTTP 3000、HTTPS 8443，冲突时修改端口映射。
-3. 取得实际交付的同版本配套镜像后，在线版拉取；本地版导入对应amd64或arm64 TAR，须包含`labos:0.9.4`、`postgres:18-bookworm`、`caddy:2.11.7-alpine`三者。先核对随包SHA256SUMS及群晖架构；当前尚无0.9.4已发布TAR，不能把下列包名当作本机已有文件。
+3. 在线版拉取同版本镜像；本地版从0.9.4 Release下载对应amd64或arm64 TAR，核对随包SHA256SUMS及群晖架构后导入。每包含`labos:0.9.4`、`postgres:18-bookworm`、`caddy:2.11.7-alpine`三个镜像，不能仅导入应用；本机完整下载及结构核验已通过，实际群晖启动仍须现场确认。
 4. 启动项目。`labos-init`日志显示`HTTPS host: <实际地址> (auto, interface <网卡>)`及配置路径，正常退出0后数据库与应用启动，代理读取生成配置。选择的是一个地址，并非为所有网卡IP签发证书。空数据库首次打开网页设置管理员账号和密码。
 5. 按[手机HTTPS与扫码](SCANNING_HTTPS.md)将本项目根证书安装到手机并信任，通过日志所示实际地址的`https://<地址>:8443`使用实时相机；不能打开`https://0.0.0.0:8443`。
 
-以下命令仅在取得0.9.4同版本配套镜像后使用，在 **NAS SSH的项目目录**执行，在线版示例：
+使用0.9.4同版本配套文件，在 **NAS SSH的项目目录**执行，在线版示例：
 
 ~~~text
 docker compose -f docker-compose.yml config --quiet

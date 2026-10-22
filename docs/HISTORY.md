@@ -710,3 +710,24 @@ Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check
 按旧标签／归档不可改写约定，从9260b1e新建feature/v0.9.4-https-deployment-verification，补一行子进程环境UID/GID声明，同步版本及隔离缓存0.9.4。产品源码不变，既有Edge188项等只沿用同文件证据；本轮正式PG18、四门禁及双架构TAR／12件交付重新执行。0.9.2现场HTTPS已恢复的结果保持，未向NAS部署失败候选。
 
 0.9.4冻结前本机受影响合跑42项中41通过、0失败、1Docker条件跳过，两个打包回归通过；39JS语法通过。本机无运行Docker，子进程修正的真实Linux执行继续由本版容器门禁验证，不以本机条件跳过代替通过。
+
+
+0.9.4源码已冻结6cf18324b08a9876f8f04075cceb3d68c1f63660／v0.9.4注解ec34dbe，正式ZIP及23src按Git clean规则核验通过。冻结后发现本轮脚本仅匹配LF，未在CRLF的CHANGELOG未发布段插入094条目；这是发布记录遗漏，采用后补文档修正，不为文档虚构新业务版本，不改冻结源码／标签／归档。094的冻结DEVELOPMENT已明确本版章节，发布说明需标明其真实来源，不假称冻结CHANGELOG已含094条目。
+
+## 2026-10-22：0.9.4正式构建、HTTPS验证断言修正与四门禁通过
+
+构建39721357612／job119635298190原日志231539字节、SHA256 c272a459c05828afd062af5516cfdbcff37325a389e32c8d461331cbfe486678，经独立代理复核真实PostgreSQL18.6回归189/189、0失败／跳过／取消、39JS与amd64／arm64索引bef066e0…通过。
+
+首轮验证39721760553／运维5e7884d、第二轮39722760484／运维89c9207均通过在线、同次PG六项和两架构离线门禁，但HTTPS专项在生成配置后ERR_ASSERTION，清理通过，未上传缺失的最终发布附件。首轮官方诊断artifact12401182349／28465字节／SHA dd4bf4ff781527c4afa12fee8a5b9a982b15709613adac2aaaf1f5ace138b872，第二轮12401956802／28710字节／SHA 40f9657fa27a522f2dc9c45fc451f83eed8efc72f32b14713b2612b69314b9bb保留。首报告不能唯一定因；仅为ignored helper补安全阶段与断言行号后，第二轮确认host-route与生成配置通过，Caddy实际生成两个相同主IP的default_sni策略，helper错误要求策略只能有一条。仅修改本版ignored helper为至少一条且逐条严格匹配主机名，保留所有严格TLS／空SNI／CA／生命周期断言；含重复正确、混合错误及空策略的纯例通过，独立代理复核7例一致。不修改冻结产品源码、标签、ZIP、镜像或旧版本。
+
+第三轮验证39723219247／运维79703f3af60662749a058c0721beb8a447696d3d四门禁通过。官方小证据artifact12402236448／14244字节／SHA f1d5900c1a31611bfb3957981f019d7cdb5468410f0244124155070caa5b7fca与诊断12402256445／29212字节／SHA ebb17d38e6a4a714911add5cccef08e6dd24c93f259b2931075ed6f968ca4f82严格核官方来源后导入。原三TAP各1通过且root标记各1，PG六项属于同次在线执行，不另计生命周期；自动主IP10.1.0.138的严格空SNI请求、旧0.0.0.0自动、非法URL拒绝且配置保留、显式回环覆盖及CA／账号重建保留均通过，ARM64为QEMU。独立报告independent-raw-tap-verification-39723219247.json为passed；本机双TAR随后开始完整下载，未把runner中的包写成本机已有。
+
+冻结CHANGELOG遗漏094声明的文档问题，不采用虚构095或移动094标签处理。发布helper只对本版允许唯一且精确的冻结DEVELOPMENT章节作为来源，标明冻结阶段及完整Git文件UTF8 SHA 59d97296e785e69b061dffc8f0fd2ed8133de937801729ce5461873f50547d41；正常版本节／明确未发布节仍优先，两处均缺、错版本、重复／空章节与已有CHANGELOG声明冲突继续拒绝。root总自检通过29CJS、3内联、30旧helper摘要保护及原交付门禁；冻结记录内容不伪称已补入冻结CHANGELOG。
+
+## 2026-10-22：0.9.4完整本机交付与公开发布
+
+并行分段下载最终59／58段通过，报告range-download-2c9f0b9fca4c84427866/attempt-9Z4HjS/report.json保留网络重试；两包经完整官方大小／SHA256核对后才原子创建正式TAR。amd64为245686272字节／53736ebef070713748132f327f9a3d01e0ef84d876b080dfd3f41d25c47a04f4，arm64为242420224字节／c5e87587d9c7a104b7adc459b16082c056e61be437d4c325cb4f243be8ec9d93，不改旧包。local-delivery-verification.json确认12件488932977字节、11摘要及5份独立源附件与冻结ZIP逐字节一致。root首次误将有先后依赖的本机核验并行启动，TAR内容工具因前置报告尚未生成退出；按顺序执行后local-image-archive-verification.json通过，双TAR各应用／PG18／Caddy三镜像和六份Linux config架构／摘要通过。该工具只读取TAR头及config，未逐层读取正文或在本机运行Docker。
+
+门禁、草稿与本机完整文件核对后，Release420303017已公开为prerelease，地址https://github.com/HotLL233/labmg/releases/tag/v0.9.4，12附件与冻结6cf18324／v0.9.4一致。公开后`github-release-verification.json`为passed：12件官方元数据与11摘要一致，10个非TAR附件共826481字节经官方API匿名完整下载通过；两TAR完整下载由本机独立报告证明，不称匿名全量TAR或浏览器Release界面验收。
+
+后补统一CHANGELOG的真实0.9.4／2026-10-22条目、当前MEMORY和DEVELOPMENT、README与三份指南；保留冻结前／失败阶段及全部旧记录。此后补仅文档，不虚构0.9.5，不重打094源码ZIP、镜像、发布附件或移动标签；附件指南保留冻结时快照，发布说明明确冻结开发记录来源。现有NAS仍运行0.9.2且本轮早期HTTPS已恢复，未部署0.9.4；真手机相机、原生打印窗口、USB及长期容量未验。
