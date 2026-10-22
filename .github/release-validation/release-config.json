@@ -1,0 +1,9 @@
+{
+  "version": "0.9.4",
+  "commit": "6cf18324b08a9876f8f04075cceb3d68c1f63660",
+  "indexDigest": "sha256:bef066e0ca2a56dcf90254dd0d52d84c6edd0272e177de4f6aba35824e290b9a",
+  "baseParent": "9260b1e8e73e5689c10a6a3f13070ff6bc196803",
+  "featureBranch": "feature/v0.9.4-https-deployment-verification",
+  "status": "source-frozen",
+  "buildRunId": 39721357612
+}
