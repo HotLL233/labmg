@@ -116,35 +116,46 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (!result) error(400, '物资信息不存在');
     return result;
   }
+  async function activeCatalog(id) {
+    const row = await catalog(id);
+    if (row.merged_into !== null) conflict('该物资信息已合并，请选择有效物资信息');
+    return row;
+  }
   async function catalogView(row) {
     return { id: row.id, code: row.code, name: row.name, spec: row.spec, unit: row.unit,
+      remark: row.remark, origin: row.origin,
       trackingMode: row.tracking_mode, categoryId: row.category_id, categoryName: row.category_name ?? (await dictionary('material_categories', row.category_id, '分类')).name, version: row.version };
   }
   const normalized = value => String(value ?? '').normalize('NFKC').trim().toLowerCase();
-  const sameMaterial = (left, right) => ['name', 'spec', 'unit'].every(field => normalized(left[field]) === normalized(right[field]));
-  const materialKey = row => JSON.stringify([row.name, row.spec, row.unit].map(normalized));
+  const identityNormalized = value => normalized(value).replace(/\s+/g, ' ');
+  const identityText = (value, label, maximum = 200) => text(text(value, label, maximum).normalize('NFKC').replace(/\s+/g, ' '), label, maximum);
+  const sameMaterial = (left, right) => ['name', 'spec', 'unit'].every(field => identityNormalized(left[field]) === identityNormalized(right[field]));
+  const materialKey = row => JSON.stringify([row.name, row.spec, row.unit].map(identityNormalized));
   function indexRows(rows, key) {
     const result = new Map();
     for (const row of rows) { const value = key(row); if (!result.has(value)) result.set(value, []); result.get(value).push(row); }
     return result;
   }
   function catalogIndex(rows) {
-    return { codes: indexRows(rows, row => normalized(row.code)), identities: indexRows(rows, materialKey),
-      names: new Set(rows.map(row => normalized(row.name))), specs: new Set(rows.map(row => JSON.stringify([row.name, row.spec].map(normalized)))) };
+    const active = rows.filter(row => row.merged_into === null);
+    return { codes: indexRows(rows, row => normalized(row.code)), identities: indexRows(active, materialKey),
+      names: new Set(active.map(row => identityNormalized(row.name))), specs: new Set(active.map(row => JSON.stringify([row.name, row.spec].map(identityNormalized)))) };
   }
   async function catalogInput(input) {
     const code = text(input.code ?? '', '物资编码', 64, true).normalize('NFKC').toUpperCase();
     if (code.length > 64 || (code && !/^[A-Z0-9][A-Z0-9._/-]*$/.test(code))) error(400, '编码最多64位，须由英文字母、数字及 . _ / - 组成');
-    return { code, name: text(input.name, '物资名称'), spec: text(input.spec, '规格'), unit: text(input.unit, '单位', 30),
+    return { code, name: identityText(input.name, '物资名称'), spec: identityText(input.spec, '规格'), unit: identityText(input.unit, '单位', 30),
+      remark: text(input.remark ?? '', '物资备注', 2000, true),
       category_id: (await dictionary('material_categories', input.categoryId, '分类')).id,
       tracking_mode: trackingMode(input.trackingMode ?? 'quantity') };
   }
-  async function createCatalog(data, user, reuse = false, index = null) {
+  async function createCatalog(data, user, reuse = false, index = null, origin = 'manual') {
     index ??= catalogIndex(await all('SELECT * FROM material_catalog ORDER BY id'));
     const coded = data.code ? index.codes.get(normalized(data.code)) || [] : [];
     if (coded.length > 1) conflict('物资编码规范化后有歧义，请联系管理员核对');
     const existing = coded[0];
     if (existing) {
+      if (existing.merged_into !== null) conflict('该编码已用于已合并物资，请选择有效物资信息');
       if (reuse && sameMaterial(existing, data) && existing.category_id === data.category_id && existing.tracking_mode === data.tracking_mode) return { row: existing, created: false };
       conflict('物资编码已存在或信息冲突，请选择已有物资信息');
     }
@@ -154,8 +165,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       conflict('相同名称、规格和单位的物资信息已存在，分类或管理方式冲突，请选择已有记录');
     }
     data = { ...data, code: data.code || 'MAT-' + crypto.randomBytes(8).toString('hex').toUpperCase() };
-    const inserted = await run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode) VALUES(?,?,?,?,?,?,?)',
-      data.code, data.name, data.spec, data.unit, data.category_id, user.id, data.tracking_mode);
+    const inserted = await run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode,remark,origin) VALUES(?,?,?,?,?,?,?,?,?)',
+      data.code, data.name, data.spec, data.unit, data.category_id, user.id, data.tracking_mode, data.remark, origin);
     await log(user, 'CREATE', 'material_catalog', inserted.lastInsertRowid, data.code);
     const row = await catalog(inserted.lastInsertRowid);
     index.codes.set(normalized(row.code), [row]);
@@ -173,7 +184,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (store !== null) { conditions.push('warehouse=?'); args.push(store); }
     const local = scoped ? new Map((await all(`SELECT catalog_id,COALESCE(SUM(qty_m),0) AS quantity FROM material_stock_movements
       WHERE ${conditions.join(' AND ')} GROUP BY catalog_id`, ...args)).map(row => [row.catalog_id, row.quantity])) : totals;
-    let rows = await mapRows(await all(`SELECT c.*,d.name AS category_name FROM material_catalog c JOIN material_categories d ON d.id=c.category_id`), async row => ({
+    let rows = await mapRows(await all(`SELECT c.*,d.name AS category_name FROM material_catalog c JOIN material_categories d ON d.id=c.category_id WHERE c.merged_into IS NULL`), async row => ({
       ...await catalogView(row), stockQtyM: totals.get(row.id) || 0, ...(scoped ? { localQtyM: local.get(row.id) || 0 } : {})
     }));
     if (url.searchParams.has('categoryId')) {
@@ -377,29 +388,18 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return order.status === 'submitted' ? text(input.reason, '修订原因', 1000) : '';
   }
   async function lineInput(input, old = {}) {
-    let catalogId = input.catalogId === undefined ? old.catalog_id : input.catalogId === null ? null : integer(input.catalogId, '物资信息');
-    let master = catalogId ? (await catalog(catalogId)) : null;
-    if (!master) {
-      const identity = { name: text(input.name ?? old.name, '物资名称'), spec: text(input.spec ?? old.spec, '规格'), unit: text(input.unit ?? old.unit, '单位', 30) };
-      const code = text(input.code ?? old.code ?? '', '编码', 64, true).normalize('NFKC').toUpperCase();
-      const rows = await all('SELECT * FROM material_catalog ORDER BY id');
-      const coded = code ? rows.find(row => normalized(row.code) === normalized(code)) : null;
-      if (coded && !sameMaterial(coded, identity)) conflict('该编码对应的名称、规格或单位不同，请核对并选择已有物资');
-      const matches = rows.filter(row => sameMaterial(row, identity));
-      if (!coded && matches.length > 1) conflict('存在多个相同物资信息，请明确选择编码');
-      master = coded || matches[0] || null;
-      catalogId = master?.id || null;
-    }
+    const catalogId = input.catalogId === undefined ? old.catalog_id : input.catalogId === null ? null : integer(input.catalogId, '物资信息');
+    const master = catalogId ? await (input.catalogId === undefined ? catalog(catalogId) : activeCatalog(catalogId)) : null;
     const categoryId = input.categoryId === undefined ? old.category_id ?? master?.category_id : integer(input.categoryId, '分类');
     const regionId = input.regionId === undefined ? old.region_id : integer(input.regionId, '区域');
     (await dictionary('material_categories', categoryId, '分类'));
     (await dictionary('material_regions', regionId, '区域'));
     return {
       catalog_id: catalogId || null,
-      code: master?.code ?? (input.code === undefined ? old.code || '' : text(input.code, '编码', 64, true).toUpperCase()),
-      name: master?.name ?? text(input.name ?? old.name, '物资名称'),
-      spec: master?.spec ?? text(input.spec ?? old.spec, '规格'),
-      unit: master?.unit ?? text(input.unit ?? old.unit, '单位', 30),
+      code: master?.code ?? (input.code === undefined ? old.code || '' : text(input.code, '编码', 64, true).normalize('NFKC').toUpperCase()),
+      name: master?.name ?? (input.name === undefined && old.name !== undefined ? old.name : identityText(input.name, '物资名称')),
+      spec: master?.spec ?? (input.spec === undefined && old.spec !== undefined ? old.spec : identityText(input.spec, '规格')),
+      unit: master?.unit ?? (input.unit === undefined && old.unit !== undefined ? old.unit : identityText(input.unit, '单位', 30)),
       category_id: categoryId, region_id: regionId,
       warehouse: warehouse(input.warehouse ?? old.warehouse),
       qty_m: unitQuantity(master || { tracking_mode: 'quantity' }, input.quantity === undefined && old.qty_m !== undefined ? old.qty_m : decimal(input.quantity, 3, '申报数量'), '申报数量'),
@@ -467,7 +467,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return (await movementView(movement, true));
   }
   async function stockIdentity(input) {
-    return { catalog_id: (await catalog(input.catalogId)).id, region_id: (await dictionary('material_regions', input.regionId, '区域')).id,
+    return { catalog_id: (await activeCatalog(input.catalogId)).id, region_id: (await dictionary('material_regions', input.regionId, '区域')).id,
       warehouse: warehouse(input.warehouse), batch: text(input.batch ?? '', '批号', 100, true),
       expiry_date: date(input.expiryDate, '有效期', true) };
   }
@@ -796,11 +796,28 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     requireMaterial(user, 'materials.acceptance.write');
     return (await idempotent(user, route, input, async () => {
       const original = originalId ? (await checkedReceipt(originalId)) : null;
-      const order = (await request(original?.request_id || orderId || input.requestId));
-      const line = (await item(order.id, original?.item_id || itemId || input.itemId));
+      let order = (await request(original?.request_id || orderId || input.requestId));
+      let line = (await item(order.id, original?.item_id || itemId || input.itemId));
       versions(order, line, input);
       if (order.status !== 'submitted') conflict('只有已提交申报可办理验收或结案');
-      if (!line.catalog_id) conflict('验收、拒收或结案前请先匹配物资信息');
+      const hasCatalog = input.catalogId !== undefined && input.catalogId !== null;
+      const hasNew = Object.hasOwn(input, 'newCatalog');
+      if (hasCatalog && hasNew) error(400, '已有物资与新物资信息只能选择一种');
+      if (line.catalog_id) {
+        if (hasNew || (hasCatalog && integer(input.catalogId, '物资信息') !== line.catalog_id)) conflict('该明细已关联物资信息，不能在验收时更换');
+      } else if (kind !== 'reverse' && (hasCatalog || hasNew)) {
+        if (hasNew && (!input.newCatalog || typeof input.newCatalog !== 'object' || Array.isArray(input.newCatalog))) error(400, '新物资信息必须是对象');
+        const master = hasCatalog ? await activeCatalog(input.catalogId) :
+          (await createCatalog(await catalogInput({ ...input.newCatalog, categoryId: input.newCatalog.categoryId ?? line.category_id }), user, true, null, 'receipt')).row;
+        unitQuantity(master, line.qty_m, '申报数量');
+        await run('UPDATE material_request_items SET catalog_id=?,code=?,name=?,spec=?,unit=?,category_id=? WHERE id=?',
+          master.id, master.code, master.name, master.spec, master.unit, master.category_id, line.id);
+        await bump(order.id, line.id);
+        await log(user, 'LINK_CATALOG', 'material_request_items', line.id, JSON.stringify({ catalogId: master.id, source: 'receipt' }));
+        order = await request(order.id);
+        line = await item(order.id, line.id);
+      }
+      if (!line.catalog_id) conflict('验收前请选择已有物资信息，或填写新物资信息');
       const counts = (await activity(line.id));
       const remaining = safeSum([line.qty_m, -counts.accepted, -counts.closed]);
       const snapshot = (await itemView(line, order, user, true));
@@ -1076,6 +1093,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
             const code = text(value, '物资编码', 64);
             const found = masters.codes.get(normalized(code)) || [];
             if (found.length !== 1) error(400, found.length ? '物资编码规范化后有歧义，请联系管理员核对' : '物资编码尚未建立；新版模板请使用中文名称、规格和单位');
+            if (found[0].merged_into !== null) error(400, '该物资信息已合并，请选择有效物资信息');
             return found[0];
           });
           else {
@@ -1086,7 +1104,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
               const matches = masters.identities.get(materialKey({ name, spec, unit })) || [];
               if (matches.length > 1) add('物资名称', '名称、规格和单位对应多条物资，请联系管理员核对');
               else if (!matches.length) {
-                const hasName = masters.names.has(normalized(name)), hasSpec = masters.specs.has(JSON.stringify([name, spec].map(normalized)));
+                const hasName = masters.names.has(identityNormalized(name)), hasSpec = masters.specs.has(JSON.stringify([name, spec].map(identityNormalized)));
                 add(!hasName ? '物资名称' : !hasSpec ? '规格' : '单位', !hasName ? '物资名称尚未建立，请先在物资信息库建立或导入' : '名称、规格和单位未对应同一条物资信息，请从参考表核对组合');
               }
               else master = matches[0];
@@ -1193,7 +1211,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if ((match = route.match(/^\/catalog\/(\d+)\/tracking-mode$/)) && method === 'PUT') {
       requireManager(user, 'materials.catalog.write');
       const saved = (await transaction(async () => {
-        const master = (await catalog(match[1])), mode = trackingMode(input.trackingMode), reason = text(input.reason, '管理方式修改原因', 1000);
+        const master = (await activeCatalog(match[1])), mode = trackingMode(input.trackingMode), reason = text(input.reason, '管理方式修改原因', 1000);
         if (!Number.isSafeInteger(input.version) || input.version !== master.version) conflict('物资信息版本已变化，请重新读取');
         if (mode === master.tracking_mode) return (await catalogView(master));
         if ((await one('SELECT 1 FROM material_stock_movements WHERE catalog_id=? LIMIT 1', master.id)) ||
@@ -1211,6 +1229,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (method === 'GET') return reply(paginate((await mapRows(await all('SELECT * FROM material_barcodes WHERE catalog_id=? ORDER BY id', master.id),barcodeView)), url));
       if (method === 'POST') {
         requireManager(user, 'materials.catalog.write');
+        await activeCatalog(master.id);
         const code = packageBarcode(input.code), reason = text(input.reason, '条码绑定原因', 1000);
         const result = (await transaction(async () => {
           if ((await one('SELECT 1 FROM material_stock_units WHERE code=?', code))) conflict('该编号已用于独立单件，不能绑定为包装码');
@@ -1297,7 +1316,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           if (candidates.length === 1) {
             const existing = candidates[0];
             for (const [field, next, previous] of [['物资名称', name, existing.name], ['规格', spec, existing.spec], ['单位', unit, existing.unit]]) {
-              if (normalized(next) !== normalized(previous)) add(field, '此编码对应的物资信息不同，请核对已有记录', 409);
+              if (identityNormalized(next) !== identityNormalized(previous)) add(field, '此编码对应的物资信息不同，请核对已有记录', 409);
             }
             if (category.id !== existing.category_id) add('物资分类', '已有相同物资的分类不同，请核对已有记录，导入不会覆盖分类', 409);
             if (mode !== existing.tracking_mode) add('管理方式', '已有相同物资的管理方式不同，请核对；更改管理方式须使用专用维护入口', 409);
@@ -1548,7 +1567,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       requireMaterial(user, isOpening ? 'materials.stock.initialize' : 'materials.stock.adjust');
       const result = (await idempotent(user, route, input, async key => {
         if (isOpening && (await openingClosed())) conflict('期初登记已经关闭，请使用有原因的库存调整');
-        const master = (await catalog(input.catalogId)), region = (await dictionary('material_regions', input.regionId, '区域'));
+        const master = (await activeCatalog(input.catalogId)), region = (await dictionary('material_regions', input.regionId, '区域'));
         const category = (await dictionary('material_categories', input.categoryId ?? master.category_id, '分类'));
         const target = warehouse(input.warehouse);
         const quantity = decimal(input.quantity, 3, '数量'), amount = decimal(input.amount, 2, '总金额', true);
@@ -1647,7 +1666,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 5, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 6, generatedAt: now(),
       users: (await all('SELECT id,username FROM users ORDER BY id')), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
@@ -1666,7 +1685,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }));
   }
   async function validateRestoredLedger() {
-    for (const row of (await all('SELECT * FROM material_catalog'))) trackingMode(row.tracking_mode);
+    for (const row of (await all('SELECT * FROM material_catalog'))) {
+      trackingMode(row.tracking_mode);
+      if (!['manual', 'receipt'].includes(row.origin) || text(row.remark, '物资备注', 2000, true) !== row.remark || row.merged_into === row.id) error(400, '物资信息来源、备注或合并归属无效');
+    }
     for (const row of (await all('SELECT * FROM material_request_items WHERE catalog_id IS NOT NULL'))) unitQuantity((await catalog(row.catalog_id)), row.qty_m, '申报数量');
     for (const row of (await all('SELECT * FROM material_barcodes'))) {
       if (packageBarcode(row.code) !== row.code) error(400, '条码内容未规范化');
@@ -1859,7 +1881,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5, 6].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
     const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : TABLES;
@@ -1886,6 +1908,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const columns = await db.columns(table);
       const allowed = new Map(columns.map(column => [column.name, column]));
       normalized[table] = (payload.data[table] || []).map(source => {
+        if (payload.schemaVersion < 6 && source && typeof source === 'object') {
+          const added = { material_catalog: { remark: '', origin: 'manual', merged_into: null }, material_request_items: { manufacturer: '' },
+            material_receipts: { manufacturer: '', note: '' }, material_stock_movements: { manufacturer: '', note: '' } }[table];
+          if (added) {
+            if (Object.keys(added).some(key => Object.hasOwn(source, key))) error(400, '旧版备份不能包含新版物资字段');
+            source = { ...source, ...added };
+          }
+        }
         if (payload.schemaVersion < 4 && table === 'material_catalog' && source && typeof source === 'object') {
           if (Object.hasOwn(source, 'tracking_mode')) error(400, '旧版备份不能包含新版管理方式字段');
           source = { ...source, tracking_mode: 'quantity' };
@@ -1989,7 +2019,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const unique = [...new Map([...preferred, ...rows].map(row => [key(row), row])).values()];
       return { rows: unique.slice(0, 5000), complete: rows.length <= 5000 && unique.length <= 5000 };
     };
-    const masters = options(selected, await all('SELECT name,spec,unit FROM material_catalog ORDER BY name,spec,unit LIMIT 5001'), materialKey);
+    const masters = options(selected, await all('SELECT name,spec,unit FROM material_catalog WHERE merged_into IS NULL ORDER BY name,spec,unit LIMIT 5001'), materialKey);
     const categories = !openingSheet ? options(selected.filter(row => row.categoryName).map(row => ({ name: row.categoryName })), await all('SELECT name FROM material_categories ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
     const regions = openingSheet ? options(selected.filter(row => row.regionName).map(row => ({ name: row.regionName })), await all('SELECT name FROM material_regions ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
     sheets.push(sheet('物资参考', ['物资名称', '规格', '单位'], masters.rows.map(row => [row.name, row.spec, row.unit])));

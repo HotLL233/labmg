@@ -19,7 +19,7 @@ $lock = $null
 try {
     $lock = [System.IO.File]::Open((Join-Path $cache 'build.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
     $inputs = @()
-    foreach ($directory in @('.github', 'src', 'scripts', 'deploy', 'docs', 'tests')) {
+    foreach ($directory in @('.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'migrations')) {
         $inputs += Get-ChildItem -LiteralPath (Join-Path $root $directory) -Recurse -File -Force
     }
     $inputs += Get-ChildItem -LiteralPath (Join-Path $root 'config\label-templates') -Filter '*.json' -File -Force

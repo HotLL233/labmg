@@ -21,8 +21,8 @@ async function createTestDatabase(t) {
   });
   return {
     url: url.href,
-    async open() {
-      const db = await require('../../src/database').openDatabase({ connectionString: url.href });
+    async open(options = {}) {
+      const db = await require('../../src/database').openDatabase({ ...options, connectionString: url.href });
       clients.push(db);
       return db;
     }

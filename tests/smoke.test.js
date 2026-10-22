@@ -21,6 +21,7 @@ test('moved entry serves assets and isolates normal, development and custom data
     fs.rmSync(fixture, { recursive: true, force: true });
   });
   fs.cpSync(path.join(root, 'src'), path.join(fixture, 'src'), { recursive: true });
+  fs.cpSync(path.join(root, 'migrations'), path.join(fixture, 'migrations'), { recursive: true });
   fs.copyFileSync(path.join(root, 'package.json'), path.join(fixture, 'package.json'));
 
   for (const mode of [

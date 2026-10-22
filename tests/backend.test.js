@@ -14,6 +14,7 @@ async function fixture(t, legacy = false, options = {}) {
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'run-'));
   fs.cpSync(path.join(root, 'src'), path.join(directory, 'src'), { recursive: true });
+  fs.cpSync(path.join(root, 'migrations'), path.join(directory, 'migrations'), { recursive: true });
   fs.copyFileSync(path.join(root, 'package.json'), path.join(directory, 'package.json'));
   const runtime = path.join(directory, 'runtime');
   let child;

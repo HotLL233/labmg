@@ -16,6 +16,7 @@ async function fixture(t) {
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'run-'));
   fs.cpSync(path.resolve(__dirname, '../src'), path.join(directory, 'src'), { recursive: true });
+  fs.cpSync(path.resolve(__dirname, '../migrations'), path.join(directory, 'migrations'), { recursive: true });
   fs.copyFileSync(path.resolve(__dirname, '../package.json'), path.join(directory, 'package.json'));
   const reservation = net.createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');

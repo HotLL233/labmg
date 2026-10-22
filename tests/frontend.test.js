@@ -548,7 +548,7 @@ test('user-controlled fields and account names stay out of executable markup', a
   assert.equal(edited[1], "O'Brien <img src=x onerror=alert(1)>");
 });
 
-test('new material can be submitted before catalog matching, with accounting blocked and the original request reachable', async () => {
+test('unlinked request items remain neutral and authorized users complete their identity during receipt or closure', async () => {
   const app = await browser({ role: 'MATERIAL', permissions: ['materials.read', 'materials.request.submit', 'materials.acceptance.write'] });
   const free = { id: 11, requestId: 101, catalogId: null, name: '新物资', spec: '新规格', unit: '件', qtyM: 1000, remainingQtyM: 1000, acceptedQtyM: 0, closedQtyM: 0, receiptStatus: 'pending', canEdit: true };
   const bound = { ...free, id: 12, catalogId: 5, name: '已有物资' };
@@ -556,38 +556,24 @@ test('new material can be submitted before catalog matching, with accounting blo
   app.state.materialDetails[101] = request;
   app.state.materialCapabilities = { createRequest: true, receive: true, closeReceipt: true };
   const click = node => app.document.listeners.click({ target: { closest: () => node } });
-  await app.run("go('materials')");
-  await click(app.$('[data-mw=request]'));
-  assert.match(app.$('#page').textContent, /共 1 项待匹配物资信息，可直接提交新物资/);
-  assert.ok(app.$('[data-mw=submit]'));
+  await app.run("go('materials')"); await click(app.$('[data-mw=request]'));
+  assert.match(app.$('#page').textContent, /共 1 项验收时再完善物资信息/);
+  assert.doesNotMatch(app.$('#page').innerHTML, /mw-badge amber">待匹配/); assert.ok(app.$('[data-mw=submit]'));
   await click(app.$('[data-mw=add-item]'));
   assert.equal('required' in app.$('#mw-fields [name=catalogId]').attrs, false);
-  assert.match(app.$('#mw-fields').textContent, /新物资可直接填报提交/);
+  for (const name of ['spec', 'unit']) assert.equal('required' in app.$('#mw-fields [name='+name+']').attrs, true);
+  assert.match(app.$('#mw-fields').textContent, /检索已有物资（选填）/);
+  await click(app.$('[data-mw=cancel]')); await click(app.$('[data-mw=submit]'));
+  assert.match(app.$('#mw-intro').textContent, /2 项，其中 1 项验收时再完善物资信息/);
+  assert.doesNotMatch(app.$('#mw-intro').textContent, /原单修订匹配/);
   await click(app.$('[data-mw=cancel]'));
-  await click(app.$('[data-mw=submit]'));
-  assert.match(app.$('#mw-intro').textContent, /2 项，其中 1 项待匹配物资信息/);
-  assert.match(app.$('#mw-intro').textContent, /新物资可直接提交/);
-  await click(app.$('[data-mw=cancel]'));
-  Object.assign(request, { status: 'submitted', revision: 1, canSubmit: false, canAddItem: false });
-  app.state.materialAcceptance = [free, bound];
+  Object.assign(request, { status: 'submitted', revision: 1, canSubmit: false, canAddItem: false }); app.state.materialAcceptance = [free, bound];
   await click({ dataset: { mw: 'page', page: 'acceptance' } });
-  const receive = app.document.querySelectorAll('[data-mw=receive]'), close = app.document.querySelectorAll('[data-mw=close-item]');
-  assert.equal(receive[0].disabled, true);
-  assert.equal(close[0].disabled, true);
-  assert.match(receive[0].attrs.title, /待匹配物资信息/);
-  assert.equal(receive[1].disabled, false);
-  assert.equal(close[1].disabled, false);
-  assert.match(app.$('#page').textContent, /请点“原单”/);
   for (const action of ['receive', 'close-item']) {
-    await click({ dataset: { mw: action, request: '101', item: '11' } });
-    assert.equal(app.$('#mw-dialog').open, false);
-    assert.match(app.$('#mw-status').textContent, /修订.*选择物资信息并填写原因/);
+    const buttons = app.document.querySelectorAll('[data-mw='+action+']'); assert.equal(buttons.length, 2); assert.equal(buttons[0].disabled, false); assert.equal(buttons[1].disabled, false);
+    await click(buttons[0]); assert.equal(app.$('#mw-dialog').open, true); assert.ok(app.$('#mw-fields [name=catalogId]'));
+    assert.equal(app.$('#mw-receipt-catalog').hidden, true); await click(app.$('[data-mw=cancel]'));
   }
-  await click(app.$('[data-mw=request]'));
-  assert.ok(app.$('[data-mw=edit-item]'));
-  await click(app.$('[data-mw=edit-item]'));
-  assert.ok(app.$('#mw-fields [name=catalogId]'));
-  assert.ok(app.$('#mw-fields [name=reason]'));
   assert.equal(app.requests.some(entry => entry.method === 'POST' || entry.method === 'PATCH'), false);
 });
 
@@ -1262,4 +1248,90 @@ test('managers create and link new materials with version conflict reloads, reas
   const ordinary = await materialApp(false); Object.assign(ordinary.item, { catalogId: null });
   await ordinary.click('[data-mw=request]'); assert.equal(ordinary.app.$('[data-mw=request-catalog]'), null);
   await ordinary.click({ dataset: { mw: 'request-catalog', item: '11' } }); assert.equal(ordinary.app.$('#mw-dialog').open, false);
+});
+
+
+test('raw declarations stay unlinked until an existing catalog option is explicitly selected', async () => {
+  const { app, click, fill, submit } = await materialApp(false); let sent;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/requests/101/items' && method === 'POST') { sent = body; return { body: app.state.materialDetails[101], status: 201 }; }
+  };
+  await click('[data-mw=request]'); await click('[data-mw=add-item]');
+  fill({ catalogQuery: '合成物资', name: '原始填写名称', spec: '原始填写规格', unit: '瓶', categoryId: '1', regionId: '2', warehouse: 'MAIN', quantity: '2' });
+  await submit(); assert.equal(sent.catalogId, null); assert.equal(sent.name, '原始填写名称'); assert.equal(sent.spec, '原始填写规格'); assert.equal(sent.unit, '瓶');
+  assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname === '/api/materials/catalog'), false);
+});
+
+test('receipt permissions allow atomic new identities without catalog maintenance and preserve retry bodies', async () => {
+  const { app, item, request, click, fill, submit } = await materialApp();
+  Object.assign(item, { catalogId: null, code: '', name: '待确认物资', spec: '', unit: '' }); request.status = 'submitted';
+  app.state.materialCapabilities.manageCatalog = false; await app.run("go('materials')");
+  const writes = [];
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/receipts' && method === 'POST') { writes.push(body); if (writes.length === 1) throw Error('synthetic response loss'); return { body: { request }, status: 201 }; }
+  };
+  await click({ dataset: { mw: 'receive', request: '101', item: '11' } });
+  assert.equal(app.$('#mw-fields [name=catalogQuery]').value, item.name);
+  assert.equal(app.$('#mw-receipt-catalog').hidden, true); assert.equal(app.$('#mw-fields [name=name]').disabled, true);
+  fill({ quantity: '2', amount: '4' }); await submit(); assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /请选择已有物资信息，或填写新物资信息/);
+  fill({ catalogId: 'new' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.equal(app.$('#mw-receipt-catalog').hidden, false); assert.equal(app.$('#mw-fields [name=name]').value, item.name); assert.equal(app.$('#mw-fields [name=categoryId]').value, '1');
+  await submit(); assert.match(app.$('#mw-error').textContent, /规格不能为空/); assert.equal(writes.length, 0);
+  fill({ name: '确认后的物资', spec: '500 ml', unit: '瓶', location: 'A 柜第 2 层' }); await submit();
+  assert.deepEqual(writes[0].newCatalog, { name: '确认后的物资', spec: '500 ml', unit: '瓶', categoryId: 1, trackingMode: 'unit' });
+  assert.equal(writes[0].catalogId, undefined); assert.equal(writes[0].locationVersion, 0); assert.equal(writes[0].location, 'A 柜第 2 层');
+  assert.equal(writes[0].requestVersion, 1); assert.equal(writes[0].version, 1); assert.ok(writes[0].requestIdempotencyKey);
+  assert.equal(app.$('#mw-fields [name=name]').disabled, true); fill({ name: '不可替换重试原文' }); await submit(); assert.deepEqual(writes[1], writes[0]);
+  assert.equal(app.requests.some(entry => entry.method === 'POST' && (entry.url.pathname === '/api/materials/catalog' || entry.url.pathname.endsWith('/catalog'))), false);
+  assert.equal(app.$('#mw-dialog').open, false);
+});
+
+test('receipt lookup selects stock-first existing identities and discards stale selections when searching again', async () => {
+  const { app, row, item, request, click, fill, submit } = await materialApp(); Object.assign(item, { catalogId: null }); request.status = 'submitted'; let sent;
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/catalog' && url.searchParams.has('q')) {
+      assert.equal(url.searchParams.get('regionId'), '2'); assert.equal(url.searchParams.get('warehouse'), 'MAIN');
+      return { body: { items: [{ ...row, id: 6, name: '优先物资', stockQtyM: 2000 }, { ...row, id: 5, stockQtyM: 0 }], total: 2 } };
+    }
+    if (url.pathname === '/api/materials/receipts' && method === 'POST') { sent = body; return { body: { request } }; }
+  };
+  await click({ dataset: { mw: 'receive', request: '101', item: '11' } }); await click('[data-mw=catalog-search]');
+  const options = app.$('#mw-fields [name=catalogId]').textContent; assert.ok(options.indexOf('优先物资') < options.indexOf('合成物资'));
+  fill({ catalogId: '5', quantity: '1', amount: '2', location: '柜 B' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  assert.equal(app.$('#mw-fields [name=name]').disabled, true); await submit(); assert.equal(sent, undefined); assert.match(app.$('#mw-error').textContent, /读取本批当前位置/);
+  await click('[data-mw=position-read]'); fill({ catalogQuery: '另一种名称' }); app.document.listeners.input({ target: app.$('#mw-fields [name=catalogQuery]') });
+  assert.equal(app.$('#mw-fields [name=catalogId]').value, ''); await submit(); assert.equal(sent, undefined); assert.match(app.$('#mw-error').textContent, /请选择已有物资信息/);
+  fill({ catalogId: '5' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') }); await click('[data-mw=position-read]'); await submit();
+  assert.equal(sent.catalogId, 5); assert.equal(sent.newCatalog, undefined); assert.equal(sent.locationVersion, 1); assert.equal(sent.location, '柜 B');
+});
+
+test('rejection and closure resolve unlinked identities in the same write and unauthorized users cannot open either form', async () => {
+  for (const kind of ['rejection', 'close']) {
+    const { app, item, request, click, fill, submit } = await materialApp(); item.catalogId = null; request.status = 'submitted';
+    app.state.materialCapabilities.closeReceipt = true; app.state.materialCapabilities.manageCatalog = false; await app.run("go('materials')"); let sent;
+    app.state.materialResponse = ({ url, method, body }) => {
+      if (method === 'POST' && (url.pathname === '/api/materials/receipts' || url.pathname.endsWith('/close'))) { sent = body; return { body: { request } }; }
+    };
+    await click({ dataset: { mw: kind === 'close' ? 'close-item' : 'receive', request: '101', item: '11' } });
+    fill(kind === 'close' ? { reason: '不再采购' } : { quantity: '0', amount: '0', rejectedQuantity: '1', rejectedReason: '包装破损' });
+    await submit(); assert.equal(sent, undefined); assert.match(app.$('#mw-error').textContent, /请选择已有物资信息/);
+    fill({ catalogId: '5' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') }); await submit(); assert.equal(sent.catalogId, 5);
+    assert.equal(sent.locationVersion, undefined); assert.equal(sent.location, undefined);
+    assert.equal(app.requests.filter(entry => entry.method === 'POST').length, 1);
+  }
+  const ordinary = await materialApp(false); ordinary.item.catalogId = null; ordinary.request.status = 'submitted';
+  for (const action of ['receive', 'close-item']) { await ordinary.click({ dataset: { mw: action, request: '101', item: '11' } }); assert.equal(ordinary.app.$('#mw-dialog').open, false); assert.match(ordinary.app.$('#mw-status').textContent, /没有.*权限/); }
+});
+
+test('changing declaration identity clears its association and receipt reload blocks a concurrently changed identity', async () => {
+  const draft = await materialApp(false); await draft.click('[data-mw=request]'); await draft.click('[data-mw=add-item]');
+  draft.fill({ catalogId: '5' }); draft.app.document.listeners.change({ target: draft.app.$('#mw-fields [name=catalogId]') });
+  draft.fill({ name: '另一个物资' }); draft.app.document.listeners.input({ target: draft.app.$('#mw-fields [name=name]') });
+  assert.equal(draft.app.$('#mw-fields [name=catalogId]').value, ''); assert.equal(draft.app.$('#mw-fields [name=code]').value, ''); assert.equal(draft.app.$('#mw-fields [name=name]').readOnly, false);
+  const { app, item, request, click, fill, submit } = await materialApp(); item.catalogId = null; request.status = 'submitted'; let writes = 0;
+  app.state.materialResponse = ({ url, method }) => { if (url.pathname === '/api/materials/receipts' && method === 'POST') { writes++; return { body: { error: '申报已变化' }, status: 409 }; } };
+  await click({ dataset: { mw: 'receive', request: '101', item: '11' } }); fill({ catalogId: 'new' }); app.document.listeners.change({ target: app.$('#mw-fields [name=catalogId]') });
+  fill({ quantity: '1', amount: '2' }); await submit(); assert.equal(writes, 1);
+  Object.assign(item, { catalogId: 5, version: 2 }); request.version++; await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-save').disabled, true); await submit(); assert.equal(writes, 1); assert.equal(app.$('#mw-fields [name=catalogId]').value, 'new');
 });

@@ -17,7 +17,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
     assert.ok(path.basename(fixture).startsWith('package-test-'));
     fs.rmSync(fixture, { recursive: true, force: true });
   });
-  for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests']) {
+  for (const name of ['.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'migrations']) {
     fs.cpSync(path.join(root, name), path.join(fixture, name), { recursive: true });
   }
   fs.mkdirSync(path.join(fixture, 'config'));
@@ -57,6 +57,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   assert.equal(manifest.size, fs.statSync(archive).size);
   assert.equal(manifest.sourceSha256, crypto.createHash('sha256').update(JSON.stringify(manifest.sources)).digest('hex'));
   assert.ok(manifest.sources.some(source => source.path === 'config/.env.example'));
+  for (const name of ['migrations/0003-material-catalog-decouple.sql', 'src/migrations.js', 'scripts/migrate.js']) assert.ok(manifest.sources.some(source => source.path === name));
   for (const name of ['label-38.5x30.5-0deg.json', 'label-38.5x30.5-90deg.json']) assert.ok(manifest.sources.some(source => source.path === 'config/label-templates/' + name));
   assert.ok(manifest.sources.some(source => source.path === 'deploy/.env.example'));
   assert.ok(manifest.sources.some(source => source.path === 'package-lock.json'));

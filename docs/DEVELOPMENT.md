@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.9.4（已公开）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)已公开为prerelease，正式四门禁与本机12件完整交付核验通过。部署使用同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。实际状态见[版本说明](CHANGELOG.md)，旧版验证不作为本轮结果。
+本源码版本为 **0.10.0（开发中，未发布）**，在0.9.4基线上进行申报与验收解耦及加法数据库迁移。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署目前仍取[0.9.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.4)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。0.9.4的四门禁和12件交付核验保持原范围，不作为0.10.0验证，实际状态见[版本说明](CHANGELOG.md)。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -14,11 +14,13 @@ src/
   public/              页面、样式和浏览器脚本
 scripts/
   check.js             全部 JavaScript 的语法检查
+  migrate.js           显式运行建表与有序数据库迁移
   package.ps1          部署包生成脚本
   package-docker.ps1   Docker 镜像导出与版本化层缓存
 config/
   .env.example         环境变量示例
   label-templates/     可导入的标签布局示例，使用前备份当前模板并试打
+migrations/            有序、逐事务执行的加法 SQL；应用后禁止修改原文件
 deploy/
   Dockerfile           Node 24 非 root 应用镜像
   docker-compose.yml   在线完整配置：应用、PG18、初始化、自动 HTTPS
@@ -51,6 +53,18 @@ artifacts/             唯一构建产物与缓存目录，不提交
 开始任务前读取项目记忆；完成有意义的工作后同步更新记忆、追加历程，并将对外变更加入版本说明的“未发布”。新决策替代旧结论时保留历史并注明原因，已知问题修复时补充提交与验证依据，不直接删除原始发现。
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
+
+## 0.10.0：申报模糊、验收完善（开发中，2026-10-22）
+
+分支 `feature/v0.10.0-material-catalog-decoupling`，基线28ce719，缓存 `artifacts/cache/0.10.0/`，交付目标 `artifacts/releases/0.10.0/`。本轮仅实现[优化方案](优化方案.md)批次B；业务及验证尚在进行，不改main、旧标签、旧镜像、归档或NAS。继续交付在线／本地完整YML、双架构三镜像TAR和公开Release，须真实完成后才记为发布。
+
+`openDatabase()`先运行既有建表SQL，再按四位前缀升序执行 `migrations/*.sql`，每个文件独立事务，共享既有写锁；同一账本的 `name` 记录文件名，失败停止并打印文件名及错误代码，已应用文件跳过。CLI为 `npm run migrate`，使用与服务相同的数据库配置。已有 `0.3.0-material-permissions`／`0.3.2-material-permissions` 及server内受控权限升级保留原行为，不给未运行的权限脚本登记空迁移。0003只加字段及索引，历史快照不回填；这是PG18应用schema升级，不涉及PG17物理目录迁移。源码ZIP、Docker镜像、测试副本及CI同时包含迁移文件。
+
+本机迁移专项3/3在隔离PG17.11通过，正式PG18、全量回归、浏览器与镜像门禁待补；缺少测试数据库配置仍必须失败，不能用空库或跳过代替验收。
+
+后续冻结前完整本机208项207通过／0失败／1本机Docker条件跳过，包含真实Edge全站布局；42JS通过，物资后端49/49、前端VM50/50。B4单独真实Edge94项、6图、0异常，以模拟API覆盖桌面和390px表单、选档／建档同次提交、旧关联、冲突重载及位置版本，非真实手机或打印验证。旧0.9.4 schema fixture来自冻结标签的实际SCHEMA原字节；升级测试保留原行、权限迁移标记、会话、快照与序列，并验证旧字段INSERT继续可用。
+
+物资完整备份由schema5升级schema6；新版本读取严格schema1–5时只补新列默认值，仍拒绝未知／多余字段，不回填历史快照。旧0.9.4不支持schema6，亦不能把旧程序在升级库上导出的带新列schema5混合格式当成旧备份；需要回退恢复时使用升级前数据库副本。厂家／备注的前端与Excel列留后续C，当前不声明已支持这些列的业务回导。
 
 ## 0.9.4：打印预览与自动 HTTPS（已公开，2026-10-22）
 

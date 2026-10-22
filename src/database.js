@@ -4,6 +4,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const fs = require('node:fs');
 const { Pool, types } = require('pg');
 const { SCHEMA, TABLES, ID_TABLES } = require('./schema');
+const { applyMigrations } = require('./migrations');
 
 const context = new AsyncLocalStorage();
 const identityTables = new Set(ID_TABLES);
@@ -181,7 +182,10 @@ async function openDatabase({ connectionString = process.env.DATABASE_URL, initi
   };
   try {
     await query('SELECT 1');
-    if (initialize) await db.transaction(() => db.exec(SCHEMA));
+    if (initialize) {
+      await db.transaction(() => db.exec(SCHEMA));
+      await applyMigrations(db);
+    }
     return db;
   } catch (failure) {
     await pool.end();
