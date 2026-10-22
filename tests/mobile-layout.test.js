@@ -92,10 +92,25 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
         .filter(node => node.getClientRects().length && !node.closest('.table,.mw-table,.asset-flow,.mw-nav,.nav'))
         .filter(node => { const box = node.getBoundingClientRect(); return box.left < -1 || box.right > width + 1; })
         .map(node => ({ text: node.textContent || node.id || node.name, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right }));
-      return { width, pageWidth: document.documentElement.scrollWidth, outside };
+      // 文字被挤成多行不会触发横向溢出，却会让控件变形（如「菜单」变竖排两字），
+      // 所以单独按行盒（Range 逐行矩形）判定页头控件标签是否折行。
+      // 只查页头：页内卡片按钮（标题 + 副标题）本就设计为多行，不能纳入。
+      const wrapped = [...document.querySelectorAll('.layout>main>header button,.layout>main>header .actions>*')]
+        .filter(node => node.getClientRects().length)
+        .filter(node => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const rows = new Set([...range.getClientRects()]
+            .filter(rect => rect.width > 0 && rect.height > 0)
+            .map(rect => Math.round(rect.top)));
+          return rows.size > 1;
+        })
+        .map(node => ({ text: (node.textContent || node.id || '').trim().slice(0, 20), id: node.id || null }));
+      return { width, pageWidth: document.documentElement.scrollWidth, outside, wrapped };
     });
     assert.ok(result.pageWidth <= result.width + 1, `${label}: page overflow ${JSON.stringify(result)}`);
     assert.deepEqual(result.outside, [], `${label}: controls must remain inside the viewport`);
+    assert.deepEqual(result.wrapped, [], `${label}: control labels must stay on one line`);
   };
   const navigate = async module => {
     if (page.viewportSize().width < 768) await page.locator('#menu-toggle').click();

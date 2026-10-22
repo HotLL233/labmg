@@ -24,6 +24,8 @@
   body.drawer-open .scrim{display:block}
   .scrim{position:fixed;inset:0;background:#0f172399;z-index:75;border-radius:0}
   .menu-toggle,.drawer-close{display:block;min-height:44px}
+  /* 页头是 flex：操作区变多时会压缩「菜单」按钮，导致两字竖排。锁定不换行、不收缩。 */
+  .menu-toggle{white-space:nowrap;flex-shrink:0}
   .drawer-close{margin-left:auto;margin-bottom:12px}
   .side .brand{padding:0 0 16px}
   .side .brand div{display:block}
