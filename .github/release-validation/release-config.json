@@ -1,0 +1,9 @@
+{
+  "version": "0.9.3",
+  "commit": "9260b1e8e73e5689c10a6a3f13070ff6bc196803",
+  "indexDigest": "sha256:bb28e4ff552a359d47c79ec65933f786b06f47a46334e4831a2bae8bc71f82d0",
+  "baseParent": "2aebddec0db9c0d47867f0da92881d95d78659b3",
+  "featureBranch": "feature/v0.9.3-print-preview-auto-https",
+  "status": "source-frozen",
+  "buildRunId": 39719606701
+}

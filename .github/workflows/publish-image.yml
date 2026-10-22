@@ -1,148 +1,234 @@
-name: Publish versioned image
+name: Validate frozen 0.9.3 release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to publish
+        description: Frozen business source tag
+        required: true
+        default: v0.9.3
+        type: string
+      frozen_commit:
+        description: Frozen source commit matching the version tag
+        required: true
+        type: string
+      draft_release_id:
+        description: Draft containing the seven byte-exact source and deployment assets
+        required: true
+        type: string
+      index_digest:
+        description: Previously published official multi-platform index digest
         required: true
         type: string
 
 permissions:
-  contents: read
-  packages: write
+  contents: write
+  packages: read
 
 concurrency:
-  group: publish-ghcr-image
+  group: validate-frozen-labos-0.9.3
   cancel-in-progress: false
 
-env:
-  IMAGE: ghcr.io/hotll233/labmg
-  SOURCE: https://github.com/HotLL233/labmg
-
 jobs:
-  publish:
+  validate:
     if: github.repository == 'HotLL233/labmg'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:18-bookworm
-        env:
-          POSTGRES_USER: labos_ci
-          POSTGRES_PASSWORD: ci-fixture-password
-          POSTGRES_DB: postgres
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U labos_ci -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 20
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: project
     env:
-      LABOS_TEST_DATABASE_URL: postgresql://labos_ci:ci-fixture-password@127.0.0.1:5432/postgres
+      FROZEN_COMMIT: ${{ inputs.frozen_commit }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      INDEX_DIGEST: ${{ inputs.index_digest }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out operations helper ref
+        uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
-          fetch-depth: 0
+          path: ops
           persist-credentials: false
 
-      - name: Validate version tag
-        id: version
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          node <<'NODE'
-          const assert = require('node:assert/strict');
-          const fs = require('node:fs');
-          const { execFileSync } = require('node:child_process');
-          const { version } = require('./package.json');
-          assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
-          assert.equal(process.env.RELEASE_TAG, `v${version}`, 'Tag must match package.version');
-          const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-          const taggedCommit = execFileSync('git', ['rev-parse', `${process.env.RELEASE_TAG}^{commit}`], { encoding: 'utf8' }).trim();
-          assert.equal(commit, taggedCommit, 'Checkout must match the requested tag commit');
-          if (process.env.GITHUB_EVENT_NAME === 'push') assert.equal(commit, process.env.GITHUB_SHA);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\n`);
-          NODE
+      - name: Check out frozen business tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v0.9.3
+          path: project
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --omit=dev --ignore-scripts --no-audit
-      - run: npm run check
-      - uses: docker/setup-compose-action@v1
-        with:
-          version: v5.5.1
-      - run: node --test tests/database.test.js tests/backend.test.js tests/frontend.test.js tests/materials.test.js tests/material-xlsx.test.js tests/scanner.test.js tests/labels.test.js tests/user-csv.test.js tests/user-import-api.test.js tests/printing-retirement.test.js tests/compose.test.js tests/https.test.js tests/https-config.test.js tests/runtime-init.test.js
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          cache-dependency-path: project/package-lock.json
 
-      - name: Preserve existing version
-        id: existing
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-          REVISION: ${{ steps.version.outputs.commit }}
+      - name: Install frozen dependencies
+        run: npm ci --omit=dev --ignore-scripts --no-audit
+
+      - name: Verify frozen HTTPS discovery and runtime initializer logic
+        run: |
+          mkdir -p artifacts/cache/0.9.3
+          node --test --test-reporter=tap tests/https-config.test.js tests/runtime-init.test.js 2>&1 | tee artifacts/cache/0.9.3/https-config-runtime-tests.log
+
+      - name: Prepare runner-only validation helpers
         run: |
           node <<'NODE'
-          const assert = require('node:assert/strict');
-          const fs = require('node:fs');
-          (async () => {
-            const { IMAGE, SOURCE, VERSION, REVISION, GITHUB_ACTOR, GH_TOKEN } = process.env;
-            const repository = IMAGE.slice('ghcr.io/'.length);
-            const tokenUrl = new URL('https://ghcr.io/token');
-            tokenUrl.searchParams.set('service', 'ghcr.io');
-            tokenUrl.searchParams.set('scope', `repository:${repository}:pull,push`);
-            const auth = await fetch(tokenUrl, { headers: { Authorization: `Basic ${Buffer.from(`${GITHUB_ACTOR}:${GH_TOKEN}`).toString('base64')}` } });
-            assert.ok(auth.ok, `Registry authorization failed: ${auth.status}`);
-            const { token } = await auth.json();
-            assert.ok(token, 'Missing registry token');
-            const get = route => fetch(`https://ghcr.io/v2/${repository}/${route}`, {
-              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }
-            });
-            const response = await get(`manifests/${VERSION}`);
-            if (response.status === 404) {
-              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'exists=false\n');
-              return;
-            }
-            assert.ok(response.ok, `Registry lookup failed: ${response.status}`);
-            const index = await response.json();
-            for (const architecture of ['amd64', 'arm64']) {
-              const descriptor = index.manifests?.find(item => item.platform?.os === 'linux' && item.platform.architecture === architecture);
-              assert.ok(descriptor, `Existing version lacks linux/${architecture}; use a new version`);
-              const manifestResponse = await get(`manifests/${descriptor.digest}`);
-              assert.ok(manifestResponse.ok, `Cannot inspect existing ${architecture} manifest`);
-              const manifest = await manifestResponse.json();
-              const configResponse = await get(`blobs/${manifest.config.digest}`);
-              assert.ok(configResponse.ok, `Cannot inspect existing ${architecture} config`);
-              const config = await configResponse.json();
-              assert.equal(config.os, 'linux');
-              assert.equal(config.architecture, architecture);
-              assert.equal(config.config.Labels['org.opencontainers.image.version'], VERSION);
-              assert.equal(config.config.Labels['org.opencontainers.image.revision'], REVISION, 'Existing tag points to different source; use a new version');
-              assert.equal(config.config.Labels['org.opencontainers.image.source'], SOURCE);
-            }
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'exists=true\n');
-            console.log(`Reused verified ${IMAGE}:${VERSION}`);
-          })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+          assert.equal(process.env.RELEASE_TAG,'v0.9.3');
+          assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),process.env.FROZEN_COMMIT);
+          assert.equal(execFileSync('git',['rev-parse','refs/tags/v0.9.3^{commit}'],{encoding:'utf8'}).trim(),process.env.FROZEN_COMMIT);
+          assert.match(process.env.INDEX_DIGEST,/^sha256:[a-f0-9]{64}$/);
+          assert.equal(require('./package.json').version,'0.9.3');
+          const cache='artifacts/cache/0.9.3',source='../ops/.github/release-validation';
+          fs.mkdirSync(cache,{recursive:true});
+          for(const name of ['verify-ghcr-anonymous.cjs','verify-https.cjs','export-ghcr-offline.cjs','postgres-image.cjs','verify-postgresql.cjs','release-config.json','published-index.json'])fs.copyFileSync(path.join(source,name),path.join(cache,name),fs.constants.COPYFILE_EXCL);
+          fs.mkdirSync(path.join(cache,'remote-validation'),{recursive:true});
+          fs.copyFileSync(path.join(source,'upload-draft-assets.cjs'),path.join(cache,'remote-validation/upload-draft-assets.cjs'),fs.constants.COPYFILE_EXCL);
+          assert.equal(require('./'+cache+'/release-config.json').commit,process.env.FROZEN_COMMIT);
+          assert.equal(require('./'+cache+'/published-index.json').indexDigest,process.env.INDEX_DIGEST);
           NODE
 
-      - name: Build and push both architectures
-        if: steps.existing.outputs.exists == 'false'
-        uses: docker/build-push-action@v6
+      - name: Download the seven official frozen draft inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict');
+          const {Readable,Transform}=require('node:stream'),{pipeline}=require('node:stream/promises');
+          const repo='HotLL233/labmg',api='https://api.github.com/repos/'+repo,headers={Authorization:'Bearer '+process.env.GH_TOKEN,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'labmg-release-validation'};
+          let stage='draft-metadata',lastHttpStatus=null;
+          function reject(code,message){const error=new Error(message);error.safeCode=code;error.safeMessage=message;throw error;}
+          async function json(route){const r=await fetch(api+route,{headers,redirect:'error',signal:AbortSignal.timeout(30000)});lastHttpStatus=r.status;if(!r.ok)reject('OFFICIAL_API_HTTP','Official GitHub REST metadata request failed.');return r.json();}
+          async function download(asset,file){
+            stage='asset-'+asset.id;
+            let r=await fetch(api+'/releases/assets/'+asset.id,{headers:{...headers,Accept:'application/octet-stream'},redirect:'manual',signal:AbortSignal.timeout(300000)});
+            lastHttpStatus=r.status;
+            if([301,302,303,307,308].includes(r.status)){
+              const target=new URL(r.headers.get('location'));
+              assert.ok(target.protocol==='https:'&&!target.username&&!target.password&&(target.hostname.endsWith('.githubusercontent.com')||target.hostname.endsWith('.blob.core.windows.net')),'Unexpected official asset redirect host');
+              r=await fetch(target,{redirect:'error',signal:AbortSignal.timeout(300000)});
+              lastHttpStatus=r.status;
+            }
+            assert.ok(r.ok&&r.body,'Asset download failed');
+            let size=0;const hash=crypto.createHash('sha256');fs.mkdirSync(path.dirname(file),{recursive:true});
+            await pipeline(Readable.fromWeb(r.body),new Transform({transform(chunk,encoding,callback){size+=chunk.length;hash.update(chunk);callback(null,chunk);}}),fs.createWriteStream(file,{flags:'wx'}));
+            const sha256=hash.digest('hex');assert.equal(size,asset.size);assert.equal(asset.digest,'sha256:'+sha256);
+            return {name:path.basename(file),assetId:asset.id,size,sha256};
+          }
+          (async()=>{
+            assert.match(process.env.DRAFT_RELEASE_ID,/^\d+$/);
+            const draft=await json('/releases/'+process.env.DRAFT_RELEASE_ID);assert.equal(draft.draft,true);assert.equal(draft.tag_name,'v0.9.3');
+            const expected=['labos-0.9.3.zip','manifest.json','docker-compose.yml','docker-compose.local.yml','SYNOLOGY.md','SCANNING_HTTPS.md','LABEL_PRINTING.md'];
+            const assets=[];
+            for(const name of expected){const matching=draft.assets.filter(a=>a.name===name);assert.equal(matching.length,1);assets.push(await download(matching[0],path.join('artifacts/releases/0.9.3',name)));}
+            const manifest=JSON.parse(fs.readFileSync('artifacts/releases/0.9.3/manifest.json','utf8').replace(/^\uFEFF/,''));assert.equal(manifest.commit,process.env.FROZEN_COMMIT);assert.equal(manifest.version,'0.9.3');assert.equal(manifest.sha256,assets.find(a=>a.name===manifest.archive).sha256);
+            fs.writeFileSync('artifacts/cache/0.9.3/official-inputs.json',JSON.stringify({repository:repo,draftReleaseId:draft.id,commit:process.env.FROZEN_COMMIT,assets,environment:'GitHub Actions hosted Ubuntu'},null,2)+'\n');
+          })().catch(error=>{const result={status:'failed',stage,httpStatus:lastHttpStatus,errorCode:error.safeCode||(/^[A-Z][A-Z0-9_]{1,60}$/.test(error.code||'')?error.code:'TRANSFER_OR_PARSE_FAILED'),message:error.safeMessage||(error.code==='ERR_ASSERTION'?'Official asset metadata or frozen source assertion failed.':'Official input transfer or parsing failed.'),checkedAtUtc:new Date().toISOString()};fs.writeFileSync('artifacts/cache/0.9.3/official-inputs-error.json',JSON.stringify(result,null,2)+'\n');console.error(JSON.stringify(result));process.exitCode=1;});
+          NODE
+
+      - name: Set up current Docker with multi-platform image storage
+        id: docker
+        uses: docker/setup-docker-action@v4
         with:
-          context: .
-          file: deploy/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            VCS_REF=${{ steps.version.outputs.commit }}
+          version: latest
+          set-host: true
+          daemon-config: |
+            {"features":{"containerd-snapshotter":true}}
+
+      - name: Enable ARM64 container emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Use the Compose version validated with frozen source tests
+        uses: docker/setup-compose-action@v1
+        with:
+          version: v5.5.1
+
+      - name: Record runner and Docker capabilities
+        run: |
+          mkdir -p artifacts/cache/0.9.3
+          docker version > artifacts/cache/0.9.3/runner-docker-version.log
+          docker info > artifacts/cache/0.9.3/runner-docker-info.log
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+          const run=(name,args)=>execFileSync(name,args,{encoding:'utf8'}).trim();
+          assert.match(process.env.DOCKER_HOST||'',/^unix:\/\//);
+          const apis={};
+          for(const side of ['Client','Server']){const value=run('docker',['version','--format','{{.'+side+'.APIVersion}}']),parts=value.split('.').map(Number);assert.ok(parts[0]>1||(parts[0]===1&&parts[1]>=49),'Docker '+side+' API 1.49+ required');apis[side.toLowerCase()]=value;}
+          const driverStatus=JSON.parse(run('docker',['info','--format','{{json .DriverStatus}}']));
+          assert.ok(driverStatus.some(row=>row.includes('io.containerd.snapshotter.v1')),'containerd image store is required');
+          const composeVersion=run('docker',['compose','version','--short']);assert.equal(composeVersion.replace(/^v/,''),'5.5.1');
+          const powershellMajor=run('pwsh',['-NoProfile','-NonInteractive','-Command','$PSVersionTable.PSVersion.Major']);assert.equal(powershellMajor,'7');
+          fs.writeFileSync('artifacts/cache/0.9.3/runner-environment.json',JSON.stringify({provider:'GitHub Actions',runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,runnerOs:process.env.RUNNER_OS,runnerArch:process.env.RUNNER_ARCH,node:process.version,platform:process.platform,architecture:process.arch,dockerHost:process.env.DOCKER_HOST,dockerApi:apis,driverStatus,composeVersion,powershellMajor,arm64:'QEMU emulation',physicalNas:false,productionData:false},null,2)+'\n');
+          NODE
+
+      - name: Verify deployment files against frozen source ZIP
+        run: node artifacts/cache/0.9.3/export-ghcr-offline.cjs --prepare-deployment-only 2>&1 | tee artifacts/cache/0.9.3/prepare-deployment.log
+
+      - name: Gate 1 - anonymous official image and Compose lifecycle
+        run: node artifacts/cache/0.9.3/verify-ghcr-anonymous.cjs --execute-after-public-confirmed --index-digest="$INDEX_DIGEST" 2>&1 | tee artifacts/cache/0.9.3/remote-anonymous.log
+
+      - name: Gate 2 - captured fresh PostgreSQL persistence evidence
+        run: node artifacts/cache/0.9.3/verify-postgresql.cjs --verify-captured-compose-evidence 2>&1 | tee artifacts/cache/0.9.3/remote-postgresql.log
+
+      - name: Gate 3 - official offline TAR export and both container tests
+        run: node artifacts/cache/0.9.3/export-ghcr-offline.cjs --validate 2>&1 | tee artifacts/cache/0.9.3/remote-offline.log
+
+      - name: Gate 4 - real Caddy adapter and trusted HTTPS lifecycle
+        run: node artifacts/cache/0.9.3/verify-https.cjs --execute-after-image-gates 2>&1 | tee artifacts/cache/0.9.3/remote-https.log
+
+      - name: Upload verified missing assets to private release draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+        run: node artifacts/cache/0.9.3/remote-validation/upload-draft-assets.cjs --execute-after-gates
+
+      - name: Upload small publication evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-0.9.3-publish-evidence
+          path: |
+            project/artifacts/cache/0.9.3/ghcr-anonymous-verification.json
+            project/artifacts/cache/0.9.3/ghcr-offline-export.json
+            project/artifacts/cache/0.9.3/postgresql-verification.json
+            project/artifacts/cache/0.9.3/https-verification.json
+            project/artifacts/cache/0.9.3/runner-environment.json
+            project/artifacts/cache/0.9.3/draft-upload-report.json
+            project/artifacts/releases/0.9.3/labos-0.9.3-linux-amd64.json
+            project/artifacts/releases/0.9.3/labos-0.9.3-linux-arm64.json
+            project/artifacts/releases/0.9.3/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload verified twelve release assets and canonical gate reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-0.9.3-release-validation
+          path: |
+            project/artifacts/releases/0.9.3/
+            project/artifacts/cache/0.9.3/ghcr-anonymous-verification.json
+            project/artifacts/cache/0.9.3/ghcr-offline-export.json
+            project/artifacts/cache/0.9.3/postgresql-verification.json
+            project/artifacts/cache/0.9.3/https-verification.json
+            project/artifacts/cache/0.9.3/runner-environment.json
+            project/artifacts/cache/0.9.3/official-inputs.json
+          include-hidden-files: true
+          compression-level: 6
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload reports and diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-0.9.3-validation-reports
+          path: |
+            project/artifacts/cache/0.9.3/*.json
+            project/artifacts/cache/0.9.3/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
