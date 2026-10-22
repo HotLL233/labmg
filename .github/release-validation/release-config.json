@@ -1,0 +1,9 @@
+{
+  "version": "0.9.2",
+  "commit": "ae7261bb24e835509676cf04aeab02a2b8dfcfe6",
+  "indexDigest": "sha256:4196801ace6a1bbf157526f3a9034865f9d98d90fc7c28bb3c449f183fdc0898",
+  "baseParent": "f65c6a838fd9c2e338a2bc8cea278105781fb2cf",
+  "featureBranch": "feature/v0.9.2-visual-label-designer",
+  "status": "source-frozen",
+  "buildRunId": 39701491785
+}
