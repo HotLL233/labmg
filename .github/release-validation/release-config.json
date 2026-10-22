@@ -1,0 +1,9 @@
+{
+  "version": "0.10.1",
+  "commit": "5d59622b022426125d585939adffbdbda623baf9",
+  "indexDigest": "sha256:d290d6af9b834bbc4bb5c311153513c6a0c3a0c4fbbcdba78cdf1cfd039eaec7",
+  "baseParent": "df333454e0d0f899b7e0f8509f3ebd615f16e544",
+  "featureBranch": "feature/v0.10.1-docker-migration-context",
+  "status": "source-frozen",
+  "buildRunId": 39738793787
+}
