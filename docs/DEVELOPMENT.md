@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-本源码版本为 **0.9.2（可视化标签排版，开发中，尚未发布）**，使用 Node.js、PostgreSQL 和静态前端，需要 Node.js 22.13+，建议使用 Node.js 24。数据库继续为PostgreSQL18。正式部署暂取已公开0.9.1 Release的同版本附件；当前仓库部署文件已同步未发布0.9.2，不宣称该版镜像或TAR可用。旧版发布和验证记录保留，0.9.1的PG18、Edge及容器结果不作为本轮结果，实际状态见[版本说明](CHANGELOG.md)。
+本源码版本为 **0.9.2（可视化标签排版，已公开验证版）**，使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署从[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)下载同版本两份YML之一及配套附件；旧版发布和验证记录保留，0.9.1的PG18、Edge及容器结果不作为本轮结果，实际状态见[版本说明](CHANGELOG.md)。
 
 Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
@@ -52,7 +52,9 @@ artifacts/             唯一构建产物与缓存目录，不提交
 
 正式发布时新增版本及日期，保留旧条目并同步版本号、标签和相关文档。纯文档维护不自动提升业务版本。以上文件不记录真实密码、令牌或业务数据正文；根目录的 `AGENTS.md` 仅作为维护规则入口。
 
-## 0.9.2：可视化标签排版（开发中，2026-10-22）
+## 0.9.2：可视化标签排版（已公开，2026-10-22）
+
+以下保留开发及冻结前的阶段记录；本节末尾真实发布结果补充此前“尚未／待验”状态。
 
 在`feature/v0.9.2-visual-label-designer`开发，缓存集中`artifacts/cache/0.9.2/`，未来交付目标为`artifacts/releases/0.9.2/`；保留main、0.9.1及全部旧标签和产物。package、锁文件及部署配置同步0.9.2，尚未冻结、构建或发布；源码ZIP打包增加`config/label-templates/*.json`，便于随源码取得两方向留白配置。
 
@@ -69,6 +71,18 @@ artifacts/             唯一构建产物与缓存目录，不提交
 用户于2026-10-22明确反馈此前提供的38.5×30.5mm 0°／90°留白JSON“提供两方向都正常了”，补充0.9.1节内此前“实物待验”的状态。这是用户对两份已提供模板的有限实物确认，不扩展为任意布局、全部驱动或本轮0.9.2新设计器已验收；本轮未调用真实打印机、操作NAS或业务库。
 
 上述最终源码的真实浏览器专项随后通过：`artifacts/cache/0.9.2/labels/designer-ZNr88d/report.json`记录238项、4份PDF、4张桌面／390px截图、0异常，JS SHA256为`eae8cb8cb7d21835725ac629c68dd28573ccaf33056a8eefb00bba4bd74976c0`，CSS为`c4d17a6fc692a6879cf7e29449ed0939074e83209fc42b1a0a5beb7f976dfb26`。覆盖两方向、四倍率、鼠标／CDP触摸、键盘／数值同步、精度、边界、取消／捕获释放、导入保存重开及打印前不重排；首次helper释放尚未建立的捕获而失败，`designer-6fT9OV/report.json`保留，修正验证顺序后通过，未为此改产品。代理目视四图、root另目视桌面0°和手机宽90°两图；只用合成记录，打印请求拦截，原生窗口、真手机、USB及正式PG18／镜像仍按后续真实门禁记录。
+
+上述正式门禁与交付随后完成：[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)已公开为prerelease（420193133），源码冻结`ae7261bb24e835509676cf04aeab02a2b8dfcfe6`／`v0.9.2`，注解标签对象`4329a74e6336ef0ed974996b00005f1757a2e129`。构建`39701491785`／job`119571521058`原日志独立确认真实PG18.6回归179/179、0失败／跳过、37JS通过；双架构应用索引`sha256:4196801ace6a1bbf157526f3a9034865f9d98d90fc7c28bb3c449f183fdc0898`经匿名registry元数据核对。
+
+验证`39701897267`／运维提交`55363abe101a3d5850d7427c5859dc998eb38fbe`四门禁通过：匿名双架构与在线Compose、同次在线执行的PG18六项持久化证据、禁止拉取的三镜像双TAR、本实例CA严格可信的无SNI Caddy HTTPS。三份原TAP独立复核各1通过、0失败／跳过、root初始化标记各1；PG captured不另算生命周期，ARM64为QEMU。原始日志及官方证据由`artifacts/cache/0.9.2/root-release-evidence-review.json`独立复核。
+
+本机下载初次blob复用方式进度慢，仅复用2字节后主动停止本轮精确进程，`blob-reuse-download-ksS6gq/report.json`记为interrupted，部分缓存保留。改用既有并行分段工具后，`range-download-8b984c0076f2f4effc53/attempt-TPrm7R/report.json`为passed：amd64共59段、arm64共58段，少量Range超时重试后两包均通过官方完整大小及SHA256核对，才原子新建目标TAR；不改旧包或冻结附件。
+
+本机`artifacts/releases/0.9.2/`完整保存12件共488902906字节，11条摘要、5份独立源附件与冻结ZIP逐字节一致；双TAR各含应用、PG18、Caddy三镜像，六份Linux config架构及摘要通过，报告`local-delivery-verification.json`与`local-image-archive-verification.json`均为passed。未在本机运行Docker或逐层读取层正文。源码ZIP包含`config/label-templates/`两份留白JSON；用户此前的实物确认仅覆盖这两份旧模板，不代表新设计器或所有纸型已实物通过。
+
+公开后`github-release-verification.json`为passed：12件官方元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过；两TAR完整下载另由本机报告证明，不称匿名全量TAR或浏览器Release界面验收。
+
+后补仅改当前文档，不重打冻结ZIP／镜像、替换发布附件或移动标签；附件中的指南保留源码冻结时的阶段快照。0.9.1及全部旧记录继续保留。本轮未访问NAS或业务库，未打开原生系统打印窗口、操作驱动、USB打印机或真手机，物理送料及长期容量仍须现场验收。
 
 ## 0.9.1：打印纸张提示与排查（已公开，2026-10-21）
 
@@ -435,7 +449,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前在线Compose应用镜像为`ghcr.io/hotll233/labmg:0.9.1`，本地为`labos:0.9.1`，均已正式交付；本轮构建、匿名双架构、容器及附件验证结果见上方0.9.1条目。两份配置均含应用、PG18、初始化与Caddy四服务，`runtime/`与`https/`固定在YML旁；在线版与本地版各自单独使用。同一PG18项目更新保留原存储，不实施旧数据库主版本迁移。具体部署说明及DS918+父目录准备要求见[群晖部署](SYNOLOGY.md)。历史0.8.0冻结`b4d0df5`／`v0.8.0`及0.7.0冻结`ef9d0f6`／`v0.7.0`继续保留，各版实际结果见本页历史条目。
+当前在线Compose应用镜像为`ghcr.io/hotll233/labmg:0.9.2`，本地为`labos:0.9.2`，均已交付；本轮构建、匿名双架构、容器及本机附件验证结果见上方0.9.2条目。两份配置均含应用、PG18、初始化与Caddy四服务，`runtime/`与`https/`固定在YML旁；在线版与本地版各自单独使用。同一PG18项目更新保留原存储，不实施旧数据库主版本迁移。具体部署说明及DS918+父目录准备要求见[群晖部署](SYNOLOGY.md)。历史0.9.1及更早冻结标签、产物和验证结果保留，各版实际结果见本页历史条目。
 
 历史：0.6.2 在线镜像为 `ghcr.io/hotll233/labmg:0.6.2`，冻结源码为 `989554e`／`v0.6.2`。此前已将其开发初期“尚未冻结／发布”更正为公开验证版；0.6.1 及更早验证记录保留，不能替代本版结果。
 
@@ -467,7 +481,7 @@ npm run package:docker
 
 该命令先生成并校验同版本源码 ZIP，再从这个快照构建 `linux/amd64` 和 `linux/arm64` 镜像，使用 `docker save` 导出 TAR。镜像标签为 `labos:<version>`，版本和源码提交写入 OCI 标签；每架构有独立 TAR 与 JSON 校验清单，部署时只导入适合目标架构的一份。YML、环境示例和群晖说明另放发布目录，便于直接取用。
 
-0.9.1每架构一份应用+PG18+Caddy三镜像TAR已公开，全部12件交付已在本机完整保存并通过大小、摘要和冻结源附件核对；双TAR各三镜像及六config的架构／摘要检查通过。导入并核对同版本、同架构TAR后单独使用配套`docker-compose.local.yml`，四服务均禁止拉取，无需通过`.env`改应用标签；在线YML与本地YML是两份完整配置，不叠加。上一公开0.9.0两架构TAR及全部附件保持原样。
+0.9.2每架构一份应用+PG18+Caddy三镜像TAR已公开，全部12件交付已在本机完整保存并通过大小、11条摘要和5份冻结源附件核对；双TAR各三镜像及六config架构／摘要检查通过。导入并核对同版本、同架构TAR后单独使用配套`docker-compose.local.yml`，四服务均禁止拉取，无需通过`.env`改应用标签；在线YML与本地YML是两份完整配置，不叠加。上一公开0.9.1两架构TAR及全部旧附件保持原样。
 
 以下保留0.8.0时的交付说明：
 
@@ -480,7 +494,7 @@ npm run package:docker
 `tests/docker.test.js` 只有设置 `LABOS_DOCKER_IMAGE` 并预装同架构 PG18、Caddy 镜像时才运行真实容器检查；普通 `npm test` 会明确跳过该项。`LABOS_DOCKER_MODE` 仅允许 `online`／`local`，默认读取在线 YML；离线必须设为 `local`，实际读取本地 YML 并断言固定应用标签及四服务禁止拉取。例如在三镜像已导入后：
 
 ```powershell
-$env:LABOS_DOCKER_IMAGE = 'labos:0.9.1' # 先导入本架构三镜像TAR
+$env:LABOS_DOCKER_IMAGE = 'labos:0.9.2' # 先导入本架构三镜像TAR
 $env:LABOS_DOCKER_MODE = 'local'
 node --test tests/docker.test.js
 Remove-Item Env:LABOS_DOCKER_MODE

@@ -667,3 +667,19 @@ Release419049884已正式公开为0.9.1 prerelease；`public-release-final-check
 发布helper首次总自检因CHANGELOG缺少0.9.2未发布说明而失败，原`offline-self-check-first-attempt.json`保留。文档补充后`release-helper-self-check.json`通过：29份CJS语法、3段workflow内联、30份旧helper摘要保护、12附件／11摘要／7初始输入清单及合成三镜像TAR正负例；不等同正式冻结ZIP验证、Docker或发布门禁，未联网、读取凭据、推送或发布。最终真实浏览器、正式PG18及容器门禁仍待本轮结果；尚未冻结或发布，旧版计数不作为本轮结果。
 
 最终真实浏览器专项随后完成：`artifacts/cache/0.9.2/labels/designer-ZNr88d/report.json`通过238项、4份PDF、4张桌面／390px截图、0异常，绑定JS SHA256 `eae8cb8cb7d21835725ac629c68dd28573ccaf33056a8eefb00bba4bd74976c0`及CSS `c4d17a6fc692a6879cf7e29449ed0939074e83209fc42b1a0a5beb7f976dfb26`，执行中未变。覆盖两方向、四倍率、真实鼠标与CDP触摸、任意精度、校准边界、取消／捕获释放、键盘与数值联动、保存重开、范围与固定实体页，屏幕二维码解码通过。代理目视四图，root另目视桌面0°和390px的90°图，横向溢出限制在预览内部。首次`designer-6fT9OV/report.json`因helper未先建立捕获就释放而失败，修正顺序后通过，未为此改产品。浏览器专项只用合成记录、拦截系统打印请求，未访问NAS／业务库或原生系统窗口、真手机、驱动、USB；正式PG18、容器和发布门禁继续执行。
+
+## 2026-10-22：0.9.2冻结、正式门禁与公开交付
+
+源码冻结`ae7261bb24e835509676cf04aeab02a2b8dfcfe6`／`v0.9.2`，注解标签对象`4329a74e6336ef0ed974996b00005f1757a2e129`。构建`39701491785`／job`119571521058`成功，原日志229094字节、SHA256 `10039ab6a33f83975d71431ac73bde004176dcb37da3644fe17db1aa0410e60d`独立确认真实PG18.6回归179/179、0失败／跳过、37JS通过；双架构应用索引`sha256:4196801ace6a1bbf157526f3a9034865f9d98d90fc7c28bb3c449f183fdc0898`经匿名registry元数据核对。
+
+验证`39701897267`／运维提交`55363abe101a3d5850d7427c5859dc998eb38fbe`四门禁通过：匿名双架构与在线Compose、同次在线执行的PG18六项持久化证据、禁止拉取的三镜像双TAR、本实例CA严格可信的无SNI Caddy HTTPS。三份原TAP独立复核各1通过、0失败／跳过、root初始化标记各1；PG captured不另算生命周期，ARM64为QEMU。原始日志及官方证据由`artifacts/cache/0.9.2/root-release-evidence-review.json`独立复核。
+
+本机下载初次blob复用方式进度慢，仅复用2字节后主动停止本轮精确进程，`blob-reuse-download-ksS6gq/report.json`记为interrupted，部分缓存保留。改用既有并行分段工具后，`range-download-8b984c0076f2f4effc53/attempt-TPrm7R/report.json`为passed：amd64共59段、arm64共58段，少量Range超时重试后两包均通过官方完整大小及SHA256核对，才原子新建目标TAR；不改旧包或冻结附件。
+
+本机`local-delivery-verification.json`确认12件共488902906字节，11条SHA256SUMS、5份独立源附件与冻结ZIP逐字节一致。源码ZIP662326字节、SHA256 `c8bedb9fb1dc1623eb66611585af82051153e6371c422900adb035a1489d80b7`，manifest sourceSha256为`91b44c0eede267fbb6c20075363142b77fc0c1ba9511eb39de18242bf88f43cd`。amd64 TAR245685248字节、SHA256 `8f314ab6cdaa019c10d0ce1d562496de4141797fb427c867e4093773b8aa49cc`；arm64 TAR242418176字节、SHA256 `b0e926d8e9e01fed3acf60e825188d33891bb971286864de842ba9933475577e`。`local-image-archive-verification.json`确认各包恰含labos:0.9.2、postgres:18-bookworm、caddy:2.11.7-alpine，六份Linux config架构及摘要通过；本机未运行Docker或逐层读取层正文。
+
+[0.9.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.9.2)已公开为prerelease（420193133）。README、开发与群晖说明、标签指南、MEMORY及统一CHANGELOG补记真实结果；四条明确0.9.2变更归入2026-10-22版本，其他纯文档未发布项及所有历史保留。MEMORY中陈旧0.7.0“当前工作流”行标为历史并保留原文，新增0.9.2真实当前行。两份留白JSON随源码ZIP交付，用户此前的实物确认只覆盖这两份模板，不扩展为新设计器或全部纸型已通过。
+
+公开后`github-release-verification.json`为passed：12件官方元数据与11摘要一致，10个非TAR附件共799482字节经官方API匿名完整下载通过；两TAR完整下载另由本机报告证明，不称匿名全量TAR或浏览器Release界面验收。
+
+后补仅改当前文档，不重打冻结ZIP／镜像、替换发布附件或移动标签；附件中的指南保留源码冻结时的阶段快照。0.9.1及全部旧记录继续保留。本轮未访问NAS或业务库，未打开原生系统打印窗口、操作驱动、USB打印机或真手机，物理送料及长期容量仍须现场验收。
