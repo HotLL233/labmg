@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 
-ARG VERSION=0.12.0
+ARG VERSION=0.13.0
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/HotLL233/labmg" \
       org.opencontainers.image.version=$VERSION \

@@ -69,7 +69,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     const results = {
-      '/api/auth/me': { user }, '/api/ui-config/nav': nav,
+      '/api/auth/me': { user, appVersion: require('../package.json').version }, '/api/ui-config/nav': nav,
       '/api/ui-config/dashboard': nav.map(row => ({ ...row, kind: 'module', description: '合成模块说明' })),
       '/api/dashboard': { totals: { archives: 1 }, finance: { income: 0, expense: 0 }, warnings: 0 },
       '/api/permissions': { catalog: ['archives.read'], roles, roleNames: { ADMIN: '系统管理员', MATERIAL: '物资管理员' }, sections: {} },
@@ -129,7 +129,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
   const checkTables = async (label, selector = '#page .table') => {
     const tables = await page.locator(selector).evaluateAll(nodes => nodes.map(container => {
       const table = container.querySelector('table'), headers = [...table.querySelectorAll('thead th')].map(node => node.textContent.trim());
-      const rows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('[colspan]'));
+      const rows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('[colspan]') && getComputedStyle(row).display !== 'none');
       return { containerWidth: container.clientWidth, scrollWidth: container.scrollWidth, tableWidth: table.getBoundingClientRect().width,
         display: getComputedStyle(table).display, headerDisplay: getComputedStyle(table.querySelector('thead')).display,
         rows: rows.map(row => ({ display: getComputedStyle(row).display, fields: [...row.children].map((cell, index) => ({
@@ -222,29 +222,27 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       await checkTables(`${width}px materials ${materialPage}`);
       if (materialPage === 'inventory') {
         assert.deepEqual(await page.locator('#page .table thead th').allTextContents(), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
-        assert.equal(await page.locator('.stock-group-head').count(), 1, 'same material shares one total heading');
-        assert.match(await page.locator('.stock-group-head').textContent(), /全部仓库／区域.*3 瓶/);
+        assert.equal(await page.locator('.stock-group-head').count(), 0, 'stock rows retain one record per batch without repeated group headings');
         assert.equal(await page.locator('#page td.num').count(), 2, 'manufacturer detail keeps two numeric quantity rows');
         assert.deepEqual(await page.locator('#page tbody tr:not(.stock-group-head) td:nth-child(6)').allTextContents(), ['合成厂家甲', '合成厂家乙']);
-        const details = page.locator('.stock-detail').first();
-        await details.locator('summary').click();
+        await page.locator('[data-mw="stock-detail"]').first().click();
+        const details = page.locator('#mw-view');
+        await details.waitFor({ state: 'visible' });
         assert.match(await details.textContent(), /合成柜第2层/);
         assert.match(await details.textContent(), /合成档案备注/);
+        assert.match(await details.textContent(), /全部仓库.*区域.*3 瓶/);
         assert.equal(await details.locator('[data-mw="stock-issue"]').isVisible(), true, 'issue action remains reachable in batch details');
         await checkLayout(`${width}px expanded stock detail`);
+        await details.locator('[data-mw="close-view"]').first().click();
       }
       if ([390, 1440].includes(width) && ['acceptance', 'inventory'].includes(materialPage)) await page.screenshot({ path: path.join(screenshots, `${width}-materials-${materialPage}.png`), fullPage: true });
     }
-    await page.locator('#page [data-mw="dictionaries"]').click();
-    await page.locator('#mw-view').waitFor({ state: 'visible' });
-    await checkTables(`${width}px material catalog dialog`, '#mw-view .table');
-    assert.ok(await page.locator('#mw-view').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog dialog keeps scrolling inside its table');
-    const previousScroll = await page.locator('#mw-view').evaluate(node => { node.scrollTop = node.scrollHeight; return node.scrollTop; });
-    if (width === 390) assert.ok(previousScroll > 0, 'phone catalog creates a real scrolling dialog');
-    await page.locator('#mw-view [data-mw="close-view"]').first().click();
-    await page.locator('#page [data-mw="dictionaries"]').click();
-    assert.equal(await page.locator('#mw-view').evaluate(node => node.scrollTop), 0, 'reopening shared details starts at its heading');
-    await page.locator('#mw-view [data-mw="catalog-edit"]').click();
+    await page.locator('.mw-nav [data-page="catalog"]').click();
+    await page.locator('#page [data-mw="catalog-edit"]').waitFor();
+    await checkTables(`${width}px material catalog workspace`);
+    assert.ok(await page.locator('#page .table').evaluate(node => node.scrollWidth <= node.clientWidth + 1 || innerWidth >= 768), 'catalog card layout stays inside its workspace');
+    assert.match(await page.locator('#page tbody td strong').first().textContent(), /布局检查物资/);
+    await page.locator('#page [data-mw="catalog-edit"]').click();
     await page.locator('#mw-dialog').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#mw-fields [name="unit"]').getAttribute('readonly'), '', 'referenced catalog keeps its stock unit');
     assert.equal(await page.locator('#mw-laboratory-fields').isVisible(), true, 'chemical-category editing exposes laboratory fields');
@@ -252,26 +250,25 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog edit keeps fields inside the dialog');
     if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(screenshots, `${width}-catalog-edit.png`) });
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
-    await page.locator('#page [data-mw="dictionaries"]').click();
-    await page.locator('#mw-view [data-mw="numbering-rules"]').click();
-    await page.locator('#mw-view [data-mw="numbering-edit"]').first().waitFor();
-    await checkTables(`${width}px numbering rules dialog`, '#mw-view .table');
-    await page.locator('#mw-view [data-mw="numbering-edit"]').first().click();
+    await page.locator('.mw-nav [data-page="settings"]').click();
+    await page.locator('#page [data-mw="setting"][data-setting="numbering"]').click();
+    await page.locator('#page [data-mw="numbering-edit"]').first().waitFor();
+    await checkTables(`${width}px numbering rules workspace`);
+    await page.locator('#page [data-mw="numbering-edit"]').first().click();
     await page.locator('#mw-fields [name="template"]').fill('MAT-{YYYY}-{SEQ}');
     assert.match(await page.locator('#mw-numbering-preview').textContent(), /MAT-\d{4}-000020/);
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'numbering edit keeps preview inside the dialog');
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
-    await page.locator('#page [data-mw="dictionaries"]').click();
-    await page.locator('#mw-view [data-mw="storage-places"]').click();
-    await page.locator('#mw-view [data-mw="place-new"]').waitFor();
-    await checkTables(`${width}px storage places dialog`, '#mw-view .table');
+    await page.locator('#page [data-mw="setting"][data-setting="places"]').click();
+    await page.locator('#page [data-mw="place-new"]').waitFor();
+    await checkTables(`${width}px storage places workspace`);
     if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(screenshots, `${width}-storage-places.png`) });
-    await page.locator('#mw-view [data-mw="place-new"]').click();
+    await page.locator('#page [data-mw="place-new"]').click();
     assert.match(await page.locator('#mw-fields [name="parentId"]').textContent(), /合成房间 \/ 试剂柜/);
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'place edit remains within the dialog');
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
-    await page.locator('#page [data-mw="dictionaries"]').click();
-    await page.locator('#mw-view [data-mw="close-view"]').first().click();
+    await page.locator('#page [data-mw="setting"][data-setting="numbering"]').click();
     await page.locator('#page [data-mw="label-template"]').click();
     await page.locator('#material-label-designer').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#material-label-designer table').evaluate(node => getComputedStyle(node).display), 'table', 'label design coordinates retain their table layout');
@@ -292,7 +289,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     await dialog.locator('[type="submit"]').scrollIntoViewIfNeeded();
     assert.ok(await dialog.locator('[type="submit"]').isVisible(), 'long form save action remains reachable');
     const bounds = await dialog.boundingBox();
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1 && bounds.height <= 822, `${width}px long dialog fits viewport`);
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1 && bounds.y >= 0 && bounds.y + bounds.height <= page.viewportSize().height + 1, `${width}px long dialog fits viewport`);
     if (width < 900) await page.screenshot({ path: path.join(screenshots, `${width}-long-form.png`) });
     await page.evaluate(() => editor.close());
     await page.evaluate(() => show(1));

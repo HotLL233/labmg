@@ -96,7 +96,7 @@ async function fixture(t, legacy = false, options = {}) {
 
 test('empty databases require validated same-origin administrator setup without a default password', { timeout: 30000 }, async t => {
   const f = await fixture(t, false, { setup: true, environment: { LABOS_ADMIN_USER: undefined, LABOS_ADMIN_PASSWORD: undefined } });
-  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: true, setupUsername: 'admin' });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, appVersion: require('../package.json').version, setupRequired: true, setupUsername: 'admin' });
   await f.request('POST', '/api/auth/login', null, { username: 'admin', password: 'admin123' }, 401);
   const valid = { username: 'first-admin', password: 'setup123', passwordConfirm: 'setup123' };
   for (const input of [null, [], {}, { ...valid, username: 12 }, { ...valid, username: '' }, { ...valid, username: '  ' }, { ...valid, username: 'u'.repeat(65) }, { ...valid, password: 12345678 }, { ...valid, password: 'short12', passwordConfirm: 'short12' }, { ...valid, password: ' '.repeat(8), passwordConfirm: ' '.repeat(8) }, { ...valid, password: 'p'.repeat(1025), passwordConfirm: 'p'.repeat(1025) }, { ...valid, passwordConfirm: 'different' }, { username: valid.username, password: valid.password }]) {
@@ -116,6 +116,7 @@ test('empty databases require validated same-origin administrator setup without 
   assert.match(result.headers.get('set-cookie'), /Path=\/; HttpOnly; SameSite=Lax; Max-Age=86400/);
   const cookie = result.headers.get('set-cookie').split(';')[0];
   const me = (await f.request('GET', '/api/auth/me', cookie)).data;
+  assert.equal(me.appVersion, require('../package.json').version);
   assert.equal(me.setupRequired, false);
   assert.equal(me.setupUsername, undefined);
   assert.equal(me.user.id, result.data.user.id);
@@ -130,7 +131,7 @@ test('empty databases require validated same-origin administrator setup without 
 
 test('concurrent first setup creates one administrator and remains closed after restart', { timeout: 30000 }, async t => {
   const f = await fixture(t, false, { setup: true, environment: { LABOS_ADMIN_USER: 'suggested-admin', LABOS_ADMIN_PASSWORD: '' } });
-  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: true, setupUsername: 'suggested-admin' });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, appVersion: require('../package.json').version, setupRequired: true, setupUsername: 'suggested-admin' });
   const attempts = ['setup-one', 'setup-two'].map(username => ({ username, password: 'setup123', passwordConfirm: 'setup123' }));
   const results = await Promise.all(attempts.map(input => f.request('POST', '/api/auth/setup', null, input, [201, 409])));
   assert.deepEqual(results.map(result => result.status).sort(), [201, 409]);
@@ -155,7 +156,7 @@ test('any existing user disables setup and explicit initialization never overwri
   await f.sql(async db => await db.prepare('DELETE FROM users WHERE username=?').run('legacy-admin'));
   const original = await f.sql(async db => (await db.prepare('SELECT * FROM users').get()));
   await f.restart({ LABOS_ADMIN_USER: 'new-admin', LABOS_ADMIN_PASSWORD: 'new-password' });
-  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, setupRequired: false });
+  assert.deepEqual((await f.request('GET', '/api/auth/me')).data, { user: null, appVersion: require('../package.json').version, setupRequired: false });
   await f.request('POST', '/api/auth/setup', null, { username: 'new-admin', password: 'setup123', passwordConfirm: 'setup123' }, 409);
   assert.deepEqual(await f.sql(async db => (await db.prepare('SELECT * FROM users').all())), [original]);
 });

@@ -1,0 +1,79 @@
+/* 记录工作区：沿用现有控件、表格和手机DOM，打印样式保持独立。 */
+@media screen{
+  .layout>main>header{position:sticky;top:0;z-index:45;height:auto;min-height:64px;padding:10px 20px;gap:12px}
+  .header-heading h1{font-size:var(--fs-panel);margin:0}
+  .header-heading #subtitle{display:none}
+  .session{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  #app-version{font-size:var(--fs-note);color:var(--c-text-2);white-space:nowrap}
+  #session-user{font-size:var(--fs-label);max-width:180px;overflow-wrap:anywhere}
+  .ws-logout{border:1px solid var(--c-danger);color:var(--c-danger);background:var(--c-surface);font-weight:600;white-space:nowrap;min-height:36px}
+  .header-tools{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  .header-tools #search{width:min(320px,100%);min-width:0;flex:1}
+  .page{padding:16px 20px;min-width:0}
+  #page{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
+  #page>.toolbar{margin-bottom:0}
+  .page>.toolbar{min-height:36px;margin-bottom:8px}
+  .ws-records{overscroll-behavior:contain;border-radius:var(--r-sm)}
+  .ws-records th{position:sticky;top:0;z-index:2;background:var(--c-subtle)}
+  .ws-records td,.ws-dialog .table td{font-size:var(--fs-body);padding:10px 12px;line-height:1.35;border-right:1px solid var(--c-line)}
+  .ws-records th,.ws-dialog .table th{font-size:var(--fs-label);padding:9px 12px;border-right:1px solid var(--c-line)}
+  .ws-records td small{display:block;font-size:var(--fs-note);color:var(--c-text-2)}
+  .ws-records tr:hover{background:var(--c-primary-50)}
+  .ws-records tr[hidden]{display:none!important}
+  .ws-pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:44px;padding:6px 0;font-size:var(--fs-label);flex-wrap:wrap}
+  .ws-page-status{margin-right:auto;color:var(--c-text-2)}
+  .ws-pagination button{padding:7px 12px;min-height:32px}
+  .ws-pagination button:disabled{opacity:.45;cursor:default}
+  dialog.ws-dialog{position:fixed;inset:12px 12px 12px 257px;margin:0;width:auto;max-width:none;height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);padding:0;border-radius:var(--r-md);overflow:hidden}
+  dialog.ws-dialog[open]{display:flex;flex-direction:column}
+  .ws-dialog>.ws-context{display:flex;align-items:center;gap:12px;padding:8px 16px;min-height:52px;flex-shrink:0;border-bottom:1px solid var(--c-line);background:var(--c-subtle);font-size:var(--fs-label)}
+  .ws-context-brand{margin-right:auto;font-weight:600;white-space:nowrap}
+  .ws-context [data-ws-version]{font-weight:400;font-size:var(--fs-note);color:var(--c-text-2)}
+  .ws-context [data-ws-user]{overflow-wrap:anywhere;min-width:0}
+  .ws-dialog>form{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
+  .ws-dialog .modal-head,.ws-dialog .mw-dialog-head{display:flex;align-items:center;gap:12px;padding:12px 16px;margin:0;border-bottom:1px solid var(--c-line);flex-shrink:0}
+  .ws-dialog .modal-head h2,.ws-dialog .mw-dialog-head h2{font-size:var(--fs-panel);margin:0}
+  .ws-dialog .modal-head p{margin:4px 0 0;font-size:var(--fs-note)}
+  .ws-dialog .modal-head .x{font-size:var(--fs-label);white-space:nowrap;height:auto;min-height:36px}
+  .ws-dialog-scroll,.ws-dialog .mw-dialog-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px;flex:1}
+  .ws-dialog-scroll .grid{margin-top:0;gap:12px 16px}
+  .ws-dialog footer,.ws-dialog .mw-dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;margin:0;border-top:1px solid var(--c-line);background:var(--c-surface);flex-shrink:0;flex-wrap:wrap}
+  .ws-dialog .table{max-width:100%}
+  .ws-dialog :is(input,select,textarea){max-width:100%}
+  .ws-dialog [role=alert]{overflow-wrap:anywhere}
+  .ws-dialog #file-error{color:var(--c-danger);border:1px solid var(--c-danger);border-radius:var(--r-sm);padding:10px 12px;background:var(--c-subtle)}
+  .ws-dialog .detail-item{border:1px solid var(--c-line);background:var(--c-surface)}
+  .ws-dialog .detail-grid{gap:8px}
+}
+@media screen and (min-width:1280px){.ws-dialog .detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ws-dialog .detail-item{padding:8px 12px}}
+@media screen and (min-width:768px) and (max-width:1279px){dialog.ws-dialog{left:84px}}
+@media screen and (max-width:767px){
+  .layout>main>header{padding:8px 12px;flex-direction:row;align-items:center;gap:8px}
+  .header-heading{gap:8px;min-width:0}
+  .header-heading h1{font-size:var(--fs-panel);overflow-wrap:anywhere}
+  .session{gap:8px;margin-left:auto;justify-content:flex-end}
+  #session-user{max-width:110px;font-size:var(--fs-note)}
+  .ws-logout{min-height:44px;padding:8px 10px}
+  .header-tools{flex-wrap:wrap}
+  .header-tools #search{flex-basis:180px}
+  .page{padding:12px}
+  .ws-records{max-height:none!important;overflow:visible}
+  .ws-pagination{padding-bottom:12px}
+  .ws-pagination button{min-height:44px}
+  dialog.ws-dialog{inset:8px;height:calc(100dvh - 16px);max-height:calc(100dvh - 16px)}
+  .ws-dialog>.ws-context{padding:8px 12px;gap:8px;flex-wrap:wrap}
+  .ws-context [data-ws-user]{font-size:var(--fs-note);max-width:100px}
+  .ws-dialog .modal-head,.ws-dialog .mw-dialog-head{padding:10px 12px}
+  .ws-dialog-scroll,.ws-dialog .mw-dialog-body{padding:12px}
+  .ws-dialog .grid,.ws-dialog .detail-grid{grid-template-columns:minmax(0,1fr)}
+  .ws-dialog .table{overflow:visible;border:0;background:transparent}
+  .ws-dialog .table table,.ws-dialog .table tbody{display:block;min-width:0;white-space:normal}
+  .ws-dialog .table thead{display:none}
+  .ws-dialog .table tr{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;padding:12px;margin-bottom:10px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md)}
+  .ws-dialog .table td{display:block;padding:0;border:0;min-width:0;white-space:normal;overflow-wrap:anywhere}
+  .ws-dialog .table td[data-label]::before{content:attr(data-label);display:block;font-size:var(--fs-note);color:var(--c-text-2);margin-bottom:2px}
+  .ws-dialog .table td:first-child,.ws-dialog .table td.cell-act{grid-column:1/-1}
+  .ws-dialog .table td.cell-act{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+}
+@media screen and (max-width:390px){.ws-dialog .table tr{grid-template-columns:1fr}.session #session-user{max-width:90px}}
+@media print{.ws-context,.ws-pagination{display:none!important}.ws-records{max-height:none!important;overflow:visible!important}.ws-records tr[hidden]{display:table-row!important}.ws-dialog-scroll{overflow:visible!important}}

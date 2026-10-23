@@ -1,12 +1,14 @@
 # 开发与版本管理
 
-当前版本为 **0.12.0（公开验证版，2026-10-23）**，开发分支`feature/v0.12.0-lab-material-maintenance`，基于b8d9214，冻结源码`0afad25367edee03814f7f4645de1dab5012182b`／`v0.12.0`。物资资料维护、草稿整单删除／未验收申报取消、分类编号、层级库位及化学试剂字段已交付。新增0004／0005加法迁移和schema7备份合同；旧编码与历史快照保留，物资Excel升级10列兼容旧6／5列，库存仍13列。合同见[MATERIAL_API](MATERIAL_API.md)及[Excel说明](EXCEL_IMPORT_EXPORT.md)。
+当前开发 **0.13.0（记录工作区，本机验收完成，待发布）**，分支`feature/v0.13.0-record-workspaces`，基于方案提交687ba4d。按[新工作区方案](UI_WORKSPACE_OPTIMIZATION.md)执行W1–W4，[施工卡](UI_施工卡.md)第9节补充具体范围。缓存使用`artifacts/cache/0.13.0/`，专用测试PG18.4为127.0.0.1:54950及该版postgres/data；不接日常数据库。本机专用PG18.4整轮247项246通过／0失败／1本机Docker条件跳过；最后异步详情增量后，前端VM与两份Edge布局共72/72通过，重叠用例不重复计总。真实API＋Edge最终1333检查／27图／0脚本异常，覆盖五种宽高及低高度降级；47JS与普通／严格UI审计各8/0/0通过。正式CI、双架构镜像、四门禁及公开交付仍等待本版新证据，升版本不等于镜像已发布。
+
+最新公开版本为 **0.12.0（公开验证版，2026-10-23）**，开发分支`feature/v0.12.0-lab-material-maintenance`，基于b8d9214，冻结源码`0afad25367edee03814f7f4645de1dab5012182b`／`v0.12.0`。物资资料维护、草稿整单删除／未验收申报取消、分类编号、层级库位及化学试剂字段已交付。新增0004／0005加法迁移和schema7备份合同；旧编码与历史快照保留，物资Excel升级10列兼容旧6／5列，库存仍13列。合同见[MATERIAL_API](MATERIAL_API.md)及[Excel说明](EXCEL_IMPORT_EXPORT.md)。
 
 本版新构建39896388360的原日志确认真实PG18.6回归236/236、0失败／跳过、45JS通过；验证39897052388四门禁通过，原三TAP、同次PG六项和严格可信空SNI自动HTTPS经root独立复读。ARM64为QEMU。本机`artifacts/releases/0.12.0/`完整12件489228347字节、11摘要、5份冻结源附件及双TAR三镜像／六config均通过；正式部署取[0.12.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.12.0)的同版文件。保留原PG18项目`runtime/`、`https/`和UID/GID，先备份PostgreSQL与附件；schema7备份不可交旧版恢复，回退须还原升级前数据库。未自动升级NAS或验收实体手机、原生Excel／WPS与USB打印。附件保留冻结时的候选说明，发布后文档补记不移动标签或重打资产。
 
 本机源码阶段记录保留：专用PG18.4全文件240项239通过／0失败／1容器条件跳过，最后化学复用增量另1通过；45JS、两种UI8/0/0、VM63/63、最终Edge布局及实际PG18＋Edge76断言通过。专用54940已精确清理剩余库0并fast停止，证据在`artifacts/cache/0.12.0/`，原中途PG退出失败记录保留，不接生产运行库。这些本机结果与上方正式PG18 CI、容器门禁分别记录，不叠加重复用例。
 
-当前设计分支`feature/ui-workspace-design`基于发布后文档提交5fb3a38，仅新增[页面密度与记录工作区方案](UI_WORKSPACE_OPTIMIZATION.md)及[HTML参考](prototypes/ui-workspace-compact.html)。方案覆盖常驻应用版本／退出、名称主显、主数据分区、记录表与多级返回；桌面尽量一屏，长内容和手机允许必要滚动。此轮为分析与离线原型，正式页面尚未改动，不升业务版本或重打镜像；验证缓存集中`artifacts/cache/0.12.0/ui-workspace-design/`。
+前期设计分支`feature/ui-workspace-design`基于发布后文档提交5fb3a38，当时仅新增[页面密度与记录工作区方案](UI_WORKSPACE_OPTIMIZATION.md)及[HTML参考](prototypes/ui-workspace-compact.html)。方案覆盖常驻应用版本／退出、名称主显、主数据分区、记录表与多级返回；桌面尽量一屏，长内容和手机允许必要滚动。当时只做分析与离线原型，正式页面未改动，不升业务版本或重打镜像；验证缓存集中`artifacts/cache/0.12.0/ui-workspace-design/`。用户随后批准的正式0.13.0实施见本文顶部，保留该阶段历史范围。
 
 上一公开版本 **0.11.1（验证版，2026-10-23）**，统一Excel导入模板／导出报表、修正大单据备份恢复限制，并整合手机页头折行补丁。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。[0.11.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.1)及`artifacts/releases/0.11.1/`保持原样；其PG18.6回归216/216、43JS及四门禁仅为该版历史证据。更新后从当前程序重新下载模板，操作见[Excel模板与报表](EXCEL_IMPORT_EXPORT.md)。
 

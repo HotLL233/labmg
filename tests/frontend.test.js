@@ -27,6 +27,11 @@ class Element {
     }
   }
   get id() { return this.attrs.id; }
+  get parentNode() { return this.parent; }
+  get nextSibling() { return this.parent?.children[this.parent.children.indexOf(this)+1] || null; }
+  get nextElementSibling() { return this.nextSibling; }
+  get className() { return [...this.classes].join(' '); }
+  set className(value) { this.attrs.class = value; this.classes = new Set(value.split(/\s+/)); }
   set id(value) { this.attrs.id = value; }
   get name() { return this.attrs.name; }
   set name(value) { this.attrs.name = value; }
@@ -52,11 +57,20 @@ class Element {
   }
   get textContent() { return this._text + this.children.map(node => node.textContent).join(''); }
   set textContent(value) { this._text = String(value); this.children = []; }
-  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  appendChild(child) { if(child.parent)child.parent.children.splice(child.parent.children.indexOf(child),1);child.parent = this; this.children.push(child); return child; }
   append(child) { return this.appendChild(child); }
   remove() { if(this.parent)this.parent.children.splice(this.parent.children.indexOf(this),1); }
   contains(node) { return node===this||this.children.some(child=>child.contains(node)); }
-  addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
+  addEventListener(type, handler) {
+    const handlers=(this.eventHandlers ||= {})[type] ||= [];handlers.push(handler);
+    (this.listeners ||= {})[type]=event=>{
+      if(event&&!('defaultPrevented' in event)){
+        const prevent=event.preventDefault?.bind(event);event.defaultPrevented=false;
+        event.preventDefault=()=>{event.defaultPrevented=true;prevent?.();};
+      }
+      return Promise.all(handlers.map(listener=>listener(event)));
+    };
+  }
   hasAttribute(name) { return Object.hasOwn(this.attrs, name); }
   getAttribute(name) { return this.hasAttribute(name) ? this.attrs[name] : null; }
   setAttribute(name, value) { this.attrs[name] = value; }
@@ -141,7 +155,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   }));
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
   const requests = [], timers = new Map();
-  const state = { conflict: false, hold: null, auth: { user, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
+  const state = { conflict: false, hold: null, auth: { user, appVersion: require('../package.json').version, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
     materialOpeningClosed: false, materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [], materialLists: {}, materialResponse: null,
     materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
   const nav = ['dashboard', ...modules, 'management', 'audit', 'datahub', 'trash'].map(target => ({ key: target, target, label: target, icon: '', description: '', visible: 1, sort_order: 0 }));
@@ -368,7 +382,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['app.js', 'material-scan.js', 'material-labels.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['workspace.js', 'app.js', 'material-scan.js', 'material-labels.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -398,6 +412,159 @@ test('actual script order keeps shared state and correct CRUD payloads across bu
     assert.equal(app.run('current'), module);
     assert.equal(app.run(`items.some(row=>row.id===${id})`), false);
   }
+});
+
+test('workspace uses the running version and keeps uncommitted input behind return, navigation and logout guards', async () => {
+  const app = await browser({ role: 'ADMIN', display_name: '合成管理员', permissions: ['*'] }, { appVersion: '99.1.2' });
+  assert.equal(app.$('#app-version').textContent, 'v99.1.2');
+  assert.equal(app.$('#session-user').textContent, '合成管理员');
+  assert.equal(app.$('#logout').textContent, '退出登录');
+  await app.run("go('finance')");app.run('openEditor()');
+  assert.equal(app.$('#editor [data-ws-version]').textContent, 'v99.1.2');
+  assert.equal(app.$('#editor [data-ws-user]').textContent, '合成管理员');
+  app.$('[name=title]').value = '尚未保存的记录';
+  let confirmations = 0;app.context.confirm = () => { confirmations++;return false; };
+  assert.equal(app.run('Workspace.close(editor)'), false);
+  await app.run("go('people')");
+  await app.$('#editor [data-ws-logout]').onclick();
+  assert.equal(app.run('current'), 'finance');
+  assert.equal(app.context.editor.open, true);
+  assert.equal(app.$('[name=title]').value, '尚未保存的记录');
+  assert.equal(app.requests.some(request => request.url.pathname === '/api/auth/logout'), false);
+  assert.equal(confirmations, 3);
+  app.context.confirm = () => true;app.context.editor.dataset.wsBusy = 'true';
+  assert.equal(app.run('Workspace.close(editor)'), false, 'saving cannot be discarded by accepting a confirmation');
+  assert.equal(app.run('Workspace.guardLeave()'), false);
+  delete app.context.editor.dataset.wsBusy;
+  assert.equal(app.run('Workspace.close(editor)'), true);
+  assert.equal(app.context.editor.open, false);
+  const unavailable = await browser(undefined, { appVersion: undefined });
+  assert.equal(unavailable.$('#app-version').textContent, '版本不可用', 'an absent server version must not be replaced by a guessed version');
+});
+
+test('workspace pages the original rows by available height and leaves server pagination alone', async () => {
+  const app = await browser();
+  app.$('#page').innerHTML = '<div class="table"><table><thead><tr><th>名称</th></tr></thead><tbody>'+Array.from({length:38},(_,i)=>'<tr><td>记录'+i+'</td></tr>').join('')+'</tbody></table></div><div class="table" data-ws-skip="true"><table><thead><tr><th>服务端记录</th></tr></thead><tbody><tr><td>保留</td></tr></tbody></table></div>';
+  const containers = app.$('#page').querySelectorAll('.table'),container = containers[0],rows = container.querySelectorAll('tbody tr');
+  for(const node of containers)node.getBoundingClientRect=()=>({top:200});
+  container.querySelector('thead').getBoundingClientRect=()=>({height:36});
+  rows.forEach(row=>{row.getBoundingClientRect=()=>({height:44});});
+  app.context.innerHeight=768;app.context.innerWidth=1366;
+  app.context.getComputedStyle=()=>({display:app.context.innerWidth<768?'block':'table'});
+  app.run("Workspace.enhance(document.querySelector('#page'))");
+  assert.equal(rows.filter(row=>!row.hidden).length,10);
+  assert.equal(app.$('#page').querySelectorAll('.ws-pagination').length,1);
+  const seen = new Set();
+  for(let page=0;page<4;page++){
+    rows.filter(row=>!row.hidden).forEach(row=>seen.add(row));
+    app.$('[data-ws-page=next]').onclick();
+  }
+  assert.equal(seen.size,38);
+  assert.equal(container.querySelectorAll('tbody tr')[0],rows[0], 'pagination preserves the existing DOM and row events');
+  assert.equal(app.$('[data-ws-page=next]').disabled,true);
+  app.run("Workspace.enhance(document.querySelector('#page'))");
+  assert.equal(app.$('#page').querySelectorAll('.ws-pagination').length,1);
+  assert.equal(container.dataset.wsPage,'3');
+  app.context.innerHeight=480;app.run("Workspace.fit(document.querySelector('#page'))");
+  assert.equal(rows.filter(row=>!row.hidden).length,4);
+  app.context.innerWidth=390;app.run("Workspace.fit(document.querySelector('#page'))");
+  assert.equal(container.style.maxHeight,'none');
+  assert.equal(rows.filter(row=>!row.hidden).length,8);
+});
+
+test('delayed attachment responses cannot reopen a closed detail or overwrite a newer record', async () => {
+  const app=await browser();await app.run("go('finance')");
+  const first=app.records.find(row=>row.module==='finance');
+  const second={...structuredClone(first),id:99,title:'another-finance-record'};app.records.push(second);
+  await app.run('load()');
+  const originalFetch=app.context.fetch;let holdId=first.id,release;
+  app.context.fetch=async(route,options)=>{
+    const url=new URL(route,'http://localhost');
+    if(url.pathname!=='/api/files'||options?.method)return originalFetch(route,options);
+    const id=Number(url.searchParams.get('record_id'));
+    if(id===holdId){holdId=null;await new Promise(resolve=>{release=resolve;});}
+    return {ok:true,json:async()=>[{id,original_name:'attachment-for-'+id,size:10}]};
+  };
+  let pending=app.run('show('+first.id+')');
+  assert.equal(app.context.detail.open,true);
+  assert.equal(app.run('Workspace.close(detail)'),true);
+  release();await pending;
+  assert.equal(app.context.detail.open,false,'closing while files are loading must remain closed');
+  holdId=first.id;pending=app.run('show('+first.id+')');
+  await app.run("go('people')");release();await pending;
+  assert.equal(app.run('current'),'people');
+  assert.equal(app.context.detail.open,false,'navigation must not reopen the previous module detail');
+  await app.run("go('finance')");holdId=first.id;pending=app.run('show('+first.id+')');
+  await app.run('show('+second.id+')');release();await pending;
+  assert.equal(app.$('#detail-title').textContent,second.title);
+  assert.match(app.$('#files').textContent,/attachment-for-99/);
+  assert.doesNotMatch(app.$('#files').textContent,new RegExp('attachment-for-'+first.id+'(?:\\D|$)'));
+});
+
+test('asset detail caller rejects stale responses after either attachment request', async () => {
+  const app=await browser();await app.run("go('assets')");
+  const first=app.records.find(row=>row.module==='assets'),second=app.records.find(row=>row.id===20);
+  const originalFetch=app.context.fetch;let calls=0,holdAt=1,release;
+  const waitHeld=async()=>{for(let attempt=0;attempt<20&&calls<holdAt;attempt++)await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,holdAt,'expected the asset timeline request to be held');};
+  app.context.fetch=async(route,options)=>{
+    const url=new URL(route,'http://localhost');
+    if(url.pathname!=='/api/files'||options?.method)return originalFetch(route,options);
+    const id=Number(url.searchParams.get('record_id'));
+    if(++calls===holdAt)await new Promise(resolve=>{release=resolve;});
+    return {ok:true,json:async()=>[{id,original_name:'asset-attachment-'+id,size:10}]};
+  };
+  let pending=app.run('showAsset('+first.id+')');
+  app.run('Workspace.close(detail)');release();await pending;
+  assert.equal(calls,1,'a closed generic detail must not start the asset timeline request');
+  assert.doesNotMatch(app.$('#detail-body').textContent,/生命周期记录/);
+  holdAt=calls+2;pending=app.run('showAsset('+first.id+')');
+  await waitHeld();
+  await app.run('showAsset('+second.id+')');release();await pending;
+  assert.equal(app.$('#detail-title').textContent,second.title);
+  assert.match(app.$('#detail-body').textContent,/asset-attachment-20/);
+  assert.doesNotMatch(app.$('#detail-body').textContent,new RegExp('asset-attachment-'+first.id+'(?:\\D|$)'));
+  holdAt=calls+2;pending=app.run('showAsset('+first.id+')');
+  await waitHeld();
+  await app.run("go('people')");release();await pending;
+  assert.equal(app.context.detail.open,false);
+  assert.doesNotMatch(app.$('#detail-body').textContent,/生命周期记录/);
+});
+
+test('attachment uploads guard the active record and clear only the successfully uploaded file input', async () => {
+  const app=await browser();await app.run("go('templates')");
+  const record=app.records.find(row=>row.module==='templates');record.data.fields=['待填写'];await app.run('load()');
+  await app.run('show('+record.id+')');
+  let reader;
+  app.context.FileReader=class{readAsDataURL(){reader=this;this.result='data:text/plain;base64,eA==';}};
+  const input=app.$('#file'),file={name:'synthetic.txt',type:'text/plain'};
+  input.files=[file];input.value='synthetic.txt';
+  input.onchange({target:input});
+  assert.equal(app.context.detail.dataset.wsBusy,'true');
+  assert.equal(app.run('Workspace.close(detail)'),false);
+  await reader.onload();
+  assert.equal(input.value,'');
+  assert.equal(app.context.detail.dataset.wsBusy,undefined);
+  assert.equal(app.run('Workspace.close(detail)'),true, 'uploaded files are no longer reported as unsaved');
+  const upload=app.requests.findLast(request=>request.url.pathname==='/api/files'&&request.method==='POST');
+  assert.equal(upload.body.record_id,record.id);
+  await app.run('show('+record.id+')');app.$('[name=tpl_待填写]').value='尚未打印的填写内容';
+  input.files=[file];input.value='synthetic.txt';input.onchange({target:input});await reader.onload();
+  app.context.confirm=()=>false;
+  assert.equal(app.run('Workspace.close(detail)'),false, 'a completed upload must not mark other unsaved template fields clean');
+  input.files=[file];input.value='synthetic.txt';input.onchange({target:input});reader.onerror();
+  assert.equal(input.value,'synthetic.txt');
+  assert.equal(app.context.detail.dataset.wsBusy,undefined);
+  assert.match(app.$('#toast').textContent,/读取文件失败/);
+  assert.equal(app.$('#file-error').hidden,false);
+  assert.match(app.$('#file-error').textContent,/读取文件失败/);
+  const originalFetch=app.context.fetch;let lost=true;
+  app.context.fetch=(route,options)=>{if(route==='/api/files'&&options?.method==='POST'&&lost)throw Error('合成连接中断');return originalFetch(route,options);};
+  input.onchange({target:input});await reader.onload();
+  assert.equal(input.value,'synthetic.txt');assert.equal(app.$('#file-error').hidden,false);
+  assert.match(app.$('#file-error').textContent,/上传失败.*合成连接中断/);
+  lost=false;input.onchange({target:input});await reader.onload();
+  assert.equal(input.value,'');assert.equal(app.$('#file-error').hidden,true);
+  assert.equal(app.run('Workspace.close(detail)'),false, 'retry also preserves unrelated template inputs');
 });
 
 test('materials uses its authenticated workflow API and blocks the generic record editor for every logged-in role', async () => {
@@ -622,7 +789,21 @@ async function materialApp(manager = true) {
   const item = { ...row, id: 11, requestId: 101, qtyM: 10000, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 10000, receiptStatus: 'pending', version: 1, canEdit: true };
   const request = { ...app.state.materialRequests[0], status: 'draft', version: 1, canEditHeader: true, canAddItem: true, canSubmit: manager, items: [item] };
   app.state.materialDetails[101] = request;
-  const click = node => app.document.listeners.click({ target: { closest: () => typeof node === 'string' ? app.$(node) : node } });
+  const click = async node => {
+    const dispatch = target => app.document.listeners.click({ target: { closest: () => target } });
+    if(node==='[data-mw=dictionaries]')return dispatch(app.$('[data-page=catalog]'));
+    if(node==='[data-mw=numbering-rules]'||node==='[data-mw=storage-places]'){
+      await dispatch(app.$('[data-page=settings]'));
+      return dispatch(app.$('[data-setting='+(node.includes('numbering')?'numbering':'places')+']'));
+    }
+    if(node==='[data-mw=category-profile]'&&!app.$(node)){await dispatch(app.$('[data-page=settings]'));await dispatch(app.$('[data-setting=categories]'));}
+    if(node==='[data-mw=label-template]'&&!app.$(node))await dispatch(app.$('[data-page=settings]'));
+    if(node==='[data-mw=batches]'&&app.$('[data-mw=stock-detail]')){
+      for(let count=0;app.$('#mw-view')?.open&&count<8;count++)await dispatch(app.$('#mw-view [data-mw=close-view]'));
+      await dispatch(app.$('[data-mw=stock-detail]'));
+    }
+    return dispatch(typeof node==='string'?app.$(node):node);
+  };
   const fill = values => { for (const [name, value] of Object.entries(values)) app.$(`#mw-fields [name=${name}]`).value = value; };
   const submit = () => app.$('#mw-form').listeners.submit({ preventDefault() {}, target: app.$('#mw-form') });
   await app.run("go('materials')");
@@ -678,8 +859,11 @@ test('ordinary users request stock once, retry a lost response with the same bod
   release(); await first;
   assert.equal(app.$('#mw-fields [name=quantity]').disabled, true);
   assert.equal(app.$('#mw-save').textContent, '按原内容重试');
+  assert.equal(app.context.MaterialWorkflow.hasPending(),true);assert.equal(app.context.MaterialWorkflow.canLeave(),false);
+  await app.run("go('assets')");assert.equal(app.run('current'),'materials');
   await click('[data-mw=cancel]'); assert.equal(app.$('#mw-dialog').open, true);
   await submit(); assert.equal(sends.length, 2); assert.deepEqual(sends[1], sends[0]);
+  assert.equal(app.context.MaterialWorkflow.hasPending(),false);
   assert.equal('amount' in sends[0], false); assert.ok(sends[0].requestIdempotencyKey.length >= 8);
   assert.equal(app.$('[data-mw=issue-stock]'), null); assert.equal(app.$('[data-mw=issue-reject]'), null);
   assert.match(app.$('#page').textContent, /未记账/);
@@ -728,7 +912,7 @@ test('material issuers confirm stock without entering money and cannot process a
   assert.match(app.$('#mw-version').textContent, /领用单版本 2.*冲突后的最新位置/);
   await submit(); assert.equal(writes.length, 1);
   await click('[data-mw=cancel]'); await click({ dataset: { mw: 'refresh' } });
-  assert.match(app.$('#page').textContent, /¥1\.23/); assert.equal(app.$('[data-mw=issue-stock]'), null);
+  await click('[data-mw=issue-detail]');assert.match(app.$('#mw-view-body').textContent, /¥1\.23/); assert.equal(app.$('[data-mw=issue-stock]'), null);
 });
 
 test('request conflict reload adds a submitted revision reason, retains inputs and enforces new identity locks and permissions', async () => {
@@ -1199,7 +1383,8 @@ test('catalog Excel controls use a strict template and preserve the current expo
   app.state.materialResponse = ({ url, method, body }) => {
     if (url.pathname === '/api/materials/catalog/import' && method === 'POST') { imported = body; return { body: { created: 1, skipped: 2 }, status: 201 }; }
   };
-  await click('[data-mw=dictionaries]'); assert.match(app.$('#mw-view-body').textContent, /物资信息库.*库存数量由出入库流水累计/);
+  await click('[data-mw=dictionaries]'); assert.match(app.$('#page').textContent, /物资信息库.*物资名称 \/ 编码/);
+  await click('[data-mw=help]'); assert.match(app.$('#mw-view-body').textContent, /库存数量由出入库流水累计/); await click('[data-mw=close-view]');
   await click('[data-mw=catalog-template]'); assert.ok(app.requests.some(entry => entry.url.pathname === '/api/materials/catalog/template'));
   app.$('#mw-catalog-management-query').value = '试剂 A'; await click('[data-mw=catalog-export]');
   assert.equal(app.requests.find(entry => entry.url.pathname === '/api/materials/catalog/export.xlsx').url.searchParams.get('q'), '试剂 A');
@@ -1227,7 +1412,9 @@ test('Excel export labels and filenames distinguish reimport details, redacted r
     const label = viewAmount ? '导出回导明细' : '导出 Excel（仅查看）', prefix = viewAmount ? '库存回导明细-' : '库存只读报表-';
     await click({ dataset: { mw: 'page', page: 'inventory' } });
     assert.equal(app.$('[data-mw=export]').textContent, label);
-    assert.match(app.$('#page').textContent, viewAmount ? /库存导入明细.*库存.*批次库存.*七列表/ : /金额脱敏的只读报表，不支持回导/);
+    await click('[data-mw=help]');
+    assert.match(app.$('#mw-view-body').textContent, viewAmount ? /库存导入明细.*库存.*批次库存.*七列表/ : /金额脱敏的只读报表，不支持回导/);
+    await click('[data-mw=close-view]');
     await click('[data-mw=export]'); assert.ok(downloads.at(-1).startsWith(prefix));
     assert.equal(app.requests.at(-1).url.pathname, '/api/materials/export.xlsx'); assert.equal(app.requests.at(-1).url.searchParams.get('type'), 'stock');
     await click({ dataset: { mw: 'page', page: 'openings' } }); await click({ dataset: { mw: 'opening-detail', id: '81' } });
@@ -1455,7 +1642,7 @@ test('receipt identity section shows linked details and preserves an unlinked de
   assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname.endsWith('/catalog')), false);
 });
 
-test('inventory has seven labeled columns, server totals and expandable legacy actions without exposing unescaped metadata', async () => {
+test('inventory has seven labeled columns and moves global totals and legacy actions to a returning detail workspace', async () => {
   const { app, row, click } = await materialApp();
   const first = { ...row, firstMovementAt: '2026-10-01T01:02:03Z', totalQtyM: 19000, manufacturer: '厂家甲', note: '批次备注', catalogRemark: '档案<img src=x>', qtyM: 2000 };
   const second = { ...first, manufacturer: '', note: '', qtyM: 3000 };
@@ -1467,17 +1654,22 @@ test('inventory has seven labeled columns, server totals and expandable legacy a
   await click({ dataset: { mw: 'page', page: 'inventory' } });
   assert.deepEqual(app.$('#page').querySelectorAll('thead th').map(node => node.textContent), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
   const body = app.$('#page tbody'), groups = body.querySelectorAll('.stock-group-head');
-  assert.equal(groups.length, 1); assert.match(groups[0].textContent, /该物资合计（全部仓库／区域）：19 件/);
-  assert.equal(groups[0].querySelector('td').getAttribute('data-label'), null);
+  assert.equal(groups.length, 0);
   const rows = body.children.filter(node => !node.classes.has('stock-group-head'));
   for (const current of rows) assert.deepEqual(current.children.map(node => node.getAttribute('data-label')), ['入库时间', '名称', '数量', '规格', '单位', '厂家', '备注']);
   assert.equal(rows[0].children[2].classes.has('num'), true);
   assert.equal(rows[0].children[0].textContent, '2026-10-01 01:02:03');
   assert.equal(rows[0].children[5].textContent, '厂家甲'); assert.equal(rows[0].children[6].textContent, '批次备注');
   assert.equal(rows[1].children[5].textContent, '—'); assert.equal(rows[1].children[6].textContent, '—');
-  assert.match(rows[0].querySelector('details').textContent, /档案备注：档案<img src=x>.*领用按实际批次办理/);
-  assert.equal(app.$('#page img'), null);
-  for (const action of ['stock-issue', 'batches', 'movements', 'opening-list', 'adjustment', 'export']) assert.ok(app.$(`[data-mw=${action}]`));
+  assert.equal(rows[0].querySelector('details'), null);
+  for (const action of ['stock-issue','stock-detail','opening-list','adjustment','export']) assert.ok(app.$(`[data-mw=${action}]`));
+  await click('[data-mw=stock-detail]');
+  assert.match(app.$('#mw-view-body').textContent, /该物资合计（全部仓库／区域）19 件/);
+  assert.match(app.$('#mw-view-body').textContent, /本行厂家批次数量2 件/);
+  assert.match(app.$('#mw-view-body').textContent, /档案备注档案<img src=x>.*领用按实际批次办理/);
+  assert.equal(app.$('#mw-view img'), null);
+  for(const action of ['batches','movements'])assert.ok(app.$(`#mw-view [data-mw=${action}]`));
+  await click('[data-mw=close-view]');
   await click('[data-mw=next]');
   const lookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1);
   assert.equal(lookup.url.searchParams.get('detail'), '1'); assert.equal(lookup.url.searchParams.get('page'), '2');
@@ -1530,7 +1722,7 @@ test('catalog maintenance preserves imported identity, protects stock units and 
   assert.equal(app.$('#mw-fields [name=name]').value,'更正后的物资');assert.match(app.$('#mw-version').textContent,/最新版本 4/);
   await submit();assert.equal(writes[1].version,4);assert.equal(writes[1].unit,row.unit);assert.equal(row.qtyM,10000);
   await click('[data-mw=catalog-active]');fill({reason:'暂时停用该物资'});await submit();assert.equal(writes.at(-1).active,false);
-  assert.match(app.$('#mw-view-body').textContent,/已停用/);assert.ok(app.$('[data-mw=catalog-active]'));
+  assert.match(app.$('#page').textContent,/已停用/);assert.ok(app.$('[data-mw=catalog-active]'));
 });
 
 test('catalog deletion is limited to an explicitly deletable record and hidden from ordinary users', async()=>{
@@ -1550,7 +1742,7 @@ test('whole request deletion and cancellation use reasons and current permission
   };
   await click('[data-mw=request]');await click('[data-mw=request-delete]');await submit();assert.equal(writes.length,0);
   fill({reason:'清理误建的整张申报草稿'});await submit();assert.deepEqual(writes[0],{requestVersion:1,reason:'清理误建的整张申报草稿'});
-  assert.match(app.$('#page').textContent,/申报单列表/);assert.equal(app.$('[data-mw=request-delete]'),null);
+  assert.match(app.$('#page').textContent,/申报记录/);assert.equal(app.$('[data-mw=request-delete]'),null);
   Object.assign(request,{status:'submitted',revision:1,version:7,canDelete:false,canCancel:true,canAddItem:false,canSubmit:false});
   await click({dataset:{mw:'request',id:'101'}});assert.equal(app.$('[data-mw=request-delete]'),null);await click('[data-mw=request-cancel]');
   fill({reason:'采购计划撤销，无验收事件'});await submit();assert.equal(writes[1].requestVersion,7);
@@ -1572,7 +1764,7 @@ test('closed opening drafts can be deleted without reopening or posting stock',a
   await click({dataset:{mw:'refresh'}});await click({dataset:{mw:'opening-detail',id:'81'}});
   assert.equal(app.$('[data-mw=opening-add-item]'),null);assert.ok(app.$('[data-mw=opening-delete-document]'));
   await click('[data-mw=opening-delete-document]');fill({reason:'清理未入库的旧草稿'});await submit();
-  assert.deepEqual(removed,{version:5,reason:'清理未入库的旧草稿'});assert.match(app.$('#page').textContent,/期初库存单据/);
+  assert.deepEqual(removed,{version:5,reason:'清理未入库的旧草稿'});assert.match(app.$('#page').textContent,/期初／补录记录/);
   assert.equal(app.requests.some(entry=>entry.url.pathname.endsWith('/post')),false);
 });
 
@@ -1583,7 +1775,7 @@ test('the unified numbering editor previews independent rules and preserves chan
     if(url.pathname==='/api/materials/unit-label-rule')return {body:{rule:{template:'LAB-{SEQ}',padding:8,version:1},nextSequence:90,dateBasis:'UTC'}};
     if(url.pathname==='/api/materials/numbering-rules/catalog'&&method==='PUT'){writes.push(body);if(writes.length===1){rule.version=3;return {body:{error:'编号规则版本已变化'},status:409};}Object.assign(rule,body,{version:4});return {body:{kind:'catalog',rule,nextSequence:23}};}
   };
-  await click('[data-mw=dictionaries]');await click('[data-mw=numbering-rules]');assert.match(app.$('#mw-view-body').textContent,/MAT-000023.*LAB-00000090/);
+  await click('[data-mw=dictionaries]');await click('[data-mw=numbering-rules]');assert.match(app.$('#page').textContent,/MAT-000023.*LAB-00000090/);
   await click('[data-mw=numbering-edit]');fill({template:'WZ-{YYYY}-{SEQ}',padding:'4'});app.document.listeners.input({target:app.$('#mw-fields [name=template]')});
   assert.match(app.$('#mw-numbering-preview').textContent,/WZ-\d{4}-0023/);await submit();assert.equal(writes.length,0);
   fill({reason:'统一后续物资编码'});await submit();await click('[data-mw=reload-form]');assert.equal(app.$('#mw-fields [name=template]').value,'WZ-{YYYY}-{SEQ}');
@@ -1603,9 +1795,38 @@ test('chemical categories expose optional laboratory fields and reject unsafe SD
 test('storage-place management and all position fields share Chinese paths without requiring internal identifiers',async()=>{
   const {app,row,request,click,fill,submit}=await materialApp();const places=[{id:1,name:'合成房间',parentId:null,path:'合成房间',active:true,effectiveActive:true,version:1},{id:2,name:'试剂柜',parentId:1,path:'合成房间 / 试剂柜',active:true,effectiveActive:true,version:2},{id:3,name:'停用柜',parentId:1,path:'合成房间 / 停用柜',active:false,effectiveActive:false,version:1}];app.state.materialLists['/storage-places']=places;const writes=[];
   app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/storage-places'&&method==='POST'){writes.push(body);places.push({id:4,...body,path:'合成房间 / 新柜',active:true,effectiveActive:true,version:1});return {body:{place:places.at(-1)}};}if(url.pathname==='/api/materials/stock/location'&&method==='PUT'){writes.push(body);return {body:{location:body.location}};}};
-  await click({dataset:{mw:'refresh'}});await click('[data-mw=dictionaries]');await click('[data-mw=storage-places]');assert.match(app.$('#mw-view-body').textContent,/合成房间 \/ 试剂柜/);
+  await click({dataset:{mw:'refresh'}});await click('[data-mw=dictionaries]');await click('[data-mw=storage-places]');assert.match(app.$('#page').textContent,/合成房间 \/ 试剂柜/);
   await click('[data-mw=place-new]');fill({name:'新柜',parentId:'1'});await submit();assert.deepEqual(writes[0],{name:'新柜',parentId:1});
   await click('[data-mw=close-view]');request.status='submitted';await click({dataset:{mw:'receive',request:'101',item:'11'}});
   assert.deepEqual(app.$('#mw-storage-place-options').querySelectorAll('option').map(node=>node.value),['合成房间','合成房间 / 试剂柜','合成房间 / 新柜']);await click('[data-mw=cancel]');
   await click({dataset:{mw:'page',page:'inventory'}});await click('[data-mw=batches]');await click('[data-mw=location]');fill({location:'合成房间 / 试剂柜',reason:'统一位置字典'});await submit();assert.equal(writes[1].location,'合成房间 / 试剂柜');assert.equal(Object.hasOwn(writes[1],'placeId'),false);assert.equal(writes[1].catalogId,row.catalogId);
+});
+
+test('catalog server pagination keeps a stable capacity across long and short pages and returns to the same query',async()=>{
+  const {app,click}=await materialApp();const original=Element.prototype.getBoundingClientRect;
+  try{
+    Element.prototype.getBoundingClientRect=function(){const height=this.tagName==='tr'&&this.textContent.includes('长名称')?120:44;return {top:this.classes.has('mw-table')?250:0,height,bottom:768};};
+    app.context.innerHeight=768;app.context.innerWidth=1366;
+    const entries=Array.from({length:38},(_,index)=>({id:index+1,code:'WZ-'+(index+1),name:index===0?'长名称'.repeat(15):'短名称'+index,spec:'合成规格',unit:'瓶',categoryId:1,trackingMode:'quantity',stockQtyM:0,active:true}));
+    app.state.materialResponse=({url,method})=>{if(url.pathname!=='/api/materials/catalog'||method!=='GET')return;const page=Number(url.searchParams.get('page')||1),pageSize=Number(url.searchParams.get('pageSize')||50);return {body:{items:entries.slice((page-1)*pageSize,page*pageSize),total:38,page,pageSize}};};
+    await click('[data-mw=dictionaries]');await new Promise(setImmediate);
+    const first=app.requests.filter(row=>row.url.pathname==='/api/materials/catalog'&&row.url.searchParams.get('active')==='all').at(-1).url;
+    const capacity=Number(first.searchParams.get('pageSize'));assert.ok(capacity<8&&capacity>=1);
+    await click('[data-mw=next]');await new Promise(setImmediate);
+    const next=app.requests.filter(row=>row.url.pathname==='/api/materials/catalog').at(-1).url;
+    assert.equal(next.searchParams.get('page'),'2');assert.equal(Number(next.searchParams.get('pageSize')),capacity);
+    await click('[data-mw=catalog-detail]');assert.match(app.$('#mw-view-body').textContent,/物资名称短名称/);
+    await click('[data-mw=close-view]');assert.match(app.$('#page .mw-pagebar').textContent,/第 2 \/ /);
+    assert.equal(app.$('#mw-view').open,false);
+  }finally{if(original)Element.prototype.getBoundingClientRect=original;else delete Element.prototype.getBoundingClientRect;}
+});
+
+test('acceptance progress and receipt events stay separate and readonly amounts remain redacted in event details',async()=>{
+  const {app,row,item,click}=await materialApp(false);app.state.materialAcceptance=[item];
+  app.state.materialLists['/receipts']=[{id:91,requestId:101,itemId:11,type:'acceptance',requestRevision:1,date:'2026-10-23',snapshot:row,qtyM:1000,amountCents:987654,actorName:'合成办理人'}];
+  await click({dataset:{mw:'page',page:'acceptance'}});assert.ok(app.$('[data-mw=events]'));assert.equal(app.$('[data-mw=receipt-detail]'),null);
+  await click({dataset:{mw:'acceptance-tab',tab:'events'}});assert.ok(app.$('[data-mw=receipt-detail]'));assert.equal(app.$('#mw-filters'),null);
+  assert.doesNotMatch(app.$('#page').textContent,/9,876\.54/);assert.match(app.$('#page').textContent,/无权限/);
+  await click('[data-mw=receipt-detail]');assert.match(app.$('#mw-view-body').textContent,/本批含税总额无权限/);assert.equal(app.$('#mw-view [data-mw=reverse]'),null);
+  await click('[data-mw=close-view]');await click({dataset:{mw:'acceptance-tab',tab:'progress'}});assert.ok(app.$('#mw-filters'));assert.equal(app.$('[data-mw=receipt-detail]'),null);
 });
