@@ -1,0 +1,10 @@
+{
+  "version": "0.12.0",
+  "commit": "0afad25367edee03814f7f4645de1dab5012182b",
+  "indexDigest": "sha256:6988ffa1e195126f051ef75d4208f1ee228eca82ca0f70efcc71ee0a2f389c46",
+  "baseParent": "b8d9214a8cdc9f5d997a8c556e976c64830ff340",
+  "featureBranch": "feature/v0.12.0-lab-material-maintenance",
+  "status": "source-frozen",
+  "buildRunId": 39896388360,
+  "sourceTagObject": "d82c3639cc651a438abf13e952a1d683eed7b937"
+}
