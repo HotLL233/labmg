@@ -1,8 +1,12 @@
 # 开发与版本管理
 
-当前候选为 **0.12.0**，分支`feature/v0.12.0-lab-material-maintenance`，基于b8d9214。物资资料维护、草稿整单删除／未验收申报取消、分类编号、层级库位及化学试剂字段已完成源码及本机验证，尚未发布。新增0004／0005加法迁移和schema7备份合同；旧编码与历史快照保留，物资Excel升级10列兼容旧6／5列，库存仍13列。详细合同见[MATERIAL_API](MATERIAL_API.md)及[Excel说明](EXCEL_IMPORT_EXPORT.md)。本机专用PG18.4全文件240项239通过／0失败／1容器条件跳过，最后化学复用增量另1通过；45JS、两种UI8/0/0、VM63/63、最终Edge布局及实际PG18＋Edge76断言通过。专用54940已精确清理剩余库0并fast停止，证据全在`artifacts/cache/0.12.0/`，原中途PG退出失败记录保留，不接生产运行库。正式发布仍须本版新PG18 CI、双架构镜像、在线／本地YML和完整离线TAR，不能借用0.11.1结果。
+当前版本为 **0.12.0（公开验证版，2026-10-23）**，开发分支`feature/v0.12.0-lab-material-maintenance`，基于b8d9214，冻结源码`0afad25367edee03814f7f4645de1dab5012182b`／`v0.12.0`。物资资料维护、草稿整单删除／未验收申报取消、分类编号、层级库位及化学试剂字段已交付。新增0004／0005加法迁移和schema7备份合同；旧编码与历史快照保留，物资Excel升级10列兼容旧6／5列，库存仍13列。合同见[MATERIAL_API](MATERIAL_API.md)及[Excel说明](EXCEL_IMPORT_EXPORT.md)。
 
-已公开源码版本为 **0.11.1（验证版，2026-10-23）**，统一Excel导入模板／导出报表、修正大单据备份恢复限制，并整合手机页头折行补丁。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署取[0.11.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.1)或`artifacts/releases/0.11.1/`的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目runtime/、https/和UID/GID。真实PG18.6回归216/216、43JS及四项发布门禁通过。更新后从程序重新下载模板，操作见[Excel模板与报表](EXCEL_IMPORT_EXPORT.md)。
+本版新构建39896388360的原日志确认真实PG18.6回归236/236、0失败／跳过、45JS通过；验证39897052388四门禁通过，原三TAP、同次PG六项和严格可信空SNI自动HTTPS经root独立复读。ARM64为QEMU。本机`artifacts/releases/0.12.0/`完整12件489228347字节、11摘要、5份冻结源附件及双TAR三镜像／六config均通过；正式部署取[0.12.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.12.0)的同版文件。保留原PG18项目`runtime/`、`https/`和UID/GID，先备份PostgreSQL与附件；schema7备份不可交旧版恢复，回退须还原升级前数据库。未自动升级NAS或验收实体手机、原生Excel／WPS与USB打印。附件保留冻结时的候选说明，发布后文档补记不移动标签或重打资产。
+
+本机源码阶段记录保留：专用PG18.4全文件240项239通过／0失败／1容器条件跳过，最后化学复用增量另1通过；45JS、两种UI8/0/0、VM63/63、最终Edge布局及实际PG18＋Edge76断言通过。专用54940已精确清理剩余库0并fast停止，证据在`artifacts/cache/0.12.0/`，原中途PG退出失败记录保留，不接生产运行库。这些本机结果与上方正式PG18 CI、容器门禁分别记录，不叠加重复用例。
+
+上一公开版本 **0.11.1（验证版，2026-10-23）**，统一Excel导入模板／导出报表、修正大单据备份恢复限制，并整合手机页头折行补丁。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。[0.11.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.1)及`artifacts/releases/0.11.1/`保持原样；其PG18.6回归216/216、43JS及四门禁仅为该版历史证据。更新后从当前程序重新下载模板，操作见[Excel模板与报表](EXCEL_IMPORT_EXPORT.md)。
 
 2026-10-23[方案同步核对](PLAN_SYNC_REVIEW.md)更正范围：0.11.0的“T1–T4”指主要界面，T4临期色条尚未接入；D/E/F仍为后续路线图。核对时0.11.1仅为本地准备；其后本轮完成Excel范围并正式发布，不表示整份A–F方案或F预排版本号的功能已实现。
 
@@ -529,7 +533,7 @@ npm run package:zip
 
 ### GHCR 多架构发布
 
-当前在线Compose应用镜像为`ghcr.io/hotll233/labmg:0.9.4`，本地为`labos:0.9.4`，均已交付；本轮构建、匿名双架构、容器及本机附件验证结果见上方0.9.4条目。两份配置均含应用、PG18、初始化与Caddy四服务，`runtime/`与`https/`固定在YML旁，默认auto识别主LAN IP；在线版与本地版各自单独使用。同一PG18项目更新保留原存储，不实施旧数据库主版本迁移。具体部署说明及DS918+父目录准备要求见[群晖部署](SYNOLOGY.md)。历史0.9.2及更早冻结标签、产物和验证结果保留，各版实际结果见本页历史条目。
+当前在线Compose应用镜像为`ghcr.io/hotll233/labmg:0.12.0`，本地为`labos:0.12.0`，均已交付；本轮构建、匿名双架构、容器及本机附件验证结果见本页首段0.12.0记录。两份配置均含应用、PG18、初始化与Caddy四服务，`runtime/`与`https/`固定在YML旁，默认auto识别主LAN IP；在线版与本地版各自单独使用。同一PG18项目更新保留原存储，不实施旧数据库主版本迁移。具体部署说明及DS918+父目录准备要求见[群晖部署](SYNOLOGY.md)。历史0.9.4及更早冻结标签、产物和验证结果保留，各版实际结果见本页历史条目。
 
 历史：0.6.2 在线镜像为 `ghcr.io/hotll233/labmg:0.6.2`，冻结源码为 `989554e`／`v0.6.2`。此前已将其开发初期“尚未冻结／发布”更正为公开验证版；0.6.1 及更早验证记录保留，不能替代本版结果。
 

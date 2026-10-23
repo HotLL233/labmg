@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.12.0（开发候选，2026-10-23，待正式镜像门禁及发布）**。本轮补物资资料编辑／启停／未引用删除、草稿整单删除、未验收申报取消、统一编号规则、中文层级库位及化学试剂字段；页面、Excel与schema7备份同时更新，旧编码、二维码和历史快照保留。操作合同见[物资API](docs/MATERIAL_API.md)、[Excel模板](docs/EXCEL_IMPORT_EXPORT.md)，开源思路的采用边界见[实施映射](docs/research/MATERIAL_OPEN_SOURCE.md#0120-实施映射2026-10-23开发与验证中)。正式交付状态见[版本说明](docs/CHANGELOG.md)，当前已公开基线仍为0.11.1。
+本源码版本：**0.12.0（公开验证版，2026-10-23）**。本轮补物资资料编辑／启停／未引用删除、草稿整单删除、未验收申报取消、统一编号规则、中文层级库位及化学试剂字段；页面、Excel与schema7备份同时更新，旧编码、二维码和历史快照保留。操作合同见[物资API](docs/MATERIAL_API.md)、[Excel模板](docs/EXCEL_IMPORT_EXPORT.md)，开源思路的采用边界见[实施映射](docs/research/MATERIAL_OPEN_SOURCE.md#0120-实施映射2026-10-23已发布验证版)。双架构镜像、两份YML和完整离线包已交付，实际验证与边界见[版本说明](docs/CHANGELOG.md)。
 
 历史0.11.0完成 T1 令牌排版、T2 手机卡片和侧栏适配、T3 验收物资信息区块、T4 库存七列，以及厂家、批次备注、物资信息库备注与 Excel 回导。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，提供双架构镜像、两份 YML、离线包与源码；完整交付保存在 `artifacts/releases/0.11.0/`。
 
@@ -70,7 +70,7 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本轮候选配置为0.12.0：在线应用镜像为 `ghcr.io/hotll233/labmg:0.12.0`，本地三镜像包使用 `labos:0.12.0`。正式门禁及公开发布完成后，从[0.12.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.12.0)下载同版本镜像和配套文件；在此之前继续使用已发布的0.11.1。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。当前配置为0.12.0：在线应用镜像为 `ghcr.io/hotll233/labmg:0.12.0`，本地三镜像包使用 `labos:0.12.0`。从[0.12.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.12.0)或本机`artifacts/releases/0.12.0/`取同版配套文件；本机完整12件、双TAR摘要及三镜像结构已核验。升级前备份原PostgreSQL与附件，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |

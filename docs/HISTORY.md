@@ -884,3 +884,17 @@ Release421354434现已公开为prerelease，保留make_latest=false。最初匿�
 最终45JS、两种UI审计各8通过／0警告／0失败，前端VM63/63；全量内Edge布局npKuY5通过，独立最终AcXYKL覆盖滚动复位及390／768／1440与断点。实际PG18＋Edge专项real-AX2mbn完成76断言／6图／0浏览器错误，涵盖10列Excel导入编辑、规则保存、申报删除及取消、期初草稿删除、库位验收生成两件码、实际扫码弹窗手输单件码后申请与发放；精确库及服务已清理。helper早期响应解包／异步等待／frozen scanner覆写失败保留，不作为产品缺陷或通过；实体手机相机未测。
 
 完成后仅连接54940，核对精确data路径后清理4个无连接、名称匹配labos_test_24hex的合成残余库，查remaining=0；按同一目录pg_ctl fast停止，stop-report.json passed，前台会话exit0，保留全部证据与测试数据目录，不触既有服务或NAS。最后README、API、Excel、群晖、研究实施映射及维护记录同步。下一步冻结源码并重新取得本版真实PG18 CI、双架构镜像及四门禁；不能将本机条件跳过或先前版本结果当本版容器通过。
+
+## 2026-10-23：0.12.0 双架构镜像与完整交付发布
+
+源码冻结`0afad25367edee03814f7f4645de1dab5012182b`，注解标签v0.12.0／对象d82c3639cc651a438abf13e952a1d683eed7b937；精确同步develop和feature/v0.12.0-lab-material-maintenance，main及30旧标签核对保持。只从干净tracked worktree打包，外部.workbuddy与两份UI原型未纳入；ZIP891067字节、128源码／129条目、SHA256 d948f6f98190276b17813c04f1b2d975a0c4724f6b293d78ad9a27c116600bd8。仅本版缓存helper补新模块、0004／0005及schema-0.11.1 fixture身份白名单后自检通过，冻结源码和旧helper不变；五部署附件来自冻结ZIP原字节，另独立源码包复核通过。
+
+push自动触发构建39896388360／job120227728626，不重复调度。root独立复读原日志，确认真实PostgreSQL18.6、45JS、236测试／236通过／0失败／0跳过，包含新增material-lab及最后化学字段复用冲突保护。正式GHCR双架构索引sha256:6988ffa1e195126f051ef75d4208f1ee228eca82ca0f70efcc71ee0a2f389c46绑定冻结源码，root-ci-review.json为passed。
+
+独立ops提交ee61d4c772047b9e4415fccb05dcb123fd7a2857触发验证39897052388／job120229811327，匿名双架构与在线Compose、同次PG18持久化、双架构三镜像TAR及local禁止拉取、自动地址与可信空SNI真实Caddy HTTPS四门禁通过。官方诊断ZIP摘要通过，root从ZIP原字节读取三TAP各1/1／0失败／0跳过，四JSON与导入件一致，PG六项属于同一在线生命周期，不虚算第四次容器测试；root-deployment-review.json为passed。ARM64为QEMU，不是目标NAS或物理ARM64验收。
+
+唯一分段下载器完整下载amd64 245723136字节／SHA cbe04acce74fe22ae98c06b6585f4f857382bc71686503eb9cc7b5b3de1b79a1，arm64 242456576字节／SHA15203c60e4c5bf464edcebc15b3f0a5c2009a46ee20ed055216384c8befd2ae0，无失败，无需切换旧blob复用器。local-delivery-verification.json确认本机12件489228347字节、11摘要及5冻结源附件；local-image-archive-verification.json确认两包各含labos:0.12.0、postgres:18-bookworm、caddy:2.11.7-alpine及六config。结构检查首次误与前置delivery核验并行，前置报告尚无导致失败；仅调整执行顺序重跑通过，原失败报告保留，未为此修改产品或资产。
+
+复核草稿后公开prerelease Release421430399。匿名官方API12附件元数据／11摘要通过，首个二进制连接UND_ERR_CONNECT_TIMEOUT，原失败github-release-verification-api-first-attempt.json保留；改用官方公开直链匿名完整下载10非TAR共1048635字节通过、0API请求。组合public-delivery-summary.json限定passed-with-api-network-limitations，不伪造首次流程passed，不称匿名全TAR下载。publisher的localArchiveDownloads:false只描述其自身，本机完整TAR以独立下载和交付报告为准。
+
+发布后据实同步README、MEMORY、DEVELOPMENT、CHANGELOG、SYNOLOGY及研究实施状态，保留冻结包内当时候选说明，不重打附件或移动标签。升级保留原PG18项目runtime/、https/和UID/GID，先备份PostgreSQL与附件，schema7备份不可交旧版恢复；未自动升级NAS，实体手机相机、原生Excel／WPS、原生打印窗口、USB打印及长期容量未验。Windows命令始终显式pwsh，实查WindowsApps PowerShell7.6.8。
