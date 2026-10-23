@@ -898,3 +898,17 @@ push自动触发构建39896388360／job120227728626，不重复调度。root独�
 复核草稿后公开prerelease Release421430399。匿名官方API12附件元数据／11摘要通过，首个二进制连接UND_ERR_CONNECT_TIMEOUT，原失败github-release-verification-api-first-attempt.json保留；改用官方公开直链匿名完整下载10非TAR共1048635字节通过、0API请求。组合public-delivery-summary.json限定passed-with-api-network-limitations，不伪造首次流程passed，不称匿名全TAR下载。publisher的localArchiveDownloads:false只描述其自身，本机完整TAR以独立下载和交付报告为准。
 
 发布后据实同步README、MEMORY、DEVELOPMENT、CHANGELOG、SYNOLOGY及研究实施状态，保留冻结包内当时候选说明，不重打附件或移动标签。升级保留原PG18项目runtime/、https/和UID/GID，先备份PostgreSQL与附件，schema7备份不可交旧版恢复；未自动升级NAS，实体手机相机、原生Excel／WPS、原生打印窗口、USB打印及长期容量未验。Windows命令始终显式pwsh，实查WindowsApps PowerShell7.6.8。
+
+## 2026-10-23：页面密度与记录工作区分析、HTML参考
+
+用户要求页面显示应用版本、名称优先／编码辅助、退出明显，一级至三级页面能一屏则一屏、记录采用Excel式表格，并先提供原因分析和HTML参考。本轮读取维护记录及UI施工卡，确认WindowsApps的PowerShell7.6.8，从发布后文档提交5fb3a38建立`feature/ui-workspace-design`；正式公开版仍为0.12.0，不改main、旧标签或发布附件。
+
+只读核查正式源码：全局页头未显示运行版本／账号，物资单据版本其实是并发版本；多个标题与说明叠加，分类／区域／库位与最多200条物资共用长弹窗，名称次显、多个操作撑行；紧凑表格CSS只覆盖page，正文直属dialog密度和滚动边界不一致。库存和多个通用模块已有记录表，不能混称缺少记录功能。既有普通审计8/0/0不检查上述信息架构问题。
+
+新增`docs/UI_WORKSPACE_OPTIMIZATION.md`与`docs/prototypes/ui-workspace-compact.html`：建议常驻版本／账号／退出、单一主标题、名称主显、基础设置分标签、按可用高度分页、全工作区详情与保留上下文的多级返回。桌面优先一屏，长内容／低高度／手机保留必要滚动，不靠缩字或裁切；库存七列、全部仓库／区域合计、验收待办进度与多次历史事件分别保留。资料／编号权限继续ADMIN或MATERIAL且相应权限，不新增区域改名启停等未授权业务。
+
+原型使用合成数据、现有设计令牌和原生HTML/CSS/JS，无新增依赖或业务API。首轮Edge170项检查通过，但目视发现重复页头仍使1366×768只显示4条，以及900×650编号保存区需内部下滑；这些结果不作为最终一屏验收。随后压缩重复结构并补输入离开保护、全局合计说明和保存区检查；中间一次断言把900px的3条数据误要求全在同页，按实际空间分页原则修正检查，原报告保留。
+
+最终真实Edge报告edge-peWl4j为368断言通过、27图、0脚本异常／0网络请求，完整覆盖1366×768、1440×900、900×650、768×1024、390×844，另1366×480降级可达专项。1366×768可显示6条完整双行记录且分页同屏；38条全部分页可达，六入口／四设置、搜索、空状态恢复、三级返回／页签上下文、未保存离开／切签确认、更多菜单及手机滚动焦点通过。root独立复读最终报告及脚本，目视桌面表、900编号页、390编辑／焦点及480末字段截图；切签确认不当作分区草稿持久化。普通／严格UI审计各8/0/0，方案13个本地引用／行号及1份HTML内联脚本语法通过，检查范围分别限定。
+
+本轮仅方案／离线原型和维护记录，不改正式src、SQL、版本、YML、镜像或NAS，不进行生产业务回归。缓存集中`artifacts/cache/0.12.0/ui-workspace-design/`；外部.workbuddy与既有ui-mobile、ui-redesign草稿保持。

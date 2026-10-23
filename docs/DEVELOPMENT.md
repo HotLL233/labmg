@@ -6,6 +6,8 @@
 
 本机源码阶段记录保留：专用PG18.4全文件240项239通过／0失败／1容器条件跳过，最后化学复用增量另1通过；45JS、两种UI8/0/0、VM63/63、最终Edge布局及实际PG18＋Edge76断言通过。专用54940已精确清理剩余库0并fast停止，证据在`artifacts/cache/0.12.0/`，原中途PG退出失败记录保留，不接生产运行库。这些本机结果与上方正式PG18 CI、容器门禁分别记录，不叠加重复用例。
 
+当前设计分支`feature/ui-workspace-design`基于发布后文档提交5fb3a38，仅新增[页面密度与记录工作区方案](UI_WORKSPACE_OPTIMIZATION.md)及[HTML参考](prototypes/ui-workspace-compact.html)。方案覆盖常驻应用版本／退出、名称主显、主数据分区、记录表与多级返回；桌面尽量一屏，长内容和手机允许必要滚动。此轮为分析与离线原型，正式页面尚未改动，不升业务版本或重打镜像；验证缓存集中`artifacts/cache/0.12.0/ui-workspace-design/`。
+
 上一公开版本 **0.11.1（验证版，2026-10-23）**，统一Excel导入模板／导出报表、修正大单据备份恢复限制，并整合手机页头折行补丁。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。[0.11.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.1)及`artifacts/releases/0.11.1/`保持原样；其PG18.6回归216/216、43JS及四门禁仅为该版历史证据。更新后从当前程序重新下载模板，操作见[Excel模板与报表](EXCEL_IMPORT_EXPORT.md)。
 
 2026-10-23[方案同步核对](PLAN_SYNC_REVIEW.md)更正范围：0.11.0的“T1–T4”指主要界面，T4临期色条尚未接入；D/E/F仍为后续路线图。核对时0.11.1仅为本地准备；其后本轮完成Excel范围并正式发布，不表示整份A–F方案或F预排版本号的功能已实现。
