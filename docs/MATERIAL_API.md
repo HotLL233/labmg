@@ -1,4 +1,30 @@
-# 物资 API 合同（0.11.1）
+# 物资 API 合同（0.12.0开发）
+
+## 0.12.0 维护与实验室字段增量
+
+本节替代下文同功能的旧合同；下方0.11.1及更早记录保留为历史来源。当前开发及验证状态见CHANGELOG。所有接口仍由会话鉴权，修改采用既有事务锁、版本冲突和审计；普通系统管理员不自动获得仅MATERIAL角色的申报／验收业务权。
+
+| 接口 | 本轮合同 |
+| --- | --- |
+| `GET /catalog`、`GET /catalog/:id` | 列表默认启用，`active=false`查停用，`active=all`全部；详情返回`{catalog}`。资料增加`active,referenced,canDelete,casNumber,purity,storageConditions,sdsUrl` |
+| `PATCH /catalog/:id` | `{version,reason,...资料字段}` → `{catalog}`，ADMIN/MATERIAL加`materials.catalog.write`；省略字段保留，实验室字段传空串可清空。ID／code保持，有引用时禁止改unit／trackingMode；变更当前资料不重写原单JSON |
+| `DELETE /catalog/:id` | `{version,reason}` → `{deleted:true}`；相同维护权限，只允许无业务、包装码、幂等或快照引用资料。停用可用同址PATCH的`active:false`，禁止新选择／登记但不阻断已有库存发放 |
+| `DELETE /requests/:id` | `{requestVersion,reason}`，仅draft；MATERIAL加`materials.request.edit_submitted`可清理协作草稿，其他用户仅本人且无他人明细／附件。删除后留审计，事务回滚恢复附件，成功后清理隔离文件及失效幂等结果 |
+| `POST /requests/:id/cancel` | `{requestVersion,reason}`，仅MATERIAL加上述权限，submitted且无任何验收事件；返回单据，status为`cancelled`，记录`cancelledBy,cancelledAt,cancelReason`，原始提交及修订保留只读。列表／详情增加`canDelete,canCancel` |
+| `DELETE /openings/:id` | `{version,reason}`，仅draft；MATERIAL加该kind的initialize／adjust权限，期初关闭后仍可删旧草稿，posted拒绝。详情增加`canDelete` |
+| `GET /numbering-rules` | `{items:[{kind,label,rule:{template,padding,version,actorId,updatedAt},nextSequence,dateBasis:'UTC'}]}`，kind为catalog／request／opening／supplement |
+| `PUT /numbering-rules/:kind` | `{version,template,padding,reason}`，同物资维护权限；模板1–40字符，恰一个`{SEQ}`，可含`{YYYY}{MM}{DD}`及ASCII字母数字`._/-`，padding为1–12，结果最多64字符。分类型事务流水、不回退、不复用已分配编号；旧码及既有单件规则不变 |
+| `POST /categories` | 新增可选`profile:'general'|'chemical'`，缺省general；分类返回profile、version |
+| `PATCH /categories/:id/profile` | `{version,reason,profile}`，ADMIN/MATERIAL加`materials.categories.write`；不删除已保存的实验室字段 |
+| `GET /storage-places` | 登录后全员可读，`{items,total}`；节点含`id,name,parentId,active,effectiveActive,version,path,depth`，路径用` / `连接，depth从0开始 |
+| `POST /storage-places` | `{name,parentId?}` → 201节点，ADMIN/MATERIAL加`materials.stock.location`；最多1000节点、8层、名称60字、路径200字，节点名称不含斜线 |
+| `PATCH /storage-places/:id`、`DELETE /storage-places/:id` | `{version,reason,name?,parentId?,active?}`；同维护权限。禁止循环／同级重名／向停用父级新增；有子级或库存／期初引用时禁止更名移动删除，可以停用，子级有效启用状态随父级变化 |
+
+物资四个实验室字段均为可选文本，POST／PATCH／同次建档及Excel共用验证。CAS格式和校验位须通过，纯度／浓度最多100字、储存条件300字；SDS最多1000字，只允许不含用户名密码的HTTP(S)地址。服务端不抓取链接。同身份建档时，新提供的非空实验室字段与已有值不同则409，不静默丢弃输入；省略／空字段复用保留原值，需要纠错用PATCH。身份仍按名称＋规格＋单位，纯度／浓度不同的物资须在规格中明确区分。当前库存及单件详情采用当前名称、规格、分类；流水／原始提交等历史快照不随资料维护而改写。二维码身份继续使用稳定ID与code。
+
+物资Excel升级10列，兼容旧6／5列及编码模板，旧列未提供的实验室字段保留；相同身份而新值冲突拒绝覆盖。库存仍13列，库位参考含有效中文路径及已有文本。库位字典不强制改写旧位置，既有位置表单继续保存中文路径或自由文本。仅物资库与库存回导，申报等历史导出不变成写入入口。
+
+新增迁移`0004-material-maintenance-numbering.sql`及`0005-material-lab.sql`。JSON备份schema7包含active、取消资料、编号规则／计数／分配历史、库位及实验室字段；旧schema1–6按各自原合同拒绝未知字段，再补新字段缺省。恢复仍只允许空物资业务库，校验新状态、编号和位置树，错误整体回滚；有编号历史的7版备份不可交给旧程序。升级前使用完整PostgreSQL备份，回退同时恢复升级前数据库，不直接挂回旧镜像。
 
 0.11.0 接入库存七列、厂家与两类备注。`GET /stock` 和不带 `detail=1` 的 `GET /stock/batches` 保留原聚合／批次身份；新的 `GET /stock/batches?detail=1` 仅按厂家拆分展示，领用、位置与二维码继续使用原批次。新展示行增加 `firstMovementAt,manufacturer,note,catalogRemark,totalQtyM,amountBasis:'batch-average'`；`totalQtyM` 是该物资全部仓库／区域的合计，分页或区域筛选不会将它改成当前页小计。`GET /stock/manufacturers` 返回 `{items:[厂家名]}` 历史建议，仍须登录并具有物资读取权限。
 

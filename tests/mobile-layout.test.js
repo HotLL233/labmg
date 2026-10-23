@@ -52,7 +52,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
   const material = { id: 1, catalogId: 1, name: '布局检查物资' + 'M'.repeat(80), code: 'SYNTHETIC-MATERIAL-1', spec: '500 mL', unit: '瓶',
     categoryId: 1, categoryName: '合成分类', regionId: 1, regionName: '合成区域', warehouse: 'MAIN', trackingMode: 'unit', qtyM: 1000, amountCents: 2000 };
   const materialLists = {
-    categories: [{ id: 1, name: '合成分类' }], regions: [{ id: 1, name: '合成区域' }], catalog: [{ ...material, stockQtyM: 1000, localQtyM: 1000 }],
+    categories: [{ id: 1, name: '合成分类', profile: 'chemical', version: 1 }], regions: [{ id: 1, name: '合成区域' }], catalog: [{ ...material, active: true, referenced: true, version: 1, casNumber: '7732-18-5', purity: '分析纯', stockQtyM: 1000, localQtyM: 1000 }],
+    'storage-places': [{ id: 1, name: '合成房间', parentId: null, path: '合成房间', active: true, effectiveActive: true, version: 1 },
+      { id: 2, name: '试剂柜', parentId: 1, path: '合成房间 / 试剂柜', active: true, effectiveActive: true, version: 1 }],
+    'numbering-rules': ['catalog', 'request', 'opening', 'supplement'].map(kind => ({ kind, label: { catalog: '物资档案', request: '申报单', opening: '期初单', supplement: '补录单' }[kind], rule: { template: kind.toUpperCase() + '-{SEQ}', padding: 6, version: 1 }, nextSequence: 20, dateBasis: 'UTC' })),
     requests: [{ id: 101, no: 'SYNTHETIC-REQUEST-1', title: '合成申报单' + 'R'.repeat(80), creatorName: '合成人员', itemCount: 1, createdAt: '2026-10-22', status: 'draft', revision: 0 }],
     acceptance: [{ ...material, id: 201, requestId: 101, requestNo: 'SYNTHETIC-REQUEST-1', requestRevision: 1, acceptedQtyM: 0, closedQtyM: 0, remainingQtyM: 1000, receiptStatus: 'pending' }],
     stock: [{ ...material, lastMovementAt: '2026-10-22' }],
@@ -74,13 +77,14 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       '/api/trash': [{ ...record('archives'), deleted_at: '2026-10-19' }],
       '/api/audit': [{ id: 1, created_at: '2026-10-19', display_name: '合成人员', action: 'VIEW', entity: 'records', detail: '合成日志' }],
       '/api/materials/meta': { capabilities: { createRequest: true, receive: true, createIssue: true, manageCategories: true, manageRegions: true,
-        manageCatalog: true, viewAmount: true, export: true, initialize: true, adjustStock: true, issueStock: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
+        manageCatalog: true, manageLocation: true, viewAmount: true, export: true, initialize: true, adjustStock: true, issueStock: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
     };
     let body = results[url.pathname] ?? [];
     if (url.pathname === '/api/records') body = [record(url.searchParams.get('module'))];
     if (url.pathname.startsWith('/api/materials/') && url.pathname !== '/api/materials/meta') {
       const items = materialLists[url.pathname.slice('/api/materials/'.length)] || [];
       body = { items, total: items.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 };
+      if (url.pathname === '/api/materials/unit-label-rule') body = { rule: { template: 'LAB-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1 }, nextSequence: 31, dateBasis: 'UTC' };
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -235,6 +239,38 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     await page.locator('#mw-view').waitFor({ state: 'visible' });
     await checkTables(`${width}px material catalog dialog`, '#mw-view .table');
     assert.ok(await page.locator('#mw-view').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog dialog keeps scrolling inside its table');
+    const previousScroll = await page.locator('#mw-view').evaluate(node => { node.scrollTop = node.scrollHeight; return node.scrollTop; });
+    if (width === 390) assert.ok(previousScroll > 0, 'phone catalog creates a real scrolling dialog');
+    await page.locator('#mw-view [data-mw="close-view"]').first().click();
+    await page.locator('#page [data-mw="dictionaries"]').click();
+    assert.equal(await page.locator('#mw-view').evaluate(node => node.scrollTop), 0, 'reopening shared details starts at its heading');
+    await page.locator('#mw-view [data-mw="catalog-edit"]').click();
+    await page.locator('#mw-dialog').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#mw-fields [name="unit"]').getAttribute('readonly'), '', 'referenced catalog keeps its stock unit');
+    assert.equal(await page.locator('#mw-laboratory-fields').isVisible(), true, 'chemical-category editing exposes laboratory fields');
+    await page.locator('#mw-save').scrollIntoViewIfNeeded();
+    assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog edit keeps fields inside the dialog');
+    if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(screenshots, `${width}-catalog-edit.png`) });
+    await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    await page.locator('#page [data-mw="dictionaries"]').click();
+    await page.locator('#mw-view [data-mw="numbering-rules"]').click();
+    await page.locator('#mw-view [data-mw="numbering-edit"]').first().waitFor();
+    await checkTables(`${width}px numbering rules dialog`, '#mw-view .table');
+    await page.locator('#mw-view [data-mw="numbering-edit"]').first().click();
+    await page.locator('#mw-fields [name="template"]').fill('MAT-{YYYY}-{SEQ}');
+    assert.match(await page.locator('#mw-numbering-preview').textContent(), /MAT-\d{4}-000020/);
+    assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'numbering edit keeps preview inside the dialog');
+    await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    await page.locator('#page [data-mw="dictionaries"]').click();
+    await page.locator('#mw-view [data-mw="storage-places"]').click();
+    await page.locator('#mw-view [data-mw="place-new"]').waitFor();
+    await checkTables(`${width}px storage places dialog`, '#mw-view .table');
+    if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(screenshots, `${width}-storage-places.png`) });
+    await page.locator('#mw-view [data-mw="place-new"]').click();
+    assert.match(await page.locator('#mw-fields [name="parentId"]').textContent(), /合成房间 \/ 试剂柜/);
+    assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'place edit remains within the dialog');
+    await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    await page.locator('#page [data-mw="dictionaries"]').click();
     await page.locator('#mw-view [data-mw="close-view"]').first().click();
     await page.locator('#page [data-mw="label-template"]').click();
     await page.locator('#material-label-designer').waitFor({ state: 'visible' });

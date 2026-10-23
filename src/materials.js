@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const createMaterialLab = require('./material-lab');
 const { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet: sheet } = require('./material-xlsx');
 const TEMPLATE_VERSION = require('../package.json').version;
 
@@ -16,19 +17,24 @@ const FILE_LIMIT = 5 * 1024 * 1024;
 const BACKUP_LIMIT = 20 * 1024 * 1024;
 const STOCK_QR_PREFIX = 'LABOS-STOCK:1:';
 const TABLES = [
-  'material_categories', 'material_regions', 'material_catalog', 'material_barcodes', 'material_requests',
+  'material_categories', 'material_regions', 'material_storage_places', 'material_catalog', 'material_barcodes', 'material_requests',
   'material_request_items', 'material_request_revisions', 'material_receipts',
   'material_stock_locations', 'material_issues', 'material_openings', 'material_stock_movements',
   'material_opening_items', 'material_stock_units',
-  'material_attachments', 'material_state', 'material_idempotency'
+  'material_attachments', 'material_state', 'material_idempotency', 'material_number_allocations'
 ];
-const V4_TABLES = TABLES.filter(table => !['material_openings', 'material_opening_items'].includes(table));
+const V6_TABLES = TABLES.filter(table => !['material_number_allocations', 'material_storage_places'].includes(table));
+const V4_TABLES = V6_TABLES.filter(table => !['material_openings', 'material_opening_items'].includes(table));
 const V3_TABLES = V4_TABLES.filter(table => table !== 'material_stock_units');
 const V2_TABLES = V3_TABLES.filter(table => table !== 'material_barcodes');
 const V1_TABLES = V2_TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
 function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx }) {
+  const lab = createMaterialLab({ db, fail, hasPermission, log, validTimestamp });
   const defaultUnitRule = { template: 'LAB-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1, actorId: null, updatedAt: '', reason: '' };
+  const numberKinds = { catalog: { label: '物资编码', prefix: 'MAT' }, request: { label: '申报单号', prefix: 'WZ' },
+    opening: { label: '期初单号', prefix: 'QC' }, supplement: { label: '补录单号', prefix: 'BL' } };
+  const defaultNumberRule = kind => ({ ...defaultUnitRule, template: `${numberKinds[kind].prefix}-{YYYY}{MM}{DD}-{SEQ}` });
   async function mapRows(rows, callback) {
     const result = [];
     for (let index = 0; index < rows.length; index++) result.push(await callback(rows[index], index));
@@ -120,11 +126,43 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   async function activeCatalog(id) {
     const row = await catalog(id);
     if (row.merged_into !== null) conflict('该物资信息已合并，请选择有效物资信息');
+    if (!row.active) conflict('该物资信息已停用，不能用于新申报或新入库；已有库存仍可查询和处置');
     return row;
   }
-  async function catalogView(row) {
+  function references(value, kind, id) {
+    if (Array.isArray(value)) return value.some(entry => references(entry, kind, id));
+    if (!value || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, entry]) =>
+      ((key === kind + 'Id' || key === kind + '_id') && entry === id) ||
+      (key === kind && entry && typeof entry === 'object' && entry.id === id) || references(entry, kind, id));
+  }
+  async function catalogReferenceIds() {
+    const ids = new Set();
+    for (const table of ['material_request_items', 'material_barcodes', 'material_stock_locations', 'material_issues', 'material_stock_movements', 'material_opening_items', 'material_stock_units']) {
+      for (const row of await all(`SELECT DISTINCT catalog_id FROM ${table} WHERE catalog_id IS NOT NULL`)) ids.add(row.catalog_id);
+    }
+    for (const row of await all('SELECT DISTINCT merged_into FROM material_catalog WHERE merged_into IS NOT NULL')) ids.add(row.merged_into);
+    function collect(value) {
+      if (Array.isArray(value)) { value.forEach(collect); return; }
+      if (!value || typeof value !== 'object') return;
+      for (const [key, entry] of Object.entries(value)) {
+        if ((key === 'catalogId' || key === 'catalog_id') && Number.isSafeInteger(entry)) ids.add(entry);
+        if (key === 'catalog' && entry && Number.isSafeInteger(entry.id)) ids.add(entry.id);
+        collect(entry);
+      }
+    }
+    for (const [table, fields] of [['material_requests', ['original_snapshot']], ['material_request_revisions', ['before_snapshot', 'after_snapshot']], ['material_receipts', ['snapshot']], ['material_idempotency', ['response']]]) {
+      for (const row of await all(`SELECT ${fields.join(',')} FROM ${table}`)) {
+        for (const field of fields) if (row[field]) collect(JSON.parse(row[field]));
+      }
+    }
+    return ids;
+  }
+  const catalogReferences = async id => (await catalogReferenceIds()).has(id);
+  async function catalogView(row, referenced = undefined) {
+    referenced ??= await catalogReferences(row.id);
     return { id: row.id, code: row.code, name: row.name, spec: row.spec, unit: row.unit,
-      remark: row.remark, origin: row.origin,
+      remark: row.remark, origin: row.origin, active: Boolean(row.active), referenced, canDelete: !referenced, ...lab.view(row),
       trackingMode: row.tracking_mode, categoryId: row.category_id, categoryName: row.category_name ?? (await dictionary('material_categories', row.category_id, '分类')).name, version: row.version };
   }
   const normalized = value => String(value ?? '').normalize('NFKC').trim().toLowerCase();
@@ -148,27 +186,42 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (code.length > 64 || (code && !/^[A-Z0-9][A-Z0-9._/-]*$/.test(code))) error(400, '编码最多64位，须由英文字母、数字及 . _ / - 组成');
     return { code, name: identityText(input.name, '物资名称'), spec: identityText(input.spec, '规格'), unit: identityText(input.unit, '单位', 30),
       remark: text(input.remark ?? '', '物资备注', 2000, true),
+      ...lab.fields(input),
       category_id: (await dictionary('material_categories', input.categoryId, '分类')).id,
       tracking_mode: trackingMode(input.trackingMode ?? 'quantity') };
   }
   async function createCatalog(data, user, reuse = false, index = null, origin = 'manual') {
+    function checkLaboratoryReuse(existing) {
+      for (const [field, label] of [['cas_number', 'CAS号'], ['purity', '纯度／浓度'], ['storage_conditions', '储存条件'], ['sds_url', 'SDS链接']]) {
+        if (data[field] && data[field] !== existing[field]) conflict(`已有相同物资的${label}不同，请先选择已有物资，或在规格中区分；资料纠错请在物资信息页说明原因后编辑`);
+      }
+    }
     index ??= catalogIndex(await all('SELECT * FROM material_catalog ORDER BY id'));
     const coded = data.code ? index.codes.get(normalized(data.code)) || [] : [];
     if (coded.length > 1) conflict('物资编码规范化后有歧义，请联系管理员核对');
     const existing = coded[0];
     if (existing) {
       if (existing.merged_into !== null) conflict('该编码已用于已合并物资，请选择有效物资信息');
-      if (reuse && sameMaterial(existing, data) && existing.category_id === data.category_id && existing.tracking_mode === data.tracking_mode) return { row: existing, created: false };
+      if (!existing.active) conflict('该编码对应的物资信息已停用，请先启用，不能重复新建');
+      if (reuse && sameMaterial(existing, data) && existing.category_id === data.category_id && existing.tracking_mode === data.tracking_mode) {
+        checkLaboratoryReuse(existing);
+        return { row: existing, created: false };
+      }
       conflict('物资编码已存在或信息冲突，请选择已有物资信息');
     }
+    if (data.code && await one("SELECT 1 FROM material_number_allocations WHERE kind='catalog' AND lower(code)=lower(?) LIMIT 1", data.code)) conflict('该物资编码已被历史记录使用，不能分配给新物资，请使用新编码');
     const matches = index.identities.get(materialKey(data)) || [];
     if (matches.length) {
-      if (!data.code && matches.length === 1 && matches[0].category_id === data.category_id && matches[0].tracking_mode === data.tracking_mode) return { row: matches[0], created: false };
+      if (matches.some(row => !row.active)) conflict('相同物资信息已停用，请先启用，不能重复新建');
+      if (!data.code && matches.length === 1 && matches[0].category_id === data.category_id && matches[0].tracking_mode === data.tracking_mode) {
+        checkLaboratoryReuse(matches[0]);
+        return { row: matches[0], created: false };
+      }
       conflict('相同名称、规格和单位的物资信息已存在，分类或管理方式冲突，请选择已有记录');
     }
-    data = { ...data, code: data.code || 'MAT-' + crypto.randomBytes(8).toString('hex').toUpperCase() };
-    const inserted = await run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode,remark,origin) VALUES(?,?,?,?,?,?,?,?,?)',
-      data.code, data.name, data.spec, data.unit, data.category_id, user.id, data.tracking_mode, data.remark, origin);
+    data = { ...data, code: data.code || await allocateNumber('catalog') };
+    const inserted = await run('INSERT INTO material_catalog(code,name,spec,unit,category_id,created_by,tracking_mode,remark,origin,cas_number,purity,storage_conditions,sds_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      data.code, data.name, data.spec, data.unit, data.category_id, user.id, data.tracking_mode, data.remark, origin, data.cas_number, data.purity, data.storage_conditions, data.sds_url);
     await log(user, 'CREATE', 'material_catalog', inserted.lastInsertRowid, data.code);
     const row = await catalog(inserted.lastInsertRowid);
     index.codes.set(normalized(row.code), [row]);
@@ -176,6 +229,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return { row, created: true };
   }
   async function catalogRows(url) {
+    const active = url.searchParams.get('active') ?? 'true';
+    if (!['true', 'false', 'all'].includes(active)) error(400, '物资启用状态须为true、false或all');
     const region = url.searchParams.has('regionId') ? (await dictionary('material_regions', url.searchParams.get('regionId'), '区域')).id : null;
     const store = url.searchParams.has('warehouse') ? warehouse(url.searchParams.get('warehouse')) : null;
     const totals = new Map((await all(`SELECT catalog_id,COALESCE(SUM(qty_m),0) AS quantity FROM material_stock_movements GROUP BY catalog_id`))
@@ -186,9 +241,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (store !== null) { conditions.push('warehouse=?'); args.push(store); }
     const local = scoped ? new Map((await all(`SELECT catalog_id,COALESCE(SUM(qty_m),0) AS quantity FROM material_stock_movements
       WHERE ${conditions.join(' AND ')} GROUP BY catalog_id`, ...args)).map(row => [row.catalog_id, row.quantity])) : totals;
+    const referenceIds = await catalogReferenceIds();
     let rows = await mapRows(await all(`SELECT c.*,d.name AS category_name FROM material_catalog c JOIN material_categories d ON d.id=c.category_id WHERE c.merged_into IS NULL`), async row => ({
-      ...await catalogView(row), stockQtyM: totals.get(row.id) || 0, ...(scoped ? { localQtyM: local.get(row.id) || 0 } : {})
+      ...await catalogView(row, referenceIds.has(row.id)), stockQtyM: totals.get(row.id) || 0, ...(scoped ? { localQtyM: local.get(row.id) || 0 } : {})
     }));
+    if (active !== 'all') rows = rows.filter(row => row.active === (active === 'true'));
     if (url.searchParams.has('categoryId')) {
       const category = integer(url.searchParams.get('categoryId'), '分类');
       rows = rows.filter(row => row.categoryId === category);
@@ -198,7 +255,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       rows = rows.filter(row => row.trackingMode === mode);
     }
     const query = normalized(url.searchParams.get('q'));
-    if (query) rows = rows.filter(row => ['code', 'name', 'spec'].some(field => normalized(row[field]).includes(query)));
+    if (query) rows = rows.filter(row => ['code', 'name', 'spec', 'categoryName'].some(field => normalized(row[field]).includes(query)));
     const priority = row => local.get(row.id) > 0 ? 0 : row.stockQtyM > 0 ? 1 : 2;
     return rows.sort((left, right) => priority(left) - priority(right) || left.name.localeCompare(right.name, 'zh-CN') || left.code.localeCompare(right.code) || left.id - right.id);
   }
@@ -225,6 +282,38 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const rule = JSON.parse((await one("SELECT value FROM material_state WHERE key='unit_label_rule'")).value);
     const { reason, ...view } = rule;
     return { rule: view, nextSequence: Number((await one("SELECT value FROM material_state WHERE key='unit_sequence'")).value) + 1, dateBasis: 'UTC' };
+  }
+  function numberKind(kind) {
+    if (!Object.hasOwn(numberKinds, kind)) error(400, '编号类型无效');
+    return kind;
+  }
+  function validateNumberRule(rule) {
+    validateUnitRule(rule);
+    if (rule.template.length > 40 || !/^[A-Za-z0-9]/.test(rule.template.replace(/\{(?:YYYY|MM|DD|SEQ)\}/g, '1'))) error(400, '编号模板须以字母或数字开头，最多40字符，生成编号最多64字符');
+    return rule;
+  }
+  async function numberRuleView(kind) {
+    numberKind(kind);
+    const { reason, ...rule } = JSON.parse((await one('SELECT value FROM material_state WHERE key=?', 'number_rule_' + kind)).value);
+    return { kind, label: numberKinds[kind].label, rule, nextSequence: Number((await one('SELECT value FROM material_state WHERE key=?', 'number_sequence_' + kind)).value) + 1, dateBasis: 'UTC' };
+  }
+  async function allocateNumber(kind) {
+    const rule = validateNumberRule(JSON.parse((await one('SELECT value FROM material_state WHERE key=?', 'number_rule_' + kind)).value));
+    let sequence = Number((await one('SELECT value FROM material_state WHERE key=?', 'number_sequence_' + kind)).value);
+    const day = today(), tokens = { YYYY: day.slice(0, 4), MM: day.slice(5, 7), DD: day.slice(8, 10) };
+    const table = kind === 'catalog' ? 'material_catalog' : kind === 'request' ? 'material_requests' : 'material_openings';
+    const column = kind === 'catalog' ? 'code' : 'no';
+    const kinds = ['opening', 'supplement'].includes(kind) ? ['opening', 'supplement'] : [kind];
+    let code;
+    do {
+      sequence++;
+      if (!Number.isSafeInteger(sequence) || sequence >= Number.MAX_SAFE_INTEGER) error(400, '编号流水超出安全范围');
+      code = rule.template.replace(/\{(YYYY|MM|DD|SEQ)\}/g, (_, token) => token === 'SEQ' ? String(sequence).padStart(rule.padding, '0') : tokens[token]);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(code)) error(400, '生成编号无效或超过64字符');
+    } while (await one(`SELECT 1 FROM ${table} WHERE lower(${column})=lower(?)`, code) || await one(`SELECT 1 FROM material_number_allocations WHERE kind IN(${kinds.map(() => '?').join(',')}) AND lower(code)=lower(?)`, ...kinds, code));
+    await run('INSERT INTO material_number_allocations(kind,sequence,code,created_at) VALUES(?,?,?,?)', kind, sequence, code, now());
+    await run('UPDATE material_state SET value=? WHERE key=?', String(sequence), 'number_sequence_' + kind);
+    return code;
   }
   function barcodeCode(value) {
     const code = text(value, '条码内容', 512);
@@ -285,11 +374,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     };
   }
   function mayEdit(order, line, user) {
+    if (order.status === 'cancelled') return false;
     if (order.status === 'submitted') return material(user, 'materials.request.edit_submitted');
     return role(user, 'MATERIAL') || line.author_id === user.id;
   }
   function mayHeader(order, user) {
+    if (order.status === 'cancelled') return false;
     return order.status === 'submitted' ? material(user, 'materials.request.edit_submitted') : role(user, 'MATERIAL') || order.created_by === user.id;
+  }
+  async function mayDeleteRequest(order, user) {
+    if (order.status !== 'draft') return false;
+    if (material(user, 'materials.request.edit_submitted')) return true;
+    return order.created_by === user.id && !(await one('SELECT 1 FROM material_request_items WHERE request_id=? AND author_id<>? LIMIT 1', order.id, user.id)) &&
+      !(await one('SELECT 1 FROM material_attachments WHERE request_id=? AND actor_id<>? LIMIT 1', order.id, user.id));
   }
   function attachmentView(row) {
     return {
@@ -324,10 +421,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       id: order.id, no: order.no, title: order.title, description: order.description, status: order.status,
       createdBy: order.created_by, creatorName: (await actorName(order.created_by)), createdAt: order.created_at,
       submittedBy: order.submitted_by, submittedAt: order.submitted_at, version: order.version, revision: order.revision,
+      cancelledBy: order.cancelled_by, cancelledAt: order.cancelled_at, cancelReason: order.cancel_reason,
       itemCount: items.length, progress: { pendingItems: items.filter(row => row.remainingQtyM > 0).length },
       items, attachments: (await all('SELECT * FROM material_attachments WHERE request_id=? AND active=1 ORDER BY id', order.id)).map(attachmentView),
       ...(snapshot ? {} : {
         canEditHeader: mayHeader(order, user), canAddItem: order.status === 'draft',
+        canDelete: await mayDeleteRequest(order, user), canCancel: order.status === 'submitted' && material(user, 'materials.request.edit_submitted') &&
+          !(await one('SELECT 1 FROM material_receipts WHERE request_id=? LIMIT 1', order.id)),
         canSubmit: order.status === 'draft' && items.length > 0 && material(user, 'materials.request.submit')
       })
     };
@@ -387,6 +487,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       VALUES(?,?,?,?,?,?)`, order.id, after.revision, JSON.stringify(before), JSON.stringify(after), reason, user.id));
   }
   function editReason(order, input) {
+    if (order.status === 'cancelled') conflict('申报单已取消，不能修改');
     return order.status === 'submitted' ? text(input.reason, '修订原因', 1000) : '';
   }
   async function lineInput(input, old = {}) {
@@ -399,9 +500,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return {
       catalog_id: catalogId || null,
       code: master?.code ?? (input.code === undefined ? old.code || '' : text(input.code, '编码', 64, true).normalize('NFKC').toUpperCase()),
-      name: master?.name ?? (input.name === undefined && old.name !== undefined ? old.name : identityText(input.name, '物资名称')),
-      spec: master?.spec ?? (input.spec === undefined && old.spec !== undefined ? old.spec : identityText(input.spec, '规格')),
-      unit: master?.unit ?? (input.unit === undefined && old.unit !== undefined ? old.unit : identityText(input.unit, '单位', 30)),
+      name: master && old.catalog_id === master.id ? old.name : master?.name ?? (input.name === undefined && old.name !== undefined ? old.name : identityText(input.name, '物资名称')),
+      spec: master && old.catalog_id === master.id ? old.spec : master?.spec ?? (input.spec === undefined && old.spec !== undefined ? old.spec : identityText(input.spec, '规格')),
+      unit: master && old.catalog_id === master.id ? old.unit : master?.unit ?? (input.unit === undefined && old.unit !== undefined ? old.unit : identityText(input.unit, '单位', 30)),
       category_id: categoryId, region_id: regionId,
       warehouse: warehouse(input.warehouse ?? old.warehouse),
       manufacturer: input.manufacturer === undefined ? old.manufacturer || '' : manufacturerText(input.manufacturer),
@@ -475,8 +576,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     return (await movementView(movement, true));
   }
-  async function stockIdentity(input) {
-    return { catalog_id: (await activeCatalog(input.catalogId)).id, region_id: (await dictionary('material_regions', input.regionId, '区域')).id,
+  async function stockIdentity(input, requireActive = true) {
+    return { catalog_id: (await (requireActive ? activeCatalog(input.catalogId) : catalog(input.catalogId))).id, region_id: (await dictionary('material_regions', input.regionId, '区域')).id,
       warehouse: warehouse(input.warehouse), batch: text(input.batch ?? '', '批号', 100, true),
       expiry_date: date(input.expiryDate, '有效期', true) };
   }
@@ -590,9 +691,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   async function unitView(row) {
     const source = (await one('SELECT * FROM material_stock_movements WHERE id=?', row.source_movement_id)), snapshot = JSON.parse(source.snapshot);
+    const master = await catalog(row.catalog_id);
     const exit = row.exit_movement_id ? (await one('SELECT * FROM material_stock_movements WHERE id=?', row.exit_movement_id)) : null;
     return { id: row.id, code: row.code, sequence: row.sequence, qrPayload: row.code, catalogId: row.catalog_id,
-      catalogCode: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
+      catalogCode: master.code, name: master.name, spec: master.spec, unit: master.unit,
       regionId: row.region_id, regionName: (await dictionary('material_regions', row.region_id, '区域')).name,
       warehouse: row.warehouse, warehouseName: WAREHOUSES.find(entry => entry.code === row.warehouse)?.name || row.warehouse, batch: row.batch, expiryDate: row.expiry_date,
       location: row.status === 'in_stock' ? (await stockLocation(row))?.location || '' : exit ? JSON.parse(exit.snapshot).location || '' : '',
@@ -625,8 +727,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       filters.push('u.status=?'); args.push(status);
     }
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
-    if (q) { filters.push("instr(lower(u.code || ' ' || COALESCE(json_extract(s.snapshot,'$.name'),'') || ' ' || COALESCE(json_extract(s.snapshot,'$.code'),'')),?)>0"); args.push(q); }
-    const from = `FROM material_stock_units u JOIN material_stock_movements s ON s.id=u.source_movement_id
+    if (q) { filters.push("instr(lower(u.code || ' ' || c.name || ' ' || c.code || ' ' || c.spec || ' ' || cat.name),?)>0"); args.push(q); }
+    const from = `FROM material_stock_units u JOIN material_catalog c ON c.id=u.catalog_id JOIN material_categories cat ON cat.id=c.category_id JOIN material_stock_movements s ON s.id=u.source_movement_id
       LEFT JOIN material_stock_movements e ON e.id=u.exit_movement_id${filters.length ? ' WHERE ' + filters.join(' AND ') : ''}`;
     const page = pageInput(url), total = (await one(`SELECT COUNT(*) AS total ${from}`, ...args)).total;
     return { items: (await mapRows(await all(`SELECT u.* ${from} ORDER BY u.id LIMIT ? OFFSET ?`, ...args, page.pageSize, page.offset),unitView)), total, page: page.page, pageSize: page.pageSize };
@@ -693,7 +795,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         unit: master.unit, trackingMode: master.tracking_mode, categoryId: category.id, categoryName: category.name,
         regionId: region.id, regionName: region.name, warehouse: identity.warehouse, location: position.location, manufacturer, note } };
   }
-  async function openingView(id, details = true) {
+  async function openingView(id, details = true, user = null) {
     const document = (await opening(id));
     const lines = (await all('SELECT * FROM material_opening_items WHERE opening_id=? ORDER BY id', document.id));
     const items = (await mapRows(lines,async row => ({ ...JSON.parse(row.snapshot), id: row.id, version: row.version,
@@ -702,6 +804,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       movementId: row.movement_id, unitCount: row.movement_id ? (await one('SELECT COUNT(*) AS total FROM material_stock_units WHERE source_movement_id=?', row.movement_id)).total : 0 })));
     return { id: document.id, no: document.no, title: document.title, date: document.date, description: document.description,
       kind: document.kind, reason: document.reason, status: document.status, version: document.version,
+      canDelete: document.status === 'draft' && material(user, document.kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize'),
       createdBy: document.created_by, creatorName: (await actorName(document.created_by)), createdAt: document.created_at,
       postedBy: document.posted_by, posterName: (await actorName(document.posted_by)), postedAt: document.posted_at,
       itemCount: items.length, unitCount: items.reduce((sum, row) => sum + row.unitCount, 0), ...(details ? { items } : {}) };
@@ -730,7 +833,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     for (const row of locations.values()) (await intakeLocation(row, { location: row.location, locationVersion: row.location_version }, user, `${document.no} 入库位置`));
     for (const row of lines) {
-      const snapshot = JSON.parse(row.snapshot), master = (await catalog(row.catalog_id));
+      const snapshot = JSON.parse(row.snapshot), master = (await activeCatalog(row.catalog_id));
       if (snapshot.trackingMode !== master.tracking_mode) conflict('物资管理方式已变化，请重新编辑该明细');
       const reason = document.kind === 'supplement' ? `${document.no} 补录：${document.reason}` : `${document.no} 期初登记${row.zero_amount_reason ? `：${row.zero_amount_reason}` : ''}`;
       const movement = (await addMovement({ ...row, type: document.kind === 'supplement' ? 'adjustment' : 'opening',
@@ -739,7 +842,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }
     (await run("UPDATE material_openings SET status='posted',version=version+1,posted_by=?,posted_at=? WHERE id=?", user.id, now(), document.id));
     (await log(user, document.kind === 'supplement' ? 'SUPPLEMENT' : 'OPENING', 'material_openings', document.id, document.no));
-    return { opening: (await openingView(document.id)), openingClosed: (await openingClosed()) };
+    return { opening: (await openingView(document.id, true, user)), openingClosed: (await openingClosed()) };
   }
   async function checkedIssue(id, user) {
     const row = (await one('SELECT * FROM material_issues WHERE id=?', integer(id)));
@@ -836,24 +939,23 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''} GROUP BY catalog_id, warehouse, region_id${batchColumns}
     ) SELECT b.*, first.snapshot, r.name AS region_name, first.created_at AS first_movement_at, last.created_at AS last_movement_at
       FROM balances b JOIN material_stock_movements first ON first.id=b.first_id
-      JOIN material_stock_movements last ON last.id=b.last_id JOIN material_regions r ON r.id=b.region_id`;
+      JOIN material_stock_movements last ON last.id=b.last_id JOIN material_regions r ON r.id=b.region_id JOIN material_catalog c ON c.id=b.catalog_id JOIN material_categories cat ON cat.id=c.category_id`;
     const q = (url?.searchParams.get('q') || '').trim().toLowerCase();
-    const searchSql = q ? ` WHERE instr(lower(COALESCE(json_extract(first.snapshot,'$.code'),'') || ' ' ||
-      COALESCE(json_extract(first.snapshot,'$.name'),'') || ' ' || COALESCE(json_extract(first.snapshot,'$.spec'),'') || ' ' || r.name),?)>0` : '';
+    const searchSql = q ? ` WHERE instr(lower(c.code || ' ' || c.name || ' ' || c.spec || ' ' || cat.name || ' ' || r.name),?)>0` : '';
     if (q) args.push(q);
     const page = paged ? pageInput(url) : null;
     const total = page ? (await one(`SELECT COUNT(*) AS total FROM (${query + searchSql})`, ...args)).total : 0;
     const rows = (await mapRows(await all(query + searchSql + ' ORDER BY b.first_id' + (page ? ' LIMIT ? OFFSET ?' : ''),
       ...args, ...(page ? [page.pageSize, page.offset] : [])),async row => {
-      const snapshot = JSON.parse(row.snapshot);
+      const master = await catalog(row.catalog_id), category = await dictionary('material_categories', master.category_id, '分类');
       if (!Number.isSafeInteger(row.qty_m) || !Number.isSafeInteger(row.amount_cents)) error(400, '库存累计数值超出安全整数范围');
       return { id: byBatch ? JSON.stringify([row.catalog_id, row.warehouse, row.region_id, row.batch, row.expiry_date]) : `${row.catalog_id}:${row.warehouse}:${row.region_id}`, catalogId: row.catalog_id,
-        code: snapshot.code, name: snapshot.name, spec: snapshot.spec, unit: snapshot.unit,
+        code: master.code, name: master.name, spec: master.spec, unit: master.unit, active: Boolean(master.active), categoryId: master.category_id, categoryName: category.name,
         trackingMode: (await catalog(row.catalog_id)).tracking_mode, catalogRemark: (await catalog(row.catalog_id)).remark,
         regionId: row.region_id, regionName: row.region_name, warehouse: row.warehouse,
-        ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date, categoryId: snapshot.categoryId, categoryName: snapshot.categoryName,
+        ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date,
           location: (await stockLocation(row))?.location || '', locationVersion: (await stockLocation(row))?.version || 0,
-          qrPayload: STOCK_QR_PREFIX + JSON.stringify({ catalogId: row.catalog_id, catalogCode: snapshot.code, regionId: row.region_id,
+          qrPayload: STOCK_QR_PREFIX + JSON.stringify({ catalogId: row.catalog_id, catalogCode: master.code, regionId: row.region_id,
             warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date }) } : {}),
         qtyM: row.qty_m, amountCents: row.amount_cents, firstMovementAt: row.first_movement_at, lastMovementAt: row.last_movement_at };
     }));
@@ -950,6 +1052,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const quantity = decimal(input.quantity, 3, '合格数量', true);
         const rejected = decimal(input.rejectedQuantity ?? '0', 3, '拒收数量', true);
         const master = (await catalog(line.catalog_id));
+        if (quantity > 0) await activeCatalog(master.id);
         unitQuantity(master, quantity, '合格数量', 1000); unitQuantity(master, rejected, '拒收数量');
         const amount = decimal(input.amount, 2, '本批总金额', true);
         if (quantity === 0 && rejected === 0) error(400, '合格数量与拒收数量不能同时为零');
@@ -1034,7 +1137,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   async function listRequests(url, user, exportAll = false) {
     const status = url.searchParams.get('status');
-    if (status && !['draft', 'submitted'].includes(status)) error(400, '申报状态无效');
+    if (status && !['draft', 'submitted', 'cancelled'].includes(status)) error(400, '申报状态无效');
     const from = date(url.searchParams.get('from') || undefined, '开始日期', true);
     const to = date(url.searchParams.get('to') || undefined, '结束日期', true);
     const filters = [], args = [];
@@ -1066,10 +1169,12 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       (SELECT COUNT(*) FROM material_request_items i WHERE i.request_id=r.id AND i.qty_m>
         COALESCE((SELECT SUM(e.qty_m+e.closed_qty_m) FROM material_receipts e WHERE e.item_id=i.id),0)) AS pending_items
       ${source} ORDER BY r.id DESC LIMIT ? OFFSET ?`, ...args, pageSize, offset));
-    return { items: rows.map(row => ({ id: row.id, no: row.no, title: row.title, description: row.description,
+    return { items: await mapRows(rows, async row => ({ id: row.id, no: row.no, title: row.title, description: row.description,
       status: row.status, createdBy: row.created_by, creatorName: row.creator_name, createdAt: row.created_at,
       submittedBy: row.submitted_by, submittedAt: row.submitted_at, version: row.version, revision: row.revision,
       itemCount: row.item_count, progress: { pendingItems: row.pending_items }, canEditHeader: mayHeader(row, user),
+      canDelete: await mayDeleteRequest(row, user), canCancel: row.status === 'submitted' && material(user, 'materials.request.edit_submitted') &&
+        !(await one('SELECT 1 FROM material_receipts WHERE request_id=? LIMIT 1', row.id)),
       canAddItem: row.status === 'draft', canSubmit: row.status === 'draft' && row.item_count > 0 && material(user, 'materials.request.submit')
     })), total, page, pageSize };
   }
@@ -1129,6 +1234,39 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (matches.length !== 1) error(400, `${label}${matches.length ? '名称有歧义，请联系管理员' : '不存在，请从参考表下拉选择或先在系统创建'}`);
     return matches[0];
   }
+  async function forgetIdempotency(kind, id) {
+    let count = 0;
+    for (const row of await all('SELECT actor_id,key,response FROM material_idempotency')) {
+      if (references(JSON.parse(row.response), kind, id)) {
+        await run('DELETE FROM material_idempotency WHERE actor_id=? AND key=?', row.actor_id, row.key);
+        count++;
+      }
+    }
+    return count;
+  }
+  async function deleteDraftRequest(order, input, user) {
+    versions(order, null, input);
+    if (order.status !== 'draft') conflict('只能删除未提交草稿；已提交且未验收的单据请办理取消');
+    if (!(await mayDeleteRequest(order, user))) error(403, '物资管理员须有申报维护权限；普通人员只能删除本人创建且没有他人明细或附件的草稿');
+    const reason = text(input.reason, '删除原因', 1000);
+    if (await one('SELECT 1 FROM material_receipts WHERE request_id=? LIMIT 1', order.id) || await one('SELECT 1 FROM material_request_revisions WHERE request_id=? LIMIT 1', order.id)) conflict('单据已有验收或修订历史，不能删除');
+    const attachments = await all('SELECT * FROM material_attachments WHERE request_id=?', order.id), staged = [];
+    for (const attachment of attachments) {
+      const source = attachmentPath(attachment.stored_name);
+      if (!fs.existsSync(source)) conflict(`附件 ${attachment.id} 文件缺失，请先核查存储再删除草稿`);
+      const destination = source + '.deleted-' + crypto.randomUUID();
+      fs.renameSync(source, destination);
+      db.afterRollback(() => fs.renameSync(destination, source));
+      staged.push(destination);
+    }
+    await run('DELETE FROM material_attachments WHERE request_id=?', order.id);
+    await run('DELETE FROM material_request_items WHERE request_id=?', order.id);
+    const clearedReplies = await forgetIdempotency('request', order.id);
+    await run('DELETE FROM material_requests WHERE id=?', order.id);
+    await log(user, 'DELETE_DRAFT', 'material_requests', order.id, JSON.stringify({ no: order.no, reason,
+      attachments: attachments.map(row => ({ id: row.id, name: row.name, size: row.size, actorId: row.actor_id })), clearedReplies }));
+    return staged;
+  }
   async function dispatch(req, res, url, initialUser) {
     const route = url.pathname.slice('/api/materials'.length) || '/';
     const method = req.method;
@@ -1136,6 +1274,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     let user = tokenUser ? (await tokenUser(req)) : initialUser;
     if (!user) error(401, '请先登录');
     const reply = (value, status = 200) => send(res, status, scrub(value, user));
+    const labResult = await lab.handle(route, method, input, user);
+    if (labResult?.handled) return reply(labResult.value, labResult.status ?? 200);
     let match;
     if (route === '/meta' && method === 'GET') return reply({ capabilities: capability(user), warehouses: WAREHOUSES,
       openingClosed: (await openingClosed()), quantityScale: 1000, amountScale: 100 });
@@ -1147,7 +1287,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const status = url.searchParams.get('status'), kind = url.searchParams.get('kind');
         if (status && !['draft', 'posted'].includes(status)) error(400, '单据状态无效');
         if (kind && !['opening', 'supplement'].includes(kind)) error(400, '单据类型无效');
-        let rows = (await mapRows(await all('SELECT id FROM material_openings ORDER BY id DESC'),async row => (await openingView(row.id, false))));
+        let rows = (await mapRows(await all('SELECT id FROM material_openings ORDER BY id DESC'),async row => (await openingView(row.id, false, user))));
         if (status) rows = rows.filter(row => row.status === status);
         if (kind) rows = rows.filter(row => row.kind === kind);
         return reply(paginate(search(rows, url, ['no', 'title', 'description']), url));
@@ -1157,11 +1297,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           const kind = (await openingClosed()) ? 'supplement' : 'opening';
           requireMaterial(user, kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize');
           const data = openingHeader(input), reason = text(input.reason ?? '', '补录原因', 1000, kind === 'opening');
-          const no = `${kind === 'supplement' ? 'BL' : 'QC'}-${today().replaceAll('-', '')}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+          const no = await allocateNumber(kind);
           const inserted = (await run(`INSERT INTO material_openings(no,title,date,description,kind,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`,
             no, data.title, data.date, data.description, kind, reason, user.id, now()));
           (await log(user, 'CREATE', 'material_openings', Number(inserted.lastInsertRowid), no));
-          return (await openingView(inserted.lastInsertRowid));
+          return (await openingView(inserted.lastInsertRowid, true, user));
         }));
         return reply(result, 201);
       }
@@ -1215,6 +1355,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
               else master = matches[0];
             }
           }
+          if (master && !master.active) add(legacy ? '物资编码' : '物资名称', '该物资信息已停用，请先启用后再入库', 409);
           const region = await check('区域', value => namedOption(regions, value, '区域'));
           const store = await check(storeField, value => {
             const found = WAREHOUSES.find(row => normalized(row.name) === normalized(value) || (legacy && row.code === value));
@@ -1242,7 +1383,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         for (const data of prepared) await saveOpeningItem(document.id, data);
         (await run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id));
         (await log(user, 'IMPORT', 'material_openings', document.id, `新增${sheet.rows.length}条草稿明细`));
-        return (await openingView(document.id));
+        return (await openingView(document.id, true, user));
       }));
       return reply(result, 201);
     }
@@ -1261,22 +1402,54 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           }
           (await run('UPDATE material_openings SET version=version+1 WHERE id=?', document.id));
           (await log(user, method === 'DELETE' ? 'DELETE_ITEM' : 'SAVE_ITEM', 'material_openings', document.id, document.no));
-          return (await openingView(document.id));
+          return (await openingView(document.id, true, user));
         }));
         return reply(result, method === 'POST' ? 201 : 200);
       }
     }
     if ((match = route.match(/^\/openings\/(\d+)$/))) {
-      if (method === 'GET') { requireOpeningRead(user); return reply((await openingView(match[1]))); }
+      if (method === 'GET') { requireOpeningRead(user); return reply((await openingView(match[1], true, user))); }
+      if (method === 'DELETE') {
+        await transaction(async () => {
+          const document = await opening(match[1]);
+          requireMaterial(user, document.kind === 'supplement' ? 'materials.stock.adjust' : 'materials.stock.initialize');
+          if (!Number.isSafeInteger(input.version)) error(400, '请提供读取时的整数版本');
+          if (input.version !== document.version) conflict('单据已变化，请重新读取');
+          if (document.status !== 'draft') conflict('已入库单据不能删除，请使用库存调整保留流水');
+          const reason = text(input.reason, '删除原因', 1000);
+          if (await one('SELECT 1 FROM material_opening_items WHERE opening_id=? AND movement_id IS NOT NULL LIMIT 1', document.id)) conflict('单据已有入库流水，不能删除');
+          await run('DELETE FROM material_opening_items WHERE opening_id=?', document.id);
+          const clearedReplies = await forgetIdempotency('opening', document.id);
+          await run('DELETE FROM material_openings WHERE id=?', document.id);
+          await log(user, 'DELETE_DRAFT', 'material_openings', document.id, JSON.stringify({ no: document.no, reason, clearedReplies }));
+        });
+        return reply({ deleted: true });
+      }
       if (method === 'PATCH') {
         return reply((await transaction(async () => {
           const document = (await opening(match[1])); (await openingWritable(document, input, user));
           const data = openingHeader(input), reason = text(input.reason ?? document.reason, '补录原因', 1000, document.kind === 'opening');
           (await run('UPDATE material_openings SET title=?,date=?,description=?,reason=?,version=version+1 WHERE id=?', data.title, data.date, data.description, reason, document.id));
           (await log(user, 'UPDATE', 'material_openings', document.id, document.no));
-          return (await openingView(document.id));
+          return (await openingView(document.id, true, user));
         })));
       }
+    }
+
+    if (route === '/numbering-rules' && method === 'GET') return reply({ items: await mapRows(Object.keys(numberKinds), numberRuleView) });
+    if ((match = route.match(/^\/numbering-rules\/([a-z]+)$/)) && method === 'PUT') {
+      requireManager(user, 'materials.catalog.write');
+      const kind = numberKind(match[1]);
+      return reply(await transaction(async () => {
+        const current = (await numberRuleView(kind)).rule;
+        if (!Number.isSafeInteger(input.version)) error(400, '请提供读取时的整数版本');
+        if (input.version !== current.version) conflict('编号规则已变化，请重新读取');
+        const rule = validateNumberRule({ template: input.template, padding: input.padding, version: current.version + 1, actorId: user.id, updatedAt: now(), reason: text(input.reason, '编号规则修改原因', 1000) });
+        if (!Number.isSafeInteger(rule.version)) error(400, '编号规则版本超出范围');
+        await run('UPDATE material_state SET value=? WHERE key=?', JSON.stringify(rule), 'number_rule_' + kind);
+        await log(user, 'NUMBER_RULE', 'material_state', 0, JSON.stringify({ kind, ...rule }));
+        return numberRuleView(kind);
+      }));
     }
 
     if (route === '/unit-label-rule') {
@@ -1300,19 +1473,23 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if ((match = route.match(/^\/(categories|regions)$/))) {
       const table = match[1] === 'categories' ? 'material_categories' : 'material_regions';
       if (method === 'GET') {
-        const rows = (await all(`SELECT * FROM ${table} ORDER BY id`)).map(row => ({ id: row.id, name: row.name, createdBy: row.created_by, createdAt: row.created_at }));
+        const rows = (await all(`SELECT * FROM ${table} ORDER BY id`)).map(row => ({ id: row.id, name: row.name, createdBy: row.created_by, createdAt: row.created_at,
+          ...(table === 'material_categories' ? { profile: row.profile, version: row.version } : {}) }));
         return reply(paginate(search(rows, url, ['name']), url));
       }
       if (method === 'POST') {
         requireManager(user, `materials.${match[1]}.write`);
         const name = text(input.name, '名称', 80);
+        const profile = input.profile ?? 'general';
+        if (table === 'material_categories' && !['general', 'chemical'].includes(profile)) error(400, '分类资料类型无效');
         if ((await one(`SELECT 1 FROM ${table} WHERE name=?`, name))) error(409, '同名选项已存在');
         const inserted = (await transaction(async () => {
-          const result = (await run(`INSERT INTO ${table}(name,created_by) VALUES(?,?)`, name, user.id));
+          const result = table === 'material_categories' ? await run(`INSERT INTO ${table}(name,created_by,profile) VALUES(?,?,?)`, name, user.id, profile) : await run(`INSERT INTO ${table}(name,created_by) VALUES(?,?)`, name, user.id);
           (await log(user, 'CREATE', table, result.lastInsertRowid, name));
           return (await one(`SELECT * FROM ${table} WHERE id=?`, result.lastInsertRowid));
         }));
-        return reply({ id: inserted.id, name: inserted.name, createdBy: inserted.created_by, createdAt: inserted.created_at }, 201);
+        return reply({ id: inserted.id, name: inserted.name, createdBy: inserted.created_by, createdAt: inserted.created_at,
+          ...(table === 'material_categories' ? { profile: inserted.profile, version: inserted.version } : {}) }, 201);
       }
     }
     if ((match = route.match(/^\/catalog\/(\d+)\/tracking-mode$/)) && method === 'PUT') {
@@ -1321,15 +1498,47 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         const master = (await activeCatalog(match[1])), mode = trackingMode(input.trackingMode), reason = text(input.reason, '管理方式修改原因', 1000);
         if (!Number.isSafeInteger(input.version) || input.version !== master.version) conflict('物资信息版本已变化，请重新读取');
         if (mode === master.tracking_mode) return (await catalogView(master));
-        if ((await one('SELECT 1 FROM material_stock_movements WHERE catalog_id=? LIMIT 1', master.id)) ||
-            (await one('SELECT 1 FROM material_receipts e JOIN material_request_items i ON i.id=e.item_id WHERE i.catalog_id=? LIMIT 1', master.id)) ||
-            (await one('SELECT 1 FROM material_issues WHERE catalog_id=? LIMIT 1', master.id))) conflict('已有库存、验收或领用历史，不能切换管理方式');
+        if (await catalogReferences(master.id)) conflict('已有申报、库存或历史引用，不能直接切换管理方式');
         if (mode === 'unit' && (await one('SELECT 1 FROM material_request_items WHERE catalog_id=? AND qty_m%1000<>0 LIMIT 1', master.id))) conflict('已有非整数申报数量，不能切换为单件管理');
         (await run('UPDATE material_catalog SET tracking_mode=?,version=version+1 WHERE id=?', mode, master.id));
         (await log(user, 'TRACKING_MODE', 'material_catalog', master.id, JSON.stringify({ before: master.tracking_mode, after: mode, reason })));
         return (await catalogView((await catalog(master.id))));
       }));
       return reply({ catalog: saved });
+    }
+    if ((match = route.match(/^\/catalog\/(\d+)$/)) && ['GET', 'PATCH', 'DELETE'].includes(method)) {
+      if (method === 'GET') return reply({ catalog: await catalogView(await catalog(match[1])) });
+      requireManager(user, 'materials.catalog.write');
+      const saved = await transaction(async () => {
+        const master = await catalog(match[1]);
+        if (!Number.isSafeInteger(input.version)) error(400, '请提供读取时的整数版本');
+        if (input.version !== master.version) conflict('物资信息版本已变化，请重新读取');
+        const reason = text(input.reason, method === 'DELETE' ? '删除原因' : '修改原因', 1000);
+        const referenced = await catalogReferences(master.id);
+        if (method === 'DELETE') {
+          if (referenced || master.merged_into !== null) conflict('该物资已有申报、库存、包装码或历史引用，不能删除，请停用');
+          await run('DELETE FROM material_catalog WHERE id=?', master.id);
+          await log(user, 'DELETE', 'material_catalog', master.id, JSON.stringify({ code: master.code, reason }));
+          return { deleted: true };
+        }
+        if (input.code !== undefined && input.code !== master.code) error(400, '物资编码为稳定身份，不能修改');
+        if (master.merged_into !== null) conflict('已合并物资不能直接编辑');
+        const data = await catalogInput({ code: master.code, name: input.name ?? master.name, spec: input.spec ?? master.spec,
+          unit: input.unit ?? master.unit, categoryId: input.categoryId ?? master.category_id, remark: input.remark ?? master.remark,
+          trackingMode: input.trackingMode ?? master.tracking_mode, ...lab.view(master), ...input });
+        if (referenced && (data.unit !== master.unit || data.tracking_mode !== master.tracking_mode)) conflict('该物资已有业务或历史引用，不能直接更改单位或管理方式');
+        if (input.active !== undefined && typeof input.active !== 'boolean') error(400, '启用状态须为布尔值');
+        const active = input.active === undefined ? master.active : Number(input.active);
+        const duplicates = await all('SELECT * FROM material_catalog WHERE id<>? AND merged_into IS NULL', master.id);
+        if (duplicates.some(row => sameMaterial(row, data))) conflict('修改后的名称、规格和单位与其他物资重复，请核对');
+        await run('UPDATE material_catalog SET name=?,spec=?,unit=?,category_id=?,remark=?,tracking_mode=?,active=?,cas_number=?,purity=?,storage_conditions=?,sds_url=?,version=version+1 WHERE id=?',
+          data.name, data.spec, data.unit, data.category_id, data.remark, data.tracking_mode, active, data.cas_number, data.purity, data.storage_conditions, data.sds_url, master.id);
+        await log(user, 'UPDATE', 'material_catalog', master.id, JSON.stringify({ reason,
+          before: { name: master.name, spec: master.spec, unit: master.unit, categoryId: master.category_id, remark: master.remark, trackingMode: master.tracking_mode, active: Boolean(master.active), ...lab.view(master) },
+          after: { name: data.name, spec: data.spec, unit: data.unit, categoryId: data.category_id, remark: data.remark, trackingMode: data.tracking_mode, active: Boolean(active), ...lab.view(data) } }));
+        return { catalog: await catalogView(await catalog(master.id)) };
+      });
+      return reply(saved);
     }
     if ((match = route.match(/^\/catalog\/(\d+)\/barcodes$/))) {
       const master = (await catalog(match[1]));
@@ -1419,6 +1628,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
             return result;
           });
           const remark = sheet.headers.includes('物资备注') ? await check('物资备注', value => text(String(value), '物资备注', 2000, true)) : undefined;
+          const laboratory = {};
+          for (const [field, key, column] of [['CAS号', 'casNumber', 'cas_number'], ['纯度／浓度', 'purity', 'purity'], ['储存条件', 'storageConditions', 'storage_conditions'], ['SDS链接', 'sdsUrl', 'sds_url']]) {
+            if (sheet.headers.includes(field)) laboratory[key] = await check(field, value => lab.fields({ [key]: String(value) })[column]);
+          }
           if (errors.length !== before) continue;
           const candidates = code ? masters.codes.get(normalized(code)) || [] : masters.identities.get(materialKey({ name, spec, unit })) || [];
           if (candidates.length === 1) {
@@ -1429,10 +1642,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
             if (category.id !== existing.category_id) add('物资分类', '已有相同物资的分类不同，请核对已有记录，导入不会覆盖分类', 409);
             if (mode !== existing.tracking_mode) add('管理方式', '已有相同物资的管理方式不同，请核对；更改管理方式须使用专用维护入口', 409);
             if (remark !== undefined && remark !== existing.remark) add('物资备注', '已有相同物资的备注不同，导入不会覆盖已有备注，请先核对', 409);
+            for (const [field, key, column] of [['CAS号', 'casNumber', 'cas_number'], ['纯度／浓度', 'purity', 'purity'], ['储存条件', 'storageConditions', 'storage_conditions'], ['SDS链接', 'sdsUrl', 'sds_url']]) {
+              if (Object.hasOwn(laboratory, key) && laboratory[key] !== existing[column]) add(field, '与已有物资资料不同，导入不覆盖已有信息，请在物资信息页说明原因后编辑', 409);
+            }
           }
           if (errors.length !== before) continue;
+          if (candidates.length === 1 && !candidates[0].active && candidates[0].merged_into === null) { skipped++; continue; }
           const saved = await check(sheet.headers.includes('物资编码') ? '物资编码' : '物资名称', async () =>
-            createCatalog(await catalogInput({ code, name, spec, unit, categoryId: category.id, trackingMode: mode, remark }), user, true, masters));
+            createCatalog(await catalogInput({ code, name, spec, unit, categoryId: category.id, trackingMode: mode, remark, ...laboratory }), user, true, masters));
           if (saved?.created) created++; else if (saved) skipped++;
         }
         if (errors.length) importFailure(errors, errors.status || 400);
@@ -1455,7 +1672,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (method === 'POST') {
         const title = text(input.title, '申报标题'), description = text(input.description ?? '', '说明', 5000, true);
         const id = (await transaction(async () => {
-          const no = 'WZ-' + today().replaceAll('-', '') + '-' + crypto.randomBytes(6).toString('hex').toUpperCase();
+          const no = await allocateNumber('request');
           const result = (await run('INSERT INTO material_requests(no,title,description,created_by) VALUES(?,?,?,?)', no, title, description, user.id));
           (await log(user, 'CREATE', 'material_requests', result.lastInsertRowid, no));
           return Number(result.lastInsertRowid);
@@ -1466,6 +1683,13 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if ((match = route.match(/^\/requests\/(\d+)$/))) {
       const orderId = integer(match[1]);
       if (method === 'GET') return reply((await requestView(orderId, user)));
+      if (method === 'DELETE') {
+        const staged = await transaction(async () => deleteDraftRequest(await request(orderId), input, user));
+        for (const file of staged) {
+          try { fs.unlinkSync(file); } catch { console.error('Deleted material draft attachment remains quarantined for cleanup'); }
+        }
+        return reply({ deleted: true });
+      }
       if (method === 'PATCH') {
         const result = (await transaction(async () => {
           const order = (await request(orderId));
@@ -1484,6 +1708,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         }));
         return reply(result);
       }
+    }
+    if ((match = route.match(/^\/requests\/(\d+)\/cancel$/)) && method === 'POST') {
+      requireMaterial(user, 'materials.request.edit_submitted');
+      return reply(await transaction(async () => {
+        const order = await request(match[1]); versions(order, null, input);
+        if (order.status !== 'submitted') conflict('只能取消已提交且没有验收事件的申报单');
+        const reason = text(input.reason, '取消原因', 1000);
+        const event = await one('SELECT id,type FROM material_receipts WHERE request_id=? ORDER BY id LIMIT 1', order.id);
+        if (event) conflict(`该申报已有验收事件 #${event.id}（${event.type}），不能取消；合格验收请沿用验收冲正`);
+        await run("UPDATE material_requests SET status='cancelled',cancelled_by=?,cancelled_at=?,cancel_reason=?,version=version+1 WHERE id=?", user.id, now(), reason, order.id);
+        await log(user, 'CANCEL', 'material_requests', order.id, JSON.stringify({ no: order.no, reason }));
+        return requestView(order.id, user);
+      }));
     }
     if ((match = route.match(/^\/requests\/(\d+)\/items\/(\d+)\/catalog$/)) && method === 'POST') {
       requireManager(user, 'materials.catalog.write');
@@ -1553,6 +1790,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         if (order.status !== 'draft') conflict('申报单已提交');
         const items = (await all('SELECT * FROM material_request_items WHERE request_id=?', order.id));
         if (!items.length) error(400, '提交前须至少有一条有效物资明细');
+        for (const line of items) if (line.catalog_id) await activeCatalog(line.catalog_id);
         (await run("UPDATE material_requests SET status='submitted',submitted_by=?,submitted_at=?,revision=1,version=version+1 WHERE id=?", user.id, now(), order.id));
         (await run('UPDATE material_requests SET original_snapshot=? WHERE id=?', JSON.stringify((await requestView(order.id, user, true))), order.id));
         (await log(user, 'SUBMIT', 'material_requests', order.id, order.no));
@@ -1602,13 +1840,15 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if ((match = route.match(/^\/issues\/(\d+)$/)) && method === 'GET') return reply({ issue: (await issueView((await checkedIssue(match[1], user)), user)) });
     if (route === '/issues' && method === 'POST') {
       const result = (await idempotent(user, route, input, async () => {
-        const identity = (await stockIdentity(input)), balance = (await batchBalance(identity));
+        const identity = (await stockIdentity(input, false)), balance = (await batchBalance(identity));
         const quantity = decimal(input.quantity, 3, '领用数量');
         unitQuantity((await catalog(identity.catalog_id)), quantity, '领用数量', 1000);
         if (Object.hasOwn(input, 'unitIds') || Object.hasOwn(input, 'unitCodes')) error(400, '申请不预占具体单件，请在发放时选择');
         if (balance.qty < quantity) conflict('该批次可用库存不足，不能提交领用申请');
-        const purpose = text(input.purpose, '领用用途', 1000);
-        const snapshot = { ...JSON.parse(balance.movements[0].snapshot), batch: identity.batch, expiryDate: identity.expiry_date,
+        const purpose = text(input.purpose, '领用用途', 1000), master = await catalog(identity.catalog_id);
+        const category = await dictionary('material_categories', master.category_id, '分类');
+        const snapshot = { ...JSON.parse(balance.movements[0].snapshot), code: master.code, name: master.name, spec: master.spec, unit: master.unit,
+          categoryId: master.category_id, categoryName: category.name, batch: identity.batch, expiryDate: identity.expiry_date,
           location: (await stockLocation(identity))?.location || '', createdBy: user.id };
         const result = (await run(`INSERT INTO material_issues(catalog_id,region_id,warehouse,batch,expiry_date,qty_m,snapshot,purpose,created_by,created_at)
           VALUES(?,?,?,?,?,?,?,?,?,?)`, ...identityArgs(identity), quantity, JSON.stringify(snapshot), purpose, user.id, now()));
@@ -1625,7 +1865,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (route === '/stock/location' && method === 'PUT') {
       requireManager(user, 'materials.stock.location');
       const location = (await transaction(async () => {
-        const identity = (await stockIdentity(input)), current = (await stockLocation(identity));
+        const identity = (await stockIdentity(input, false)), current = (await stockLocation(identity));
         if (!Number.isSafeInteger(input.version) || input.version < 0) error(400, '请提供读取时的位置整数版本');
         if (input.version !== (current?.version || 0)) conflict('库存位置已变化，请重新读取后修改');
         if (!(await batchBalance(identity)).movements.length) error(400, '只能维护已有库存流水批次的位置');
@@ -1677,7 +1917,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       requireMaterial(user, isOpening ? 'materials.stock.initialize' : 'materials.stock.adjust');
       const result = (await idempotent(user, route, input, async key => {
         if (isOpening && (await openingClosed())) conflict('期初登记已经关闭，请使用有原因的库存调整');
-        const master = (await activeCatalog(input.catalogId)), region = (await dictionary('material_regions', input.regionId, '区域'));
+        const master = (await (!isOpening && input.direction === 'decrease' ? catalog(input.catalogId) : activeCatalog(input.catalogId))), region = (await dictionary('material_regions', input.regionId, '区域'));
         const category = (await dictionary('material_categories', input.categoryId ?? master.category_id, '分类'));
         const target = warehouse(input.warehouse);
         const quantity = decimal(input.quantity, 3, '数量'), amount = decimal(input.amount, 2, '总金额', true);
@@ -1765,7 +2005,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   async function backup(user) {
     if (!permit(user, 'backup.read') || !permit(user, 'materials.amount.read')) error(403, '完整物资备份需要备份及金额读取权限');
     return transaction(async () => {
-    const data = Object.fromEntries((await mapRows(TABLES,async table => [table, (await all(`SELECT * FROM ${table}${table === 'material_state' || table === 'material_idempotency' ? '' : ' ORDER BY id'}`))])));
+    const data = Object.fromEntries((await mapRows(TABLES,async table => [table, (await all(`SELECT * FROM ${table}${['material_state', 'material_idempotency', 'material_number_allocations'].includes(table) ? '' : ' ORDER BY id'}`))])));
     let totalBytes = 0;
     const files = data.material_attachments.map(row => {
       const file = attachmentPath(row.stored_name);
@@ -1776,14 +2016,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
       return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 6, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 7, generatedAt: now(),
       users: (await all('SELECT id,username FROM users ORDER BY id')), data, files };
     if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
     return result;
     });
   }
   function remapSnapshot(value, mapping) {
-    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId', 'processedBy', 'postedBy']);
+    const userKeys = new Set(['createdBy', 'submittedBy', 'authorId', 'actorId', 'userId', 'processedBy', 'postedBy', 'cancelledBy']);
     if (Array.isArray(value)) return value.map(entry => remapSnapshot(entry, mapping));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
@@ -1797,7 +2037,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   async function validateRestoredLedger() {
     for (const row of (await all('SELECT * FROM material_catalog'))) {
       trackingMode(row.tracking_mode);
-      if (!['manual', 'receipt'].includes(row.origin) || text(row.remark, '物资备注', 2000, true) !== row.remark || row.merged_into === row.id) error(400, '物资信息来源、备注或合并归属无效');
+      if (![0, 1].includes(row.active) || !['manual', 'receipt'].includes(row.origin) || text(row.remark, '物资备注', 2000, true) !== row.remark || row.merged_into === row.id) error(400, '物资信息状态、来源、备注或合并归属无效');
     }
     for (const row of (await all('SELECT * FROM material_request_items'))) {
       if (text(row.manufacturer, '厂家', 200, true) !== row.manufacturer) error(400, '申报厂家字段无效');
@@ -1814,8 +2054,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     for (const document of (await all('SELECT * FROM material_openings'))) {
       if (text(document.title, '单据主题', 200) !== document.title || date(document.date) !== document.date ||
           text(document.description, '单据说明', 2000, true) !== document.description ||
-          !/^(?:QC|BL)-\d{8}-[A-F0-9]{10}$/.test(document.no) ||
-          !document.no.startsWith(document.kind === 'supplement' ? 'BL-' : 'QC-') || !validTimestamp(document.created_at)) error(400, '期初或补录单信息无效');
+          !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(document.no) || !validTimestamp(document.created_at)) error(400, '期初或补录单信息无效');
       text(document.reason, '补录原因', 1000, document.kind === 'opening');
       if (document.kind === 'supplement' && !(await openingClosed())) error(400, '存在补录单时期初必须已关闭');
       if (document.status === 'posted' && (!validTimestamp(document.posted_at) || document.posted_at < document.created_at || document.version < 2)) error(400, '已入库单据处理信息无效');
@@ -1849,17 +2088,22 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }
     }
     for (const order of (await all('SELECT * FROM material_requests'))) {
-      if (order.status === 'submitted') {
-        if (!order.original_snapshot || !order.submitted_by || order.revision < 1) error(400, '已提交单缺少原始提交信息');
+      if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(order.no)) error(400, '申报单号无效');
+      if (['submitted', 'cancelled'].includes(order.status)) {
+        if (!order.original_snapshot || !order.submitted_by || !validTimestamp(order.submitted_at) || order.revision < 1) error(400, '已提交单缺少原始提交信息');
         const original = JSON.parse(order.original_snapshot);
         if (original.id !== order.id || original.revision !== 1 || original.status !== 'submitted') error(400, '原提交快照无效');
         const revisions = (await all('SELECT revision FROM material_request_revisions WHERE request_id=? ORDER BY revision', order.id));
         if (revisions.length !== order.revision - 1 || revisions.some((entry, index) => entry.revision !== index + 2)) error(400, '申报修订历史不连续');
       } else if (order.revision !== 0 || order.original_snapshot) error(400, '草稿不能包含已提交快照');
+      if (order.status === 'cancelled') {
+        if (!order.cancelled_by || !validTimestamp(order.cancelled_at) || order.cancelled_at < order.submitted_at ||
+            order.version < 3 || text(order.cancel_reason, '取消原因', 1000) !== order.cancel_reason) error(400, '申报取消信息无效');
+      } else if (order.cancelled_by !== null || order.cancelled_at !== null || order.cancel_reason !== '') error(400, '未取消申报不能包含取消信息');
       for (const line of (await all('SELECT * FROM material_request_items WHERE request_id=?', order.id))) {
         const counts = (await activity(line.id));
         if (counts.accepted < 0 || counts.closed < 0 || safeSum([counts.accepted, counts.closed]) > line.qty_m) error(400, '验收、结案数量与申报数量不一致');
-        if (counts.exists && order.status !== 'submitted') error(400, '草稿不能有验收事件');
+        if (counts.exists && order.status !== 'submitted') error(400, '草稿或已取消申报不能有验收事件');
       }
     }
     for (const event of (await all('SELECT * FROM material_receipts'))) {
@@ -1989,6 +2233,31 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       integer(rule.actorId, '规则操作人'); if (!(await one('SELECT 1 FROM users WHERE id=?', rule.actorId)) || !validTimestamp(rule.updatedAt)) error(400, '单件编号规则操作人或时间无效');
       text(rule.reason, '规则修改原因', 1000);
     }
+    const historicalNumberCodes = new Set();
+    for (const kind of Object.keys(numberKinds)) {
+      const saved = await one('SELECT value FROM material_state WHERE key=?', 'number_rule_' + kind);
+      const current = saved && JSON.parse(saved.value);
+      validateNumberRule(current);
+      if (Object.keys(current).length !== 6 || !['template', 'padding', 'version', 'actorId', 'updatedAt', 'reason'].every(key => Object.hasOwn(current, key)) ||
+          !Number.isSafeInteger(current.version) || current.version < 1) error(400, '编号规则字段或版本无效');
+      if (current.version === 1) {
+        if (stableJson(current) !== stableJson(defaultNumberRule(kind))) error(400, '初始编号规则无效');
+      } else {
+        if (!(await one('SELECT 1 FROM users WHERE id=?', integer(current.actorId, '规则操作人'))) || !validTimestamp(current.updatedAt)) error(400, '编号规则操作人或时间无效');
+        text(current.reason, '编号规则修改原因', 1000);
+      }
+      const value = (await one('SELECT value FROM material_state WHERE key=?', 'number_sequence_' + kind))?.value;
+      if (!/^(?:0|[1-9]\d*)$/.test(value || '') || !Number.isSafeInteger(Number(value)) || Number(value) >= Number.MAX_SAFE_INTEGER) error(400, '编号流水状态无效');
+      const allocations = await all('SELECT * FROM material_number_allocations WHERE kind=?', kind);
+      if (Number(value) !== allocations.reduce((maximum, row) => Math.max(maximum, row.sequence), 0)) error(400, '编号流水与最后一笔分配历史不一致');
+      for (const allocated of allocations) {
+        if (allocated.sequence > Number(value) || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(allocated.code) || !validTimestamp(allocated.created_at)) error(400, '编号分配历史与流水状态不一致');
+        const key = `${['opening', 'supplement'].includes(kind) ? 'opening' : kind}:${allocated.code.toUpperCase()}`;
+        if (historicalNumberCodes.has(key)) error(400, '编号分配历史在同一编号域内重复');
+        historicalNumberCodes.add(key);
+      }
+    }
+    await lab.validateBackup(Object.fromEntries(await mapRows(['material_categories', 'material_catalog', 'material_storage_places'], async table => [table, await all(`SELECT * FROM ${table}`)])));
     (await stockRows());
     (await stockDetails());
     // PostgreSQL checks all business foreign keys during insertion.
@@ -2002,10 +2271,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5, 6].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5, 6, 7].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
-    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : TABLES;
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : payload.schemaVersion < 7 ? V6_TABLES : TABLES;
     if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
         Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
@@ -2022,13 +2291,22 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       mapping.set(id, current.id);
       usernames.add(username);
     }
-    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id', 'processed_by', 'posted_by']);
+    const userColumns = new Set(['created_by', 'submitted_by', 'author_id', 'actor_id', 'processed_by', 'posted_by', 'cancelled_by']);
     const jsonColumns = new Set(['original_snapshot', 'before_snapshot', 'after_snapshot', 'snapshot', 'response']);
     const normalized = {};
     for (const table of TABLES) {
       const columns = await db.columns(table);
       const allowed = new Map(columns.map(column => [column.name, column]));
       normalized[table] = (payload.data[table] || []).map(source => {
+        if (payload.schemaVersion < 7 && source && typeof source === 'object') {
+          const added = { material_categories: { profile: 'general', version: 1 },
+            material_catalog: { active: 1, cas_number: '', purity: '', storage_conditions: '', sds_url: '' },
+            material_requests: { cancelled_by: null, cancelled_at: null, cancel_reason: '' } }[table];
+          if (added) {
+            if (Object.keys(added).some(key => Object.hasOwn(source, key))) error(400, '旧版备份不能包含新版维护字段');
+            source = { ...source, ...added };
+          }
+        }
         if (payload.schemaVersion < 6 && source && typeof source === 'object') {
           const added = { material_catalog: { remark: '', origin: 'manual', merged_into: null }, material_request_items: { manufacturer: '' },
             material_receipts: { manufacturer: '', note: '' }, material_stock_movements: { manufacturer: '', note: '' } }[table];
@@ -2042,6 +2320,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           source = { ...source, tracking_mode: 'quantity' };
         }
         if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => !allowed.has(key)) || columns.some(column => !Object.hasOwn(source, column.name))) error(400, `备份表 ${table} 字段无效`);
+        if (table === 'material_state' && typeof source.key !== 'string') error(400, '备份物资状态键必须为文本');
         const row = {};
         for (const [key, value] of Object.entries(source)) {
           const type = allowed.get(key).type;
@@ -2050,7 +2329,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           if (userColumns.has(key) && value !== null) {
             if (!mapping.has(value)) error(400, '备份业务数据引用了未映射用户');
             row[key] = mapping.get(value);
-          } else if ((jsonColumns.has(key) || (table === 'material_state' && source.key === 'unit_label_rule' && key === 'value')) && value !== null) {
+          } else if ((jsonColumns.has(key) || (table === 'material_state' && (source.key === 'unit_label_rule' || source.key.startsWith('number_rule_')) && key === 'value')) && value !== null) {
             let parsed;
             try { parsed = JSON.parse(value); } catch { error(400, '备份快照JSON无效'); }
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) error(400, '备份快照必须是对象');
@@ -2064,10 +2343,17 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (normalized.material_state.some(row => !['opening_closed', 'restored_once'].includes(row.key))) error(400, '旧版备份包含新版状态');
       normalized.material_state.push({ key: 'unit_label_rule', value: JSON.stringify(defaultUnitRule) }, { key: 'unit_sequence', value: '0' });
     }
-    if (normalized.material_state.some(row => !['opening_closed', 'restored_once', 'unit_label_rule', 'unit_sequence'].includes(row.key) ||
+    const numberKeys = Object.keys(numberKinds).flatMap(kind => ['number_rule_' + kind, 'number_sequence_' + kind]);
+    if (payload.schemaVersion < 7) {
+      if (normalized.material_state.some(row => numberKeys.includes(row.key))) error(400, '旧版备份不能包含新版编号状态');
+      for (const kind of Object.keys(numberKinds)) normalized.material_state.push({ key: 'number_rule_' + kind, value: JSON.stringify(defaultNumberRule(kind)) }, { key: 'number_sequence_' + kind, value: '0' });
+    }
+    if (normalized.material_state.some(row => !['opening_closed', 'restored_once', 'unit_label_rule', 'unit_sequence', ...numberKeys].includes(row.key) ||
         (['opening_closed', 'restored_once'].includes(row.key) && !['0', '1'].includes(row.value))) ||
+        numberKeys.some(key => normalized.material_state.filter(row => row.key === key).length !== 1) ||
         normalized.material_state.filter(row => row.key === 'unit_label_rule').length !== 1 || normalized.material_state.filter(row => row.key === 'unit_sequence').length !== 1 ||
         normalized.material_state.filter(row => row.key === 'opening_closed').length !== 1) error(400, '备份期初状态无效');
+    await lab.validateBackup(normalized);
     const barcodeCodes = new Set();
     for (const row of normalized.material_barcodes) {
       if (packageBarcode(row.code) !== row.code || barcodeCodes.has(row.code)) error(400, '备份条码未规范化或存在重复绑定');
@@ -2118,6 +2404,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
             (await run(`INSERT INTO ${table}(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`, ...keys.map(key => row[key])));
           }
         }
+        await db.exec('SET CONSTRAINTS ALL IMMEDIATE');
         (await db.resetSequences());
         (await validateRestoredLedger());
         (await run("INSERT INTO material_state(key,value) VALUES('restored_once','1') ON CONFLICT(key) DO UPDATE SET value='1'"));
@@ -2141,7 +2428,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const unique = [...new Map([...preferred, ...rows].map(row => [key(row), row])).values()];
       return { rows: unique.slice(0, 5000), complete: rows.length <= 5000 && unique.length <= 5000 };
     };
-    const masters = options(selected, await all('SELECT name,spec,unit FROM material_catalog WHERE merged_into IS NULL ORDER BY name,spec,unit LIMIT 5001'), materialKey);
+    const masters = options(selected, await all('SELECT name,spec,unit FROM material_catalog WHERE merged_into IS NULL AND active=1 ORDER BY name,spec,unit LIMIT 5001'), materialKey);
     const categories = !openingSheet ? options(selected.filter(row => row.categoryName).map(row => ({ name: row.categoryName })), await all('SELECT name FROM material_categories ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
     const regions = openingSheet ? options(selected.filter(row => row.regionName).map(row => ({ name: row.regionName })), await all('SELECT name FROM material_regions ORDER BY name LIMIT 5001'), row => normalized(row.name)) : null;
     sheets.push(sheet('物资参考', ['物资名称', '规格', '单位'], masters.rows.map(row => [row.name, row.spec, row.unit])));
@@ -2163,14 +2450,15 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
     const rows = template ? [] : await catalogRows(url);
     if (rows.length > 5000) error(413, '一次最多导出5000条物资信息，请缩小筛选范围');
-    const sheets = [sheet('物资信息', CATALOG_HEADERS, rows.map(row => [row.name, row.spec, row.unit, row.categoryName, row.trackingMode === 'unit' ? '逐件' : '数量', row.remark]))];
+    const sheets = [sheet('物资信息', CATALOG_HEADERS, rows.map(row => [row.name, row.spec, row.unit, row.categoryName, row.trackingMode === 'unit' ? '逐件' : '数量', row.remark, row.casNumber, row.purity, row.storageConditions, row.sdsUrl]))];
     await workbookReferences(sheets, false, rows);
     sheets.push(instructions([
       '用途：物资信息页用于导入物资信息库，不改变库存；导出文件可原样回导。数据从第2行开始，保留第1行中文表头及列顺序，勿增加合计行。内部编码由系统生成，无需填写。',
       '物资名称、规格、单位（必填）：分别最多200、200、30字；可参考下拉或填写新物资，名称＋规格＋单位共同识别一条物资信息，请核对三列组合。',
       '物资分类（必填）：选择已创建分类的中文名称；管理方式（必填）：从下拉选择“逐件”或“数量”。逐件为每瓶／每件独立编码，数量支持小数。',
       '物资备注（选填，最多2000字）：描述物资本身，如保存条件或使用注意事项；与入库批次的“备注”分别保存。',
-      '原样回导复用已有物资信息，不覆盖原记录；分类、管理方式或物资备注与已有记录不同会指出工作表、行、列并整批拒绝，空备注也不能用来清空已有备注。',
+      '当前模板共10列；CAS号、纯度／浓度、储存条件、SDS链接均选填。CAS须通过校验位验证，SDS须为不含账号密码的HTTP或HTTPS完整链接。旧6列和旧5列模板仍可读取，缺少的列不会清空已有资料。',
+      '原样回导复用已有物资信息，不覆盖原记录；完全一致的停用资料只跳过，保持停用。分类、管理方式、备注或实验室资料与已有记录不同会指出工作表、行、列并整批拒绝，变更请在物资信息页说明原因后编辑。',
       '每次1至5000条，文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。以“=”开头的文字按文本保存；不要改成Excel公式。',
       '参考工作表和下拉用于减少输错；不要将参考页当成导入明细。带数量或金额的库存文件请从“期初库存／存量补录”导入草稿，再核对入库。'
     ]));
@@ -2180,6 +2468,18 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="labos-catalog-${template ? 'template' : today()}.xlsx"`, 'Content-Length': buffer.length });
     res.end(buffer);
+  }
+  async function locationWorkbookReferences(sheets) {
+    const targets = sheets.filter(entry => entry.data?.[0]?.some(cell => cell.value === '存放位置'));
+    if (!targets.length) return;
+    const tree = (await lab.handle('/storage-places', 'GET', {}, null)).value.items;
+    const stored = await all("SELECT location FROM material_stock_locations WHERE location<>'' UNION SELECT location FROM material_opening_items WHERE location<>''");
+    const locations = [...new Set([...tree.filter(row => row.effectiveActive).map(row => row.path), ...stored.map(row => row.location)])].slice(0, 5000);
+    sheets.push(sheet('库位参考', ['存放位置'], locations.map(value => [value])));
+    for (const target of targets) {
+      const column = excelColumn(target.data[0].findIndex(cell => cell.value === '存放位置'));
+      target.referenceLists = { ...target.referenceLists, [column]: { sheet: '库位参考', column: 'A', count: locations.length, strict: false } };
+    }
   }
   async function openingWorkbook(res, user, document = null) {
     requireOpeningRead(user);
@@ -2205,6 +2505,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       '备注（选填，最多2000字）：记录本次入库批次信息；物资本身的说明请在物资信息库的“物资备注”填写，两者分别保存。',
       '文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。文本和编码请保留原值；导入失败会指出工作表、行、列，整份通过才保存。'
     ]));
+    await locationWorkbookReferences(sheets);
     const exporter = writeXlsx || require('write-excel-file/node').default;
     const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
     if (document?.items.length && amount) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
@@ -2288,6 +2589,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       ...(original ? ['申报单信息与申报明细取首次提交快照；验收流水和修订记录仍列出该单当前完整历史。'] : []),
       amount ? '当前文件包含权限允许的金额，请妥善保存。' : '当前账号无金额读取权限，金额和历史快照中的金额已隐藏。'
     ]));
+    await locationWorkbookReferences(sheets);
     const exporter = writeXlsx || require('write-excel-file/node').default;
     const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
     if (url.searchParams.get('type') === 'stock' && amount && sheets[0].data.length > 1) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });

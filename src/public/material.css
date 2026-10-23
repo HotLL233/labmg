@@ -26,3 +26,8 @@
   .mw-receipt-info .mw-actions{flex-wrap:wrap}
   .mw-receipt-info .mw-actions input,.mw-receipt-info .mw-actions button{flex-basis:100%}
 }
+.mw-unit-summary{padding:var(--sp-4);margin-bottom:var(--sp-4);border:1px solid var(--c-line);border-radius:var(--r-sm)}
+.mw-unit-summary h3{margin:0 0 var(--sp-3);font-size:var(--fs-panel);overflow-wrap:anywhere}
+.mw-unit-summary .mw-summary{margin:0;gap:var(--sp-2) var(--sp-4);overflow-wrap:anywhere}
+.mw-unit-summary .mw-hint{margin:var(--sp-3) 0 0}
+#mw-laboratory-fields[hidden]{display:none}

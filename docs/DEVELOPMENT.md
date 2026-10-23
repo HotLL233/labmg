@@ -1,5 +1,7 @@
 # 开发与版本管理
 
+当前候选为 **0.12.0**，分支`feature/v0.12.0-lab-material-maintenance`，基于b8d9214。物资资料维护、草稿整单删除／未验收申报取消、分类编号、层级库位及化学试剂字段已完成源码及本机验证，尚未发布。新增0004／0005加法迁移和schema7备份合同；旧编码与历史快照保留，物资Excel升级10列兼容旧6／5列，库存仍13列。详细合同见[MATERIAL_API](MATERIAL_API.md)及[Excel说明](EXCEL_IMPORT_EXPORT.md)。本机专用PG18.4全文件240项239通过／0失败／1容器条件跳过，最后化学复用增量另1通过；45JS、两种UI8/0/0、VM63/63、最终Edge布局及实际PG18＋Edge76断言通过。专用54940已精确清理剩余库0并fast停止，证据全在`artifacts/cache/0.12.0/`，原中途PG退出失败记录保留，不接生产运行库。正式发布仍须本版新PG18 CI、双架构镜像、在线／本地YML和完整离线TAR，不能借用0.11.1结果。
+
 已公开源码版本为 **0.11.1（验证版，2026-10-23）**，统一Excel导入模板／导出报表、修正大单据备份恢复限制，并整合手机页头折行补丁。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署取[0.11.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.1)或`artifacts/releases/0.11.1/`的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目runtime/、https/和UID/GID。真实PG18.6回归216/216、43JS及四项发布门禁通过。更新后从程序重新下载模板，操作见[Excel模板与报表](EXCEL_IMPORT_EXPORT.md)。
 
 2026-10-23[方案同步核对](PLAN_SYNC_REVIEW.md)更正范围：0.11.0的“T1–T4”指主要界面，T4临期色条尚未接入；D/E/F仍为后续路线图。核对时0.11.1仅为本地准备；其后本轮完成Excel范围并正式发布，不表示整份A–F方案或F预排版本号的功能已实现。

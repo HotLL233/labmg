@@ -10,7 +10,8 @@ const LEGACY_CATALOG_HEADERS = ['物资编码', '物资名称', '规格', '单�
 const PREVIOUS_OPENING_HEADERS = ['物资名称', '规格', '单位', '区域', '仓库', '数量', '总金额（元）', '批号', '有效期', '存放位置', '零金额原因'];
 const PREVIOUS_CATALOG_HEADERS = ['物资名称', '规格', '单位', '物资分类', '管理方式'];
 const OPENING_HEADERS = [...PREVIOUS_OPENING_HEADERS, '厂家', '备注'];
-const CATALOG_HEADERS = [...PREVIOUS_CATALOG_HEADERS, '物资备注'];
+const BASIC_CATALOG_HEADERS = [...PREVIOUS_CATALOG_HEADERS, '物资备注'];
+const CATALOG_HEADERS = [...BASIC_CATALOG_HEADERS, 'CAS号', '纯度／浓度', '储存条件', 'SDS链接'];
 const FILE_LIMIT = 5 * 1024 * 1024;
 
 function workbookSheet(name, headers, rows) {
@@ -18,6 +19,8 @@ function workbookSheet(name, headers, rows) {
     if (header === '说明') return 88;
     if (/快照/.test(header)) return 60;
     if (/备注|原因|用途|填写要求/.test(header)) return 44;
+    if (header === 'SDS链接') return 56;
+    if (header === '储存条件') return 32;
     if (/位置/.test(header)) return 30;
     if (/名称|主题|厂家|示例/.test(header)) return 28;
     if (/编码|编号|单号|时间/.test(header)) return 26;
@@ -170,7 +173,7 @@ async function readWorkbook(input, headerVersions, label) {
 }
 
 const readOpeningWorkbook = input => readWorkbook(input, [OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS], '期初');
-const readCatalogWorkbook = input => readWorkbook(input, [CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS], '物资信息');
+const readCatalogWorkbook = input => readWorkbook(input, [CATALOG_HEADERS, BASIC_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS], '物资信息');
 
 function referenceFeature() {
   const references = sheet => Object.entries(sheet.referenceLists || {}).filter(([, reference]) => reference.count !== 0).map(([column, reference]) => {
@@ -198,4 +201,4 @@ function referenceFeature() {
   } } };
 }
 
-module.exports = { readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet };
+module.exports = { readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, BASIC_CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet };

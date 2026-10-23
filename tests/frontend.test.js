@@ -178,7 +178,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
-    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/stock', '/api/materials/stock/manufacturers', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings'].includes(url.pathname)) {
+    if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/storage-places', '/api/materials/stock', '/api/materials/stock/manufacturers', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings', '/api/materials/numbering-rules'].includes(url.pathname)) {
       const entries = state.materialLists[url.pathname.slice('/api/materials'.length)] || [];
       return response({ items: entries, total: entries.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
     }
@@ -985,7 +985,7 @@ test('new catalogs default to individual tracking and numbering-rule edits requi
   fill({ name: '逐瓶试剂', spec: '100 mL', unit: '瓶', categoryId: '1' }); await submit();
   assert.equal(created.code, '');
   assert.equal(created.trackingMode, 'unit'); assert.equal(created.unit, '瓶');
-  await click('[data-mw=unit-rule]');
+  await click('[data-mw=numbering-rules]'); await click('[data-mw=unit-rule]');
   assert.match(app.$('#mw-intro').textContent, /UTC.*全局递增.*不按日期重置/);
   fill({ template: 'SJ-{YYYY}{MM}{DD}-{SEQ}', padding: '8' }); await submit();
   assert.equal(writes.length, 0); assert.match(app.$('#mw-error').textContent, /修改原因不能为空/);
@@ -1034,7 +1034,8 @@ test('unit scans reject issued or void items, prevent duplicate receipt and only
   for (const status of ['issued', 'void']) {
     unit.status = status; const before = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').length;
     await click('[data-mw=scan-issue]');
-    assert.match(app.$('#mw-status').textContent, /已领用或作废/); assert.equal(app.$('#mw-view').open, false);
+    assert.match(app.$('#mw-view-body').textContent, /已领用或作废/); assert.equal(app.$('#mw-view').open, true);
+    assert.equal(app.$('#mw-view [data-mw=issue-create]'), null); await click('[data-mw=close-view]');
     assert.equal(app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').length, before);
   }
   unit.status = 'in_stock'; await click('[data-mw=scan-receive]');
@@ -1202,8 +1203,9 @@ test('catalog Excel controls use a strict template and preserve the current expo
   await click('[data-mw=catalog-template]'); assert.ok(app.requests.some(entry => entry.url.pathname === '/api/materials/catalog/template'));
   app.$('#mw-catalog-management-query').value = '试剂 A'; await click('[data-mw=catalog-export]');
   assert.equal(app.requests.find(entry => entry.url.pathname === '/api/materials/catalog/export.xlsx').url.searchParams.get('q'), '试剂 A');
+  assert.equal(app.requests.find(entry => entry.url.pathname === '/api/materials/catalog/export.xlsx').url.searchParams.get('active'), 'all');
   await click('[data-mw=catalog-import]'); assert.equal(app.$('#mw-fields [name=file]').attrs.accept, '.xlsx');
-  assert.match(app.$('#mw-fields').textContent, /当前 6 列模板，也兼容旧格式/);
+  assert.match(app.$('#mw-fields').textContent, /当前 10 列模板，也兼容旧格式/);
   assert.match(app.$('#mw-intro').textContent, /“物资信息”工作表.*中文下拉选项.*物资备注描述物资本身.*不改变库存/);
   assert.equal(app.$('#mw-intro [data-mw=catalog-template]').textContent, '下载导入模板');
   fill({ file: { name: 'old.xls', size: 9 } }); await submit(); assert.equal(imported, undefined); assert.match(app.$('#mw-error').textContent, /xlsx/);
@@ -1505,4 +1507,105 @@ test('adjustments and opening drafts send manufacturer and batch notes through t
     if (mode === 'opening') { assert.equal(sent.version, 3); assert.equal(sent.locationVersion, 1); }
     else { assert.equal(sent.reason, '盘点新增'); assert.ok(sent.requestIdempotencyKey); }
   }
+});
+
+test('catalog maintenance preserves imported identity, protects stock units and reloads a conflicting edit before saving', async () => {
+  const { app, row, click, fill, submit } = await materialApp();
+  const catalog=app.state.materialLists['/catalog'][0];Object.assign(catalog,{active:true,referenced:true,canDelete:false,version:3,trackingMode:'unit'});
+  const writes=[];let conflict=true;
+  app.state.materialResponse=({url,method,body})=>{
+    if(url.pathname==='/api/materials/catalog/5'&&method==='PATCH'){
+      writes.push(body);if(conflict){conflict=false;catalog.version=4;return {body:{error:'物资已被其他人修改'},status:409};}
+      Object.assign(catalog,body,{version:catalog.version+1});return {body:{catalog}};
+    }
+  };
+  await click('[data-mw=dictionaries]');
+  assert.equal(app.requests.filter(entry=>entry.url.pathname==='/api/materials/catalog').at(-1).url.searchParams.get('active'),'all');
+  assert.equal(app.$('[data-mw=catalog-delete]'),null);
+  await click('[data-mw=catalog-edit]');assert.equal(app.$('#mw-fields [name=unit]').attrs.readonly,'');
+  assert.equal(app.$('#mw-fields [name=code]').value,row.code);assert.equal(app.$('#mw-fields [name=trackingMode]').value,'unit');
+  fill({name:'更正后的物资',remark:'修改档案备注'});await submit();assert.equal(writes.length,0);assert.match(app.$('#mw-error').textContent,/操作原因不能为空/);
+  fill({reason:'核对导入资料后更正名称'});await submit();assert.equal(writes[0].version,3);assert.equal(Object.hasOwn(writes[0],'code'),false);
+  assert.equal(app.$('[data-mw=reload-form]').hidden,false);await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-fields [name=name]').value,'更正后的物资');assert.match(app.$('#mw-version').textContent,/最新版本 4/);
+  await submit();assert.equal(writes[1].version,4);assert.equal(writes[1].unit,row.unit);assert.equal(row.qtyM,10000);
+  await click('[data-mw=catalog-active]');fill({reason:'暂时停用该物资'});await submit();assert.equal(writes.at(-1).active,false);
+  assert.match(app.$('#mw-view-body').textContent,/已停用/);assert.ok(app.$('[data-mw=catalog-active]'));
+});
+
+test('catalog deletion is limited to an explicitly deletable record and hidden from ordinary users', async()=>{
+  const {app,click,fill,submit}=await materialApp();const catalog=app.state.materialLists['/catalog'][0];Object.assign(catalog,{version:2,active:true,canDelete:true,referenced:false});let removed;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/catalog/5'&&method==='DELETE'){removed=body;app.state.materialLists['/catalog']=[];return {body:{deleted:true}};}};
+  await click('[data-mw=dictionaries]');await click('[data-mw=catalog-delete]');await submit();assert.equal(removed,undefined);
+  fill({reason:'清理无引用误建资料'});await submit();assert.deepEqual(removed,{version:2,reason:'清理无引用误建资料'});assert.equal(app.$('[data-mw=catalog-edit]'),null);
+  const ordinary=await materialApp(false);await ordinary.click({dataset:{mw:'catalog-delete',catalog:'5'}});assert.match(ordinary.app.$('#mw-status').textContent,/维护权限已变化/);
+  assert.equal(ordinary.app.requests.some(entry=>entry.method==='DELETE'),false);
+});
+
+test('whole request deletion and cancellation use reasons and current permissions while retaining cancelled history',async()=>{
+  const {app,request,click,fill,submit}=await materialApp();request.canDelete=true;request.canCancel=false;const writes=[];
+  app.state.materialResponse=({url,method,body})=>{
+    if(url.pathname==='/api/materials/requests/101'&&method==='DELETE'){writes.push(body);app.state.materialRequests=[];return {body:{deleted:true}};}
+    if(url.pathname==='/api/materials/requests/101/cancel'&&method==='POST'){writes.push(body);Object.assign(request,{status:'cancelled',version:8,canCancel:false,canDelete:false,canEditHeader:false,canSubmit:false,canAddItem:false,cancelReason:body.reason});request.items.forEach(item=>{item.canEdit=false;item.canDelete=false;});return {body:request};}
+  };
+  await click('[data-mw=request]');await click('[data-mw=request-delete]');await submit();assert.equal(writes.length,0);
+  fill({reason:'清理误建的整张申报草稿'});await submit();assert.deepEqual(writes[0],{requestVersion:1,reason:'清理误建的整张申报草稿'});
+  assert.match(app.$('#page').textContent,/申报单列表/);assert.equal(app.$('[data-mw=request-delete]'),null);
+  Object.assign(request,{status:'submitted',revision:1,version:7,canDelete:false,canCancel:true,canAddItem:false,canSubmit:false});
+  await click({dataset:{mw:'request',id:'101'}});assert.equal(app.$('[data-mw=request-delete]'),null);await click('[data-mw=request-cancel]');
+  fill({reason:'采购计划撤销，无验收事件'});await submit();assert.equal(writes[1].requestVersion,7);
+  assert.match(app.$('#page').textContent,/已作废.*采购计划撤销/);for(const action of ['request-cancel','header','add-item','submit'])assert.equal(app.$('[data-mw='+action+']'),null);
+  assert.ok(app.$('[data-mw=revisions]'));assert.equal(app.$('#page [name=status]'),null);
+});
+
+test('request deletion conflicts retain the reason and block saving after another person collaborates',async()=>{
+  const {app,request,click,fill,submit}=await materialApp();request.canDelete=true;let count=0;
+  app.state.materialResponse=({url,method})=>{if(url.pathname==='/api/materials/requests/101'&&method==='DELETE'){count++;request.version=2;request.canDelete=false;return {body:{error:'草稿已被协作修改'},status:409};}};
+  await click('[data-mw=request]');await click('[data-mw=request-delete]');fill({reason:'误建草稿'});await submit();await click('[data-mw=reload-form]');
+  assert.equal(app.$('#mw-fields [name=reason]').value,'误建草稿');assert.equal(app.$('#mw-save').disabled,true);await submit();assert.equal(count,1);
+});
+
+test('closed opening drafts can be deleted without reopening or posting stock',async()=>{
+  const {app,click,fill,submit}=await materialApp();app.state.materialOpeningClosed=true;
+  const opening={id:81,no:'QC-81',title:'已关闭期初的未入库草稿',kind:'opening',version:5,status:'draft',canDelete:true,items:[]};let removed;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/openings/81'){if(method==='GET')return {body:opening};if(method==='DELETE'){removed=body;return {body:{deleted:true}};}}};
+  await click({dataset:{mw:'refresh'}});await click({dataset:{mw:'opening-detail',id:'81'}});
+  assert.equal(app.$('[data-mw=opening-add-item]'),null);assert.ok(app.$('[data-mw=opening-delete-document]'));
+  await click('[data-mw=opening-delete-document]');fill({reason:'清理未入库的旧草稿'});await submit();
+  assert.deepEqual(removed,{version:5,reason:'清理未入库的旧草稿'});assert.match(app.$('#page').textContent,/期初库存单据/);
+  assert.equal(app.requests.some(entry=>entry.url.pathname.endsWith('/post')),false);
+});
+
+test('the unified numbering editor previews independent rules and preserves changed input across a version conflict',async()=>{
+  const {app,click,fill,submit}=await materialApp();const rule={template:'MAT-{SEQ}',padding:6,version:2};const writes=[];
+  app.state.materialResponse=({url,method,body})=>{
+    if(url.pathname==='/api/materials/numbering-rules')return {body:{items:[{kind:'catalog',label:'物资档案',rule,nextSequence:23,dateBasis:'UTC'}]}};
+    if(url.pathname==='/api/materials/unit-label-rule')return {body:{rule:{template:'LAB-{SEQ}',padding:8,version:1},nextSequence:90,dateBasis:'UTC'}};
+    if(url.pathname==='/api/materials/numbering-rules/catalog'&&method==='PUT'){writes.push(body);if(writes.length===1){rule.version=3;return {body:{error:'编号规则版本已变化'},status:409};}Object.assign(rule,body,{version:4});return {body:{kind:'catalog',rule,nextSequence:23}};}
+  };
+  await click('[data-mw=dictionaries]');await click('[data-mw=numbering-rules]');assert.match(app.$('#mw-view-body').textContent,/MAT-000023.*LAB-00000090/);
+  await click('[data-mw=numbering-edit]');fill({template:'WZ-{YYYY}-{SEQ}',padding:'4'});app.document.listeners.input({target:app.$('#mw-fields [name=template]')});
+  assert.match(app.$('#mw-numbering-preview').textContent,/WZ-\d{4}-0023/);await submit();assert.equal(writes.length,0);
+  fill({reason:'统一后续物资编码'});await submit();await click('[data-mw=reload-form]');assert.equal(app.$('#mw-fields [name=template]').value,'WZ-{YYYY}-{SEQ}');
+  await submit();assert.equal(writes[0].version,2);assert.equal(writes[1].version,3);assert.equal(writes[1].padding,4);assert.equal(writes[1].reason,'统一后续物资编码');
+});
+
+test('chemical categories expose optional laboratory fields and reject unsafe SDS protocols before sending',async()=>{
+  const {app,click,fill,submit}=await materialApp();Object.assign(app.state.materialLists['/categories'][0],{profile:'chemical',version:2});app.state.materialCapabilities.manageCategories=true;let created,profile;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/catalog'&&method==='POST'){created=body;return {body:{catalog:{id:9,...body}}};}if(url.pathname==='/api/materials/categories/1/profile'&&method==='PATCH'){profile=body;return {body:{category:{id:1,name:'合成分类',...body,version:3}}};}};
+  await click({dataset:{mw:'refresh'}});await click('[data-mw=dictionaries]');await click('[data-mw=new-catalog]');
+  assert.equal(app.$('#mw-laboratory-fields').hidden,true);fill({categoryId:'1'});app.document.listeners.change({target:app.$('#mw-fields [name=categoryId]')});assert.equal(app.$('#mw-laboratory-fields').hidden,false);
+  fill({name:'合成试剂',spec:'500mL',unit:'瓶',casNumber:'7732-18-5',purity:'分析纯',storageConditions:'室温避光',sdsUrl:'javascript:alert(1)'});await submit();assert.equal(created,undefined);assert.match(app.$('#mw-error').textContent,/http/);
+  fill({sdsUrl:'https://example.invalid/sds.pdf'});await submit();assert.equal(created.casNumber,'7732-18-5');assert.equal(created.storageConditions,'室温避光');
+  await click('[data-mw=category-profile]');fill({profile:'general',reason:'调整分类字段显示'});await submit();assert.deepEqual(profile,{profile:'general',version:2,reason:'调整分类字段显示'});
+});
+
+test('storage-place management and all position fields share Chinese paths without requiring internal identifiers',async()=>{
+  const {app,row,request,click,fill,submit}=await materialApp();const places=[{id:1,name:'合成房间',parentId:null,path:'合成房间',active:true,effectiveActive:true,version:1},{id:2,name:'试剂柜',parentId:1,path:'合成房间 / 试剂柜',active:true,effectiveActive:true,version:2},{id:3,name:'停用柜',parentId:1,path:'合成房间 / 停用柜',active:false,effectiveActive:false,version:1}];app.state.materialLists['/storage-places']=places;const writes=[];
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/storage-places'&&method==='POST'){writes.push(body);places.push({id:4,...body,path:'合成房间 / 新柜',active:true,effectiveActive:true,version:1});return {body:{place:places.at(-1)}};}if(url.pathname==='/api/materials/stock/location'&&method==='PUT'){writes.push(body);return {body:{location:body.location}};}};
+  await click({dataset:{mw:'refresh'}});await click('[data-mw=dictionaries]');await click('[data-mw=storage-places]');assert.match(app.$('#mw-view-body').textContent,/合成房间 \/ 试剂柜/);
+  await click('[data-mw=place-new]');fill({name:'新柜',parentId:'1'});await submit();assert.deepEqual(writes[0],{name:'新柜',parentId:1});
+  await click('[data-mw=close-view]');request.status='submitted';await click({dataset:{mw:'receive',request:'101',item:'11'}});
+  assert.deepEqual(app.$('#mw-storage-place-options').querySelectorAll('option').map(node=>node.value),['合成房间','合成房间 / 试剂柜','合成房间 / 新柜']);await click('[data-mw=cancel]');
+  await click({dataset:{mw:'page',page:'inventory'}});await click('[data-mw=batches]');await click('[data-mw=location]');fill({location:'合成房间 / 试剂柜',reason:'统一位置字典'});await submit();assert.equal(writes[1].location,'合成房间 / 试剂柜');assert.equal(Object.hasOwn(writes[1],'placeId'),false);assert.equal(writes[1].catalogId,row.catalogId);
 });
