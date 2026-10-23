@@ -1,0 +1,11 @@
+{
+  "version": "0.11.1",
+  "commit": "e3bd58744d0dfc384eeea1f76f5ea9ef3bb146b7",
+  "indexDigest": "sha256:fbcb624dee4369ac407d9388923fcd36a7c76e88635ea5fac79fbf813c8bc938",
+  "baseParent": "96c9f817b846fb702bf5a60a9de22df944ef5e2e",
+  "featureBranch": "feature/v0.11.1-excel-template-sync",
+  "status": "source-frozen",
+  "buildRunId": 39882767365,
+  "sourceTagObject": "01371fda2f2b837a7972d1933dad0093a6a7195f",
+  "sourceFrozenAtUtc": "2026-10-23T01:08:30.865Z"
+}
