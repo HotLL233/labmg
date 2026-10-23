@@ -929,3 +929,15 @@ push自动触发构建39896388360／job120227728626，不重复调度。root独�
 本机专用PG18.4整轮247项246通过／0失败／1本机Docker条件跳过；最后异步详情增量后，前端VM与两份Edge布局共72/72通过，重叠用例不重复计总。真实API＋Edge最终1333检查／27图／0脚本异常，覆盖五种宽高及低高度降级；47JS与普通／严格UI审计各8/0/0通过。最终报告为`artifacts/cache/0.13.0/workspace-layout-uaCZep/report.json`；全套与增量分别留原TAP，不重复计数。最后只读审查补原show/files过期响应保护并追到showAsset调用者，延迟响应VM覆盖关闭、切模块及连续查看；上传捕获记录身份，错误在详情内显示。之前的阶段“仍在收尾”由本段结果补充。
 
 普通列表优先一屏，小窗口／长内容保留必要滚动，不使用缩字或硬裁隐藏错误。新增screen样式不影响原标签打印校准，未新增运行依赖、SQL迁移或业务备份版本。源码与两份YML均0.13.0，下一步只冻结已验源码、用同版新PG18 CI及容器证据构建交付，不移动旧标签或覆盖旧发布；未操作NAS。
+
+## 2026-10-23：0.13.0 冻结、正式验证与公开交付
+
+源码冻结`1a15ae049b842e893043b2044bcb9ac41de627a8`，注解标签v0.13.0／对象e9fe4fdd12c333601fd3d1fbea9704008e1cc20b；精确同步develop及feature/v0.13.0-record-workspaces，main和31个旧标签保持。只从干净tracked detached worktree运行PowerShell7打包，134份源文件与manifest及ZIP逐一核对，外部.workbuddy和两份UI草稿未纳入。ZIP951056字节／SHA256 c777079eab93f6feb03d6d86e169942076d4a02bce1505dbf1256747b7794c3f，五份部署附件从冻结ZIP原字节提取并直接比较；校验helper首轮因Git默认转义中文路径未匹配，改用core.quotePath=false后通过，未改产品或包内容，过程保留于本版packaging缓存。
+
+push构建39910796864／job120273090775原日志由root独立复读：真实PostgreSQL18.6回归243/243、0失败／跳过、47JS通过，双架构索引sha256:af07cae76edaf2d416a15f745d2de66de40227cba243e3536a2572f7726d28e1。独立ops提交0a7cbb720f2e28d3014a692b7c9eda409e06b9ef触发验证39911550455，匿名双架构在线Compose、同次PG18持久化、双架构三镜像TAR及禁止拉取的local配置、自动地址与可信空SNI真实Caddy HTTPS四门禁通过。root独立复读本次诊断原TAP、同次PG六项及四原JSON；ARM64为QEMU，不是物理ARM64或目标NAS验收。
+
+本机完整下载两架构TAR后，依次执行本版local-delivery-verification和local-image-archive-verification，均passed：artifacts/releases/0.13.0完整12件489308976字节、11摘要、5份冻结源附件原字节、两包各含labos:0.13.0／postgres:18-bookworm／caddy:2.11.7-alpine及六config通过。只核对专用54950及精确data_directory，确认remaining=0后按原目录fast停止PG18.4，stop-report保留，不触旧实例或生产运行库。
+
+Release421514037已公开为prerelease，认证官方发布流程核对draft=false、公开状态、12资产元数据和11摘要通过。匿名API默认流程在首个仓库元数据请求403即失败，limit60／used60／remaining0，尚未核验tag、12资产或11摘要；未等待长配额重置、未重试，原failed报告和限流诊断保留。另用官方公开直链匿名完整下载10个非TAR附件1110320字节，全部大小／SHA256通过，0凭据／0API／0TAR。组合public-delivery-summary.json为passed-with-anonymous-api-limitations，anonymousApiMetadata=not-verified；不把认证元数据和匿名直链结果冒充匿名API流程整体通过，不称匿名全量TAR下载。本机完整TAR由独立下载及交付报告证明。
+
+发布后同步README、MEMORY、DEVELOPMENT、CHANGELOG、SYNOLOGY及工作区方案的实际状态，保留上方“仍在收尾／冻结准备”及0.12.0、原型阶段的历史记录。更正SYNOLOGY当前尾段把0004／0005及schema7归到0.13.0、并在公开前提前称公开的措辞：这些由0.12.0引入，0.13.0没有新迁移或备份格式。冻结附件仍保留当时快照，后补文档不重打镜像、ZIP或附件，不移动标签。升级前备份原PG18及附件并保留runtime/、https/与UID/GID；未自动部署NAS，实体手机、原生系统打印窗口／USB、浏览器缩放、其他浏览器及长期容量未验。

@@ -1,8 +1,10 @@
 # LabOS 实验室综合管理系统
 
-本源码版本：**0.13.0（记录工作区，本机验收完成，待发布）**。按已确认的[界面方案](docs/UI_WORKSPACE_OPTIMIZATION.md)改造常驻运行版本／退出、名称优先的物资库、分类设置、记录表与多级返回，保留既有权限、库存七列、全局合计、Excel、二维码和系统打印。本机验收已完成，正式CI、镜像与公开交付尚待新证据。实际验证和交付状态见[版本说明](docs/CHANGELOG.md)，此处版本号不代表镜像已发布。
+当前公开版本：**0.13.0（记录工作区，公开验证版，2026-10-23）**。按已确认的[界面方案](docs/UI_WORKSPACE_OPTIMIZATION.md)改造常驻运行版本／退出、名称优先的物资库、分类设置、记录表与多级返回，保留既有权限、库存七列、全局合计、Excel、二维码和系统打印。[0.13.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.0)已公开为prerelease（Release421514037），提供双架构镜像、两份YML、完整离线包与源码。
 
-最新公开版仍为**0.12.0（2026-10-23）**，已交付物资资料维护、整单草稿删除、统一编号、层级库位及化学字段。旧编码、二维码和历史快照保留；合同见[物资API](docs/MATERIAL_API.md)、[Excel模板](docs/EXCEL_IMPORT_EXPORT.md)。0.12.0的双架构镜像、YML和完整离线包继续保留。
+0.13.0冻结于`1a15ae0`／`v0.13.0`，正式构建39910796864的真实PostgreSQL18.6回归243/243、47份JS检查及验证39911550455的四项容器门禁通过，ARM64使用QEMU。本机`artifacts/releases/0.13.0/`完整12件489308976字节，11摘要、5份冻结源附件及双TAR三镜像／六config核验通过。认证官方发布元数据核对通过，10个非TAR附件1110320字节经公开直链匿名完整下载通过；匿名API首请求403限流，匿名元数据流程未完成，完整边界见[版本说明](docs/CHANGELOG.md)。未自动升级NAS，真手机、原生打印窗口／USB及长期容量未验；发布后文档不改写冻结附件或移动标签。
+
+上一公开版**0.12.0（2026-10-23）**已交付物资资料维护、整单草稿删除、统一编号、层级库位及化学字段。旧编码、二维码和历史快照保留；合同见[物资API](docs/MATERIAL_API.md)、[Excel模板](docs/EXCEL_IMPORT_EXPORT.md)。0.12.0的双架构镜像、YML和完整离线包继续保留。
 
 历史0.11.0完成 T1 令牌排版、T2 手机卡片和侧栏适配、T3 验收物资信息区块、T4 库存七列，以及厂家、批次备注、物资信息库备注与 Excel 回导。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，提供双架构镜像、两份 YML、离线包与源码；完整交付保存在 `artifacts/releases/0.11.0/`。
 
@@ -72,16 +74,16 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。源码配置已准备0.13.0：在线应用镜像为 `ghcr.io/hotll233/labmg:0.13.0`，本地三镜像包使用 `labos:0.13.0`，尚待本版构建与交付。当前已公开部署仍取[0.12.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.12.0)的同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL与附件，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。0.13.0已交付：在线应用镜像为 `ghcr.io/hotll233/labmg:0.13.0`，本地三镜像包使用 `labos:0.13.0`。从[0.13.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.0)下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL与附件，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.12.0 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.12.0/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.12.0 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.12.0/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.13.0 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.13.0/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.13.0 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.13.0/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
 本轮两份配置继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
-首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；本轮schema7物资备份不能交旧版程序恢复，需回退时使用升级前数据库副本。本次不提供 PostgreSQL 主版本迁移。
+首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；schema7物资备份不能交不支持schema7的旧版恢复，需回退时使用升级前数据库副本。0.13.0继续使用0.12.0已支持的schema7，没有新增SQL迁移或备份格式变更，本次不提供 PostgreSQL 主版本迁移。
 
 数据保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令，`https-config/Caddyfile`是0.9.4初始化生成的代理配置。HTTPS证书继续保存在旁边的`https/data/`；群晖首次部署先创建`runtime/`与`https/`父目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 
