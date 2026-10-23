@@ -1,0 +1,10 @@
+{
+  "version": "0.13.0",
+  "commit": "1a15ae049b842e893043b2044bcb9ac41de627a8",
+  "indexDigest": "sha256:af07cae76edaf2d416a15f745d2de66de40227cba243e3536a2572f7726d28e1",
+  "baseParent": "687ba4d8b3b0ca702f218f0e0a64ace34589d008",
+  "featureBranch": "feature/v0.13.0-record-workspaces",
+  "status": "source-frozen",
+  "buildRunId": 39910796864,
+  "sourceTagObject": "e9fe4fdd12c333601fd3d1fbea9704008e1cc20b"
+}
