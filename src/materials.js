@@ -3,7 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, excelColumn, importFailure, referenceFeature } = require('./material-xlsx');
+const { readOpeningWorkbook, OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet: sheet } = require('./material-xlsx');
+const TEMPLATE_VERSION = require('../package.json').version;
 
 const WAREHOUSES = [
   { code: 'MAIN', name: '默认仓库' },
@@ -1819,7 +1820,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (document.kind === 'supplement' && !(await openingClosed())) error(400, '存在补录单时期初必须已关闭');
       if (document.status === 'posted' && (!validTimestamp(document.posted_at) || document.posted_at < document.created_at || document.version < 2)) error(400, '已入库单据处理信息无效');
       const lines = (await all('SELECT * FROM material_opening_items WHERE opening_id=?', document.id));
-      if (lines.length > 200 || (document.status === 'posted' && !lines.length)) error(400, '期初或补录单明细数量无效');
+      if (lines.length > 5000 || (document.status === 'posted' && !lines.length)) error(400, '期初或补录单明细数量无效');
       const count = safeSum(await mapRows(lines,async row => (await catalog(row.catalog_id)).tracking_mode === 'unit' ? row.qty_m / 1000 : 0));
       if (document.status === 'posted' && count > 1000) error(400, '已入库单据的单件数量超限');
       for (const row of lines) {
@@ -2132,9 +2133,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   const decimalText = (value, digits) => `${Math.floor(value / (10 ** digits))}.${String(value % (10 ** digits)).padStart(digits, '0')}`;
   const warehouseName = code => WAREHOUSES.find(row => row.code === code)?.name || code;
+  const statusName = value => ({ draft: '草稿', submitted: '已提交', posted: '已入库', pending: '待发放', issued: '已发放', rejected: '已驳回', cancelled: '已取消' })[value] || value || '';
+  const receiptTypeName = value => ({ acceptance: '合格验收', rejection: '拒收', close: '差缺结案', reversal: '验收冲正' })[value] || value || '';
+  const instructions = rows => sheet('填写说明', ['说明'], [[`模板版本 ${TEMPLATE_VERSION}`], ...rows.map(value => [value])]);
   async function workbookReferences(sheets, openingSheet, selected = []) {
-    const cell = value => ({ type: String, value: String(value ?? '') });
-    const sheet = (name, headers, rows) => ({ sheet: name, data: [headers.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
     const options = (preferred, rows, key) => {
       const unique = [...new Map([...preferred, ...rows].map(row => [key(row), row])).values()];
       return { rows: unique.slice(0, 5000), complete: rows.length <= 5000 && unique.length <= 5000 };
@@ -2159,13 +2161,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   async function catalogWorkbook(res, url, user, template) {
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
-    const cell = value => ({ type: String, value: String(value ?? '') });
-    const sheet = (name, headers, rows) => ({ sheet: name, data: [headers.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
     const rows = template ? [] : await catalogRows(url);
     if (rows.length > 5000) error(413, '一次最多导出5000条物资信息，请缩小筛选范围');
     const sheets = [sheet('物资信息', CATALOG_HEADERS, rows.map(row => [row.name, row.spec, row.unit, row.categoryName, row.trackingMode === 'unit' ? '逐件' : '数量', row.remark]))];
     await workbookReferences(sheets, false, rows);
-    sheets.push(sheet('填写说明', ['说明'], [['填写物资名称、规格、单位；系统自动生成内部编码，无需手填。名称等可参考下拉或填写新值，分类及管理方式须选择已有选项。'], ['每次最多5000条，文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。'], ['按名称、规格、单位精确匹配；已有信息一致时跳过，分类或管理方式冲突时整批不导入。'], ['导出文件可再次导入物资信息库；此表不改变库存，数量和金额请使用期初库存或存量补录草稿。']]));
+    sheets.push(instructions([
+      '用途：物资信息页用于导入物资信息库，不改变库存；导出文件可原样回导。数据从第2行开始，保留第1行中文表头及列顺序，勿增加合计行。内部编码由系统生成，无需填写。',
+      '物资名称、规格、单位（必填）：分别最多200、200、30字；可参考下拉或填写新物资，名称＋规格＋单位共同识别一条物资信息，请核对三列组合。',
+      '物资分类（必填）：选择已创建分类的中文名称；管理方式（必填）：从下拉选择“逐件”或“数量”。逐件为每瓶／每件独立编码，数量支持小数。',
+      '物资备注（选填，最多2000字）：描述物资本身，如保存条件或使用注意事项；与入库批次的“备注”分别保存。',
+      '原样回导复用已有物资信息，不覆盖原记录；分类、管理方式或物资备注与已有记录不同会指出工作表、行、列并整批拒绝，空备注也不能用来清空已有备注。',
+      '每次1至5000条，文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。以“=”开头的文字按文本保存；不要改成Excel公式。',
+      '参考工作表和下拉用于减少输错；不要将参考页当成导入明细。带数量或金额的库存文件请从“期初库存／存量补录”导入草稿，再核对入库。'
+    ]));
     const exporter = writeXlsx || require('write-excel-file/node').default;
     const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
     if (rows.length) await readCatalogWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
@@ -2177,8 +2185,6 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     requireOpeningRead(user);
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
     const amount = permit(user, 'materials.amount.read');
-    const cell = value => typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
-    const sheet = (name, headings, rows) => ({ sheet: name, data: [headings.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
     const headings = !document || amount ? OPENING_HEADERS : OPENING_HEADERS.filter(header => header !== '总金额（元）');
     const rows = document ? document.items.map(row => {
       const values = [row.name, row.spec, row.unit, row.regionName, warehouseName(row.warehouse), decimalText(row.qtyM, 3), amount ? decimalText(row.amountCents, 2) : '', row.batch, row.expiryDate, row.location, row.zeroAmountReason, row.manufacturer || '', row.note || ''];
@@ -2186,9 +2192,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }) : [];
     const sheets = [sheet('期初明细', headings, rows)];
     if (document) sheets.push(sheet('单据信息', ['单号', '主题', '日期', '类型', '状态', '说明', '补录原因', '入库人', '入库时间'],
-      [[document.no, document.title, document.date, document.kind, document.status, document.description, document.reason, document.posterName, document.postedAt]]));
+      [[document.no, document.title, document.date, document.kind === 'supplement' ? '存量补录' : '期初库存', statusName(document.status), document.description, document.reason, document.posterName, document.postedAt]]));
     await workbookReferences(sheets, true, document?.items || []);
-    sheets.push(sheet('填写说明', ['说明'], [['物资名称、规格、单位、区域、仓库均使用中文参考下拉，名称+规格+单位须对应同一条物资信息。'], ['每张单据最多5000行；逐件物资数量为整数，入库时整单最多生成1000个单件码。'], ['数量最多3位小数，金额最多2位小数；金额为零必须填写零金额原因。'], ['有效期使用YYYY-MM-DD文本；不接受公式、宏、外部链接或旧版.xls。'], ['导出文件可导入新的期初或补录草稿；核对后点击入库才改变库存，勿将同一批现有库存重复入库。'], ['同批次位置必须一致；空位置沿用当前批次位置。'], ...(!amount && document ? [['当前账号无金额读取权限，此脱敏文件仅供查看，不能直接回导。']] : [])]));
+    sheets.push(instructions([
+      ...(!amount && document ? ['用途：当前账号无金额读取权限，此脱敏文件只读，不能直接回导。'] : ['用途：期初明细可导入新的期初／存量补录草稿，核对后整单入库才改变库存；导入会追加草稿明细，勿将现有库存重复入库。']),
+      '数据从第2行开始，保留第1行中文表头及列顺序；不要增加合计行，参考工作表和单据信息不参与明细导入。',
+      '物资名称、规格、单位（必填）：分别最多200、200、30字，三列须对应同一条已建立的物资信息；区域、仓库（必填）：使用已有中文名称及参考下拉，不填写内部编码。',
+      '数量（必填）：大于零，最多3位小数；逐件物资必须为整数。每张单据最多5000行，整单入库最多生成1000个单件码。',
+      ...(amount || !document ? ['总金额（元）（必填）：非负数，最多2位小数，填写本行总金额而非单价；零金额原因（条件必填）：总金额为0时须说明原因，最多1000字。'] : []),
+      '批号（选填，最多100字）；有效期（选填）：YYYY-MM-DD文本，例如2027-03-01；存放位置（选填，最多200字）：同批次须一致，空值沿用当前批次位置。',
+      '厂家（选填，最多200字）：可参考历史厂家下拉，也可填写新厂家；新输入统一全半角和连续空格，不改变物资身份或单件编码。',
+      '备注（选填，最多2000字）：记录本次入库批次信息；物资本身的说明请在物资信息库的“物资备注”填写，两者分别保存。',
+      '文件不超过5 MiB；不接受公式、宏、外部链接或旧版.xls。文本和编码请保留原值；导入失败会指出工作表、行、列，整份通过才保存。'
+    ]));
     const exporter = writeXlsx || require('write-excel-file/node').default;
     const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
     if (document?.items.length && amount) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });
@@ -2199,8 +2215,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   async function exportWorkbook(res, url, user) {
     if (!permit(user, 'materials.export')) error(403, '没有物资Excel导出权限');
     const amount = permit(user, 'materials.amount.read');
-    const cell = value => typeof value === 'number' ? { type: Number, value } : { type: String, value: String(value ?? '') };
-    const sheet = (name, headings, rows) => ({ sheet: name, data: [headings.map(value => ({ ...cell(value), fontWeight: 'bold' })), ...rows.map(row => row.map(cell))] });
+    const original = url.searchParams.get('version') === 'original';
     const snapshotSummary = value => {
       const serialized = JSON.stringify(scrub(JSON.parse(value), user));
       if (serialized.length <= 32767) return serialized;
@@ -2214,7 +2229,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (rows.length > 5000) error(413, '一次最多导出5000条领用申请，请缩小筛选范围');
       sheets = [sheet('领用申请', ['申请ID', '状态', '物资编码', '名称', '规格', '单位', '分类', '仓库', '区域', '批号', '有效期',
         '申请时位置', '当前位置或发放时位置', '领用数量', ...(amount ? ['发放金额（元）'] : []), '用途', '申请人', '申请时间', '处理人', '处理时间', '处理原因'],
-      rows.map(row => [row.id, row.status, row.snapshot.code, row.snapshot.name, row.snapshot.spec, row.snapshot.unit,
+      rows.map(row => [row.id, statusName(row.status), row.snapshot.code, row.snapshot.name, row.snapshot.spec, row.snapshot.unit,
         row.snapshot.categoryName, warehouseName(row.warehouse), row.snapshot.regionName, row.batch, row.expiryDate, row.snapshot.location, row.location,
         row.qtyM / 1000, ...(amount ? [row.status === 'issued' ? row.amountCents / 100 : null] : []), row.purpose, row.creatorName, row.createdAt, row.processorName, row.processedAt, row.reason]))];
     } else if (url.searchParams.get('type') === 'stock') {
@@ -2230,13 +2245,18 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           warehouseName(row.warehouse), decimalText(row.qtyM, 3), decimalText(row.amountCents, 2), row.batch, row.expiryDate, row.location,
           row.amountCents === 0 ? '导出时库存金额为零，请核对' : '', row.manufacturer, row.note])));
         await workbookReferences(sheets, true, batches.filter(row => row.qtyM > 0));
-      } else sheets.push(sheet('批次库存', ['入库时间', '物资名称', '数量', '规格', '单位', '厂家', '备注', '仓库', '区域', '批号', '有效期', '存放位置'],
-        batches.map(row => [row.firstMovementAt, row.name, row.qtyM / 1000, row.spec, row.unit, row.manufacturer, row.note, warehouseName(row.warehouse), row.regionName, row.batch, row.expiryDate, row.location])));
-      sheets.push(sheet('填写说明', ['说明'], [[amount ? '库存导入明细按批次导入新的期初或补录草稿；不会自动入库，核对后才确认，勿重复增加原有库存。' : '当前账号无金额读取权限，此脱敏报表不能直接回导。'],
-        ['零库存仅列于库存报表；导入明细仅含正库存，保留区域、仓库、批号、有效期、位置、厂家和备注。'], ['金额按整批次统一计价，厂家明细金额按当前数量分摊并补齐尾差，不是厂家独立成本。'], ['每次最多5000条草稿；逐件库存每次入库最多1000件，需要时拆分为多张单据。']]));
+      }
+      sheets.push(sheet('批次库存', ['入库时间', '物资名称', '数量', '规格', '单位', '厂家', '备注', '仓库', '区域', '批号', '有效期', '存放位置', '物资备注', ...(amount ? ['批次分摊金额（元）'] : [])],
+        batches.map(row => [row.firstMovementAt, row.name, row.qtyM / 1000, row.spec, row.unit, row.manufacturer, row.note, warehouseName(row.warehouse), row.regionName, row.batch, row.expiryDate, row.location, row.catalogRemark, ...(amount ? [row.amountCents / 100] : [])])));
+      sheets.push(instructions([
+        amount ? '用途：“库存导入明细”为可回导的13列明细，可导入新的期初／存量补录草稿；“库存”汇总和“批次库存”七列视图用于查阅，不能直接回导。' : '用途：当前账号无金额读取权限，“库存”和“批次库存”均为脱敏只读报表，不能直接回导。',
+        '批次库存前七列与库存页面一致：入库时间、物资名称、数量、规格、单位、厂家、备注；后附仓库、区域、批号、有效期、存放位置和物资备注。入库时间为该厂家组首次流水时间，不代表剩余单件各自的入库时间。',
+        '厂家区分展示明细；备注来自对应厂家组最后一条非空批次备注，物资备注来自物资信息库，两者不互相覆盖。',
+        ...(amount ? ['回导填写规则：物资名称、规格、单位须对应已有物资；区域和仓库填写中文名称。数量大于0、最多3位小数，逐件须整数；总金额非负、最多2位小数，为0时须填零金额原因。', '批号、有效期、存放位置、厂家、备注可空；有效期使用YYYY-MM-DD文本。厂家最多200字，备注最多2000字；下拉参考与新增厂家均可，物资信息库备注不在库存回导时修改。', '导入只追加草稿，不会自动入库；核对后才整单确认，勿将同一批现有库存重复登记。零库存保留在只读报表，回导明细仅含正库存。', '金额按整批次统一计价，厂家明细金额按当前数量分摊并补齐尾差，不是厂家独立成本。'] : []),
+        '每次最多5000条草稿、5 MiB；逐件库存每次入库最多1000件。保留中文表头与列顺序，不要增加合计行；不接受公式、宏、外部链接或旧版.xls。'
+      ]));
     } else {
       let orders = (await listRequests(url, user, true));
-      const original = url.searchParams.get('version') === 'original';
       if (original) orders = (await mapRows(orders,async order => {
         const saved = (await request(order.id)).original_snapshot;
         return saved ? JSON.parse(saved) : order;
@@ -2247,17 +2267,27 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const revisions = (await all('SELECT * FROM material_request_revisions ORDER BY request_id,revision')).filter(row => ids.has(row.request_id));
       if (orders.length > 1000 || items.length > 5000 || receipts.length > 5000 || revisions.length > 5000) error(413, '导出记录过多，请按日期或单据缩小范围');
       sheets = [
-        sheet('申报单信息', ['单号', '主题', '说明', '状态', '修订版', '创建人', '提交时间'], orders.map(order => [order.no, order.title, order.description, order.status, order.revision, order.creatorName, order.submittedAt])),
-        sheet('申报明细', ['单号', '物资编码', '名称', '分类', '规格', '单位', '归属区域', '仓库', '申报数量', '用途', '填报人'],
-          items.map(({ order, line }) => [order.no, line.code, line.name, line.categoryName, line.spec, line.unit, line.regionName, warehouseName(line.warehouse), line.qtyM / 1000, line.purpose, line.authorName])),
-        sheet('验收流水', ['事件ID', '类型', '申报修订版', '物资编码', '名称', '分类', '区域', '仓库', '合格数量', '拒收数量', '结案数量', ...(amount ? ['合格总金额（元）'] : []), '原因', '拒收原因', '日期'],
-          receipts.map(event => [event.id, event.type, event.requestRevision, event.snapshot.code, event.snapshot.name, event.snapshot.categoryName, event.snapshot.regionName, warehouseName(event.snapshot.warehouse),
-            event.qtyM / 1000, event.rejectedQtyM / 1000, event.closedQtyM / 1000, ...(amount ? [event.amountCents / 100] : []), event.reason, event.rejectedReason, event.date])),
+        sheet('申报单信息', ['单号', '主题', '说明', '状态', '修订版', '创建人', '提交时间'], orders.map(order => [order.no, order.title, order.description, statusName(order.status), order.revision, order.creatorName, order.submittedAt])),
+        sheet('申报明细', ['单号', '物资编码', '名称', '分类', '规格', '单位', '归属区域', '仓库', '申报数量', '用途', '填报人', '厂家', '物资信息状态'],
+          items.map(({ order, line }) => [order.no, line.code, line.name, line.categoryName, line.spec, line.unit, line.regionName, warehouseName(line.warehouse), line.qtyM / 1000, line.purpose, line.authorName, line.manufacturer || '', line.catalogId ? '已关联物资信息' : '验收时完善物资信息'])),
+        sheet('验收流水', ['事件ID', '类型', '申报修订版', '物资编码', '名称', '分类', '区域', '仓库', '合格数量', '拒收数量', '结案数量', ...(amount ? ['合格总金额（元）'] : []), '原因', '拒收原因', '日期', '规格', '单位', '厂家', '备注', '批号', '有效期', '存放位置', '零金额原因', '验收人', '验收时间'],
+          receipts.map(event => [event.id, receiptTypeName(event.type), event.requestRevision, event.snapshot.code, event.snapshot.name, event.snapshot.categoryName, event.snapshot.regionName, warehouseName(event.snapshot.warehouse),
+            event.qtyM / 1000, event.rejectedQtyM / 1000, event.closedQtyM / 1000, ...(amount ? [event.amountCents / 100] : []), event.reason, event.rejectedReason, event.date,
+            event.snapshot.spec, event.snapshot.unit, event.manufacturer, event.note, event.batch, event.expiryDate, event.snapshot.location || '', event.zeroAmountReason, event.actorName, event.createdAt])),
         sheet('修订记录', ['申报单ID', '修订版', '修改原因', '操作人', '时间', '修改前快照摘要', '修改后快照摘要'],
           (await mapRows(revisions,async row => [row.request_id, row.revision, row.reason, (await actorName(row.actor_id)), row.created_at,
             snapshotSummary(row.before_snapshot), snapshotSummary(row.after_snapshot)])))
       ];
     }
+    if (url.searchParams.get('type') !== 'stock') sheets.push(instructions([
+      `用途：${url.searchParams.get('type') === 'issues' ? '领用申请报表' : '申报、验收及修订历史报表'}仅供查询、归档，不能作为库存或物资信息库的导入模板。`,
+      ...(url.searchParams.get('type') === 'issues' ? ['领用状态和仓库使用中文名称；申请时位置与发放时位置分别保存，报表保留申请、处理时间与处理原因。'] : [
+        '申报物资可在验收时完善信息；厂家取对应申报版本，验收厂家、备注及存放位置取验收记录当时保存的值，历史未记录字段保持空白，不用当前数据补写历史。',
+        '厂家和批次备注分别描述厂家与该次批次记录，物资本身的备注由物资信息库管理；单号、事件ID和物资编码用于查询关联，无需按这些报表手填导入编码。'
+      ]),
+      ...(original ? ['申报单信息与申报明细取首次提交快照；验收流水和修订记录仍列出该单当前完整历史。'] : []),
+      amount ? '当前文件包含权限允许的金额，请妥善保存。' : '当前账号无金额读取权限，金额和历史快照中的金额已隐藏。'
+    ]));
     const exporter = writeXlsx || require('write-excel-file/node').default;
     const buffer = await exporter(sheets, { features: [referenceFeature()] }).toBuffer();
     if (url.searchParams.get('type') === 'stock' && amount && sheets[0].data.length > 1) await readOpeningWorkbook({ name: 'export.xlsx', content: buffer.toString('base64') });

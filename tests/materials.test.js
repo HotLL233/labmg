@@ -551,6 +551,78 @@ test('manufacturer and remarks Excel exports return to drafts with exact quantit
   assert.deepEqual(details.map(row => [row.manufacturer, row.qtyM, row.catalogRemark]), [['甲厂', 2000, '=档案备注'], ['乙厂', 2000, '=档案备注']]);
 });
 
+test('Excel template sync preserves import contracts, Chinese reports, receipt history and redacted batch views', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), { CATALOG_HEADERS, OPENING_HEADERS, readCatalogWorkbook, readOpeningWorkbook } = require('../src/material-xlsx');
+  const sampleRoot = path.join(root, 'artifacts/cache', require('../package.json').version, 'excel-templates');
+  fs.mkdirSync(sampleRoot, { recursive: true });
+  const samples = fs.mkdtempSync(path.join(sampleRoot, 'samples-'));
+  t.diagnostic('Synthetic HTTP XLSX samples: ' + samples);
+  const download = async (filename, route, actor = s.material) => {
+    const response = await f.request('GET', '/api/materials/' + route, actor);
+    fs.writeFileSync(path.join(samples, filename), response.bytes, { flag: 'wx' });
+    const files = workbookXml(response.bytes);
+    for (const [name, xml] of files) if (/^xl\/worksheets\/sheet\d+\.xml$/.test(name)) {
+      assert.doesNotMatch(xml, /<f(?:\s|>)/, filename + ' must retain literal values');
+      assert.match(xml, /state="frozen"/, filename + ' freezes each header');
+      assert.match(xml, /<cols>/, filename + ' sets readable column widths');
+    }
+    const sheets = await require('read-excel-file/universal').default(response.bytes.buffer.slice(response.bytes.byteOffset, response.bytes.byteOffset + response.bytes.length));
+    const data = name => { const found = sheets.find(sheet => sheet.sheet === name); assert.ok(found, filename + ': ' + name); return found.data; };
+    assert.ok(data('填写说明').some(row => row[0] === '模板版本 ' + require('../package.json').version));
+    return { ...response, sheets, data, xml: [...files.values()].join('\n') };
+  };
+  const catalogTemplate = await download('catalog-template.xlsx', 'catalog/template', f.admin);
+  const openingTemplate = await download('opening-template.xlsx', 'openings/template.xlsx');
+  assert.deepEqual(catalogTemplate.data('物资信息')[0], CATALOG_HEADERS);
+  assert.deepEqual(openingTemplate.data('期初明细')[0], OPENING_HEADERS);
+  assert.equal(CATALOG_HEADERS.length, 6); assert.equal(OPENING_HEADERS.length, 13);
+  assert.doesNotMatch(catalogTemplate.xml, /物资编码|仓库编码/);
+  assert.match(catalogTemplate.xml, /LABOS_S1_D|物资备注（选填/);
+  assert.match(openingTemplate.xml, /总金额（元）（必填）|零金额原因（条件必填）/);
+  const master = await f.catalog(s.category.id, { code: 'SYNC-XLSX', name: '=模板同步试剂', remark: '=物资长期备注' });
+  const catalogExport = await download('catalog-export.xlsx', 'catalog/export.xlsx?q=SYNC-XLSX', f.admin);
+  assert.equal((await readCatalogWorkbook({ name: '合成物资.xlsx', content: catalogExport.bytes.toString('base64') })).rows[0].values['物资备注'], master.remark);
+  let opening = (await f.request('POST', '/api/materials/openings', s.material, { title: '模板同步合成草稿' }, 201)).data;
+  const draft = await namedExcel(OPENING_HEADERS, [[master.name, master.spec, master.unit, s.region.name, '默认仓库', '1.125', '12.34', '0000123', '2028-01-02', '=期初柜', '', '=期初厂家', '=期初批次备注']]);
+  opening = (await f.request('POST', `/api/materials/openings/${opening.id}/import`, s.material, { version: opening.version, name: '合成草稿.xlsx', content: draft.toString('base64') }, 201)).data;
+  const openingExport = await download('opening-export.xlsx', `openings/${opening.id}/export.xlsx`);
+  assert.deepEqual(openingExport.data('单据信息')[1].slice(3, 5), ['期初库存', '草稿']);
+  assert.equal((await readOpeningWorkbook({ name: '合成期初.xlsx', content: openingExport.bytes.toString('base64') })).rows[0].values['批号'], '0000123');
+  let order = await f.submit(await f.order(s.material, f.item(s, { catalogId: master.id, manufacturer: '申报初始厂家' }), '模板同步合成申报'), s.material);
+  order = (await f.request('PATCH', `/api/materials/requests/${order.id}/items/${order.items[0].id}`, s.material, { requestVersion: order.version, version: order.items[0].version, manufacturer: '申报修订厂家', reason: '合成厂家修订' })).data;
+  const accepted = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { quantity: '1.125', amount: '12.34', batch: '0000123', expiryDate: '2028-01-02', location: '=验收时柜', locationVersion: 0, manufacturer: '=验收厂家', note: '=验收批次备注' }), 201)).data;
+  const identity = { catalogId: master.id, regionId: s.region.id, warehouse: 'REAGENT', batch: '0000123', expiryDate: '2028-01-02' };
+  await f.request('PUT', '/api/materials/stock/location', s.material, { ...identity, version: 1, location: '后来移动的柜', reason: '验证历史位置不被补写' });
+  const current = await download('request-export.xlsx', 'export.xlsx?type=requests&q=' + encodeURIComponent(order.title));
+  const original = await download('original-request-export.xlsx', 'export.xlsx?type=requests&version=original&q=' + encodeURIComponent(order.title));
+  assert.equal(current.data('申报单信息')[1][3], '已提交');
+  assert.equal(current.data('申报明细')[1][11], '申报修订厂家');
+  assert.equal(original.data('申报明细')[1][11], '申报初始厂家');
+  const event = Object.fromEntries(current.data('验收流水')[0].map((name, index) => [name, current.data('验收流水')[1][index]]));
+  assert.equal(event['类型'], '合格验收'); assert.equal(event['规格'], master.spec); assert.equal(event['单位'], master.unit);
+  assert.equal(event['厂家'], '=验收厂家'); assert.equal(event['备注'], '=验收批次备注'); assert.equal(event['存放位置'], '=验收时柜');
+  assert.equal(event['批号'], '0000123'); assert.equal(event['有效期'], '2028-01-02'); assert.equal(event['验收时间'], accepted.receipt.createdAt);
+  assert.equal(event['验收人'], accepted.receipt.actorName); assert.equal(original.data('验收流水').length, current.data('验收流水').length);
+  const stock = await download('stock-export.xlsx', 'export.xlsx?type=stock&catalogId=' + master.id);
+  const limited = await f.customAccount('SYNC_READONLY', ['materials.read', 'materials.export']);
+  const readonly = await download('stock-readonly.xlsx', 'export.xlsx?type=stock&catalogId=' + master.id, limited);
+  for (const value of [stock, readonly]) {
+    assert.deepEqual(value.data('批次库存')[0].slice(0, 7), ['入库时间', '物资名称', '数量', '规格', '单位', '厂家', '备注']);
+    assert.deepEqual(value.data('批次库存')[1].slice(1, 7), [master.name, 1.125, master.spec, master.unit, '=验收厂家', '=验收批次备注']);
+    assert.equal(value.data('批次库存')[1][11], '后来移动的柜'); assert.equal(value.data('批次库存')[1][12], master.remark);
+  }
+  assert.equal(stock.sheets[0].sheet, '库存导入明细');
+  assert.deepEqual((await readOpeningWorkbook({ name: '合成库存.xlsx', content: stock.bytes.toString('base64') })).headers, OPENING_HEADERS);
+  assert.equal(readonly.sheets.some(sheet => sheet.sheet === '库存导入明细'), false);
+  assert.doesNotMatch(readonly.xml, /批次分摊金额|库存总金额|12\.34|amountCents/);
+  await assert.rejects(readOpeningWorkbook({ name: '只读库存.xlsx', content: readonly.bytes.toString('base64') }), /表头不匹配/);
+  const issue = (await f.request('POST', '/api/materials/issues', s.material, { ...identity, quantity: '1', purpose: '=合成领用', requestIdempotencyKey: key() }, 201)).data.issue;
+  const issues = await download('issue-export.xlsx', 'export.xlsx?type=issues');
+  assert.equal(issues.data('领用申请')[1][0], issue.id); assert.equal(issues.data('领用申请')[1][1], '待发放');
+  const redactedRequests = await download('request-readonly.xlsx', 'export.xlsx?type=requests&q=' + encodeURIComponent(order.title), limited);
+  assert.doesNotMatch(redactedRequests.xml, /合格总金额|amountCents|12\.34/);
+});
+
 test('schema 6 restores validate allocation metadata and retain compatible snapshots without allocations', { timeout: 60000 }, async t => {
   const f = await fixture(t), s = await f.seed();
   const identity = { catalogId: s.catalog.id, regionId: s.region.id, warehouse: 'MAIN', batch: 'ALLOC-BACKUP', expiryDate: '' };
@@ -1254,7 +1326,7 @@ test('material issues retain application snapshots, enforce own-only visibility 
   await f.request('POST', '/api/materials/issues', exporter, { ...payload, purpose: '+SUM(own-export)', requestIdempotencyKey: key() }, 201);
   const ownExport = workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=issues', exporter)).bytes);
   const xml = [...ownExport.values()].join('\n');
-  assert.match(xml, /own-export/); assert.doesNotMatch(xml, /other-private-issue|own-issue|金额|amountCents/);
+  assert.match(xml, /own-export/); assert.doesNotMatch(xml, /other-private-issue|own-issue|发放金额（元）|amountCents/);
   for (const [name, text] of ownExport) if (name.startsWith('xl/worksheets/')) assert.doesNotMatch(text, /<f(?:\s|>)/);
   const adminXml = [...workbookXml((await f.request('GET', '/api/materials/export.xlsx?type=issues&status=issued', s.material)).bytes).values()].join('\n');
   assert.match(adminXml, /HYPERLINK/); assert.match(adminXml, /Shelf-now/); assert.doesNotMatch(adminXml, /other-private-issue/);
@@ -1906,6 +1978,31 @@ test('opening import rechecks login and current grants after asynchronous parsin
   reads = 0; fresh = authorized;
   await materials.handle({ method: 'POST' }, {}, new URL('http://localhost/api/materials/openings/1/import'));
   assert.equal(response.status, 201); assert.equal(response.data.items[0].amountCents, 325);
+});
+
+test('opening Excel imports above 200 rows can post and restore while 5001 rows leave the draft unchanged', { timeout: 60000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), { OPENING_HEADERS } = require('../src/material-xlsx');
+  let document = (await f.request('POST', '/api/materials/openings', s.material, { title: '合成201行恢复' }, 201)).data;
+  const row = index => [s.catalog.name, s.catalog.spec, s.catalog.unit, s.region.name, '默认仓库', '1', '0.01', 'SYNTH-' + index, '', '', '', '合成厂家', '合成批次'];
+  const rejected = await namedExcel(OPENING_HEADERS, Array.from({ length: 5001 }, (_, index) => row(index)));
+  await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '超限.xlsx', content: rejected.toString('base64') }, 400);
+  assert.deepEqual((await f.request('GET', `/api/materials/openings/${document.id}`, s.material)).data, document);
+  const bytes = await namedExcel(OPENING_HEADERS, Array.from({ length: 201 }, (_, index) => row(index)));
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/import`, s.material, { version: document.version, name: '合成201行.xlsx', content: bytes.toString('base64') }, 201)).data;
+  assert.equal(document.items.length, 201); assert.equal(document.status, 'draft');
+  document = (await f.request('POST', `/api/materials/openings/${document.id}/post`, s.material, { version: document.version, requestIdempotencyKey: key() }, 201)).data.opening;
+  assert.equal(document.status, 'posted'); assert.equal(document.unitCount, 0);
+  const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.equal(backup.data.material_opening_items.length, 201); assert.equal(backup.data.material_stock_movements.length, 201);
+  const target = await fixture(t), material = await target.account('MATERIAL');
+  const restored = (await target.request('POST', '/api/materials/restore', target.admin, backup)).data;
+  assert.equal(restored.restored, true); assert.equal(restored.counts.material_opening_items, 201);
+  const after = (await target.request('GET', `/api/materials/openings/${document.id}`, material)).data;
+  assert.equal(after.items.length, 201); assert.equal(after.status, 'posted'); assert.equal(after.unitCount, 0);
+  assert.deepEqual(after.items.map(row => [row.qtyM, row.amountCents, row.batch, row.manufacturer, row.note, row.movementId]), document.items.map(row => [row.qtyM, row.amountCents, row.batch, row.manufacturer, row.note, row.movementId]));
+  const stock = (await target.request('GET', '/api/materials/stock', material)).data;
+  assert.equal(stock.total, 1); assert.equal(stock.items[0].qtyM, 201000); assert.equal(stock.items[0].amountCents, 201);
+  assert.equal((await target.request('GET', '/api/materials/stock/movements', material)).data.total, 201);
 });
 
 test('schema 6 restores opening and supplement documents, exact labels and drafts while strictly accepting schema 4 without invented documents', { timeout: 45000 }, async t => {

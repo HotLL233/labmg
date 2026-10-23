@@ -13,6 +13,28 @@ const OPENING_HEADERS = [...PREVIOUS_OPENING_HEADERS, '厂家', '备注'];
 const CATALOG_HEADERS = [...PREVIOUS_CATALOG_HEADERS, '物资备注'];
 const FILE_LIMIT = 5 * 1024 * 1024;
 
+function workbookSheet(name, headers, rows) {
+  const width = header => {
+    if (header === '说明') return 88;
+    if (/快照/.test(header)) return 60;
+    if (/备注|原因|用途|填写要求/.test(header)) return 44;
+    if (/位置/.test(header)) return 30;
+    if (/名称|主题|厂家|示例/.test(header)) return 28;
+    if (/编码|编号|单号|时间/.test(header)) return 26;
+    if (header === '规格') return 22;
+    if (header === '单位') return 10;
+    if (/数量/.test(header)) return 15;
+    if (/金额/.test(header)) return 20;
+    return 18;
+  };
+  const cell = (value, header) => ({ type: typeof value === 'number' ? Number : String, value: value ?? '',
+    fontFamily: 'Microsoft YaHei', fontSize: 11, wrap: true, alignVertical: 'top',
+    ...(/数量|金额/.test(header) ? { align: 'right' } : {}) });
+  return { sheet: name, stickyRowsCount: 1, columns: headers.map(header => ({ width: width(header) })),
+    data: [headers.map(value => ({ ...cell(value, ''), fontWeight: 'bold', textColor: '#ffffff', backgroundColor: '#24476b', alignVertical: 'center', height: 32 })),
+      ...rows.map(row => headers.map((header, index) => cell(row[index], header)))] };
+}
+
 function excelColumn(index) {
   let result = '';
   for (let number = index + 1; number > 0; number = Math.floor((number - 1) / 26)) result = String.fromCharCode(65 + (number - 1) % 26) + result;
@@ -176,4 +198,4 @@ function referenceFeature() {
   } } };
 }
 
-module.exports = { readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature };
+module.exports = { readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet };

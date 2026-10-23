@@ -2,7 +2,11 @@
 
 已公开源码版本为 **0.11.0（验证版，2026-10-22）**，完成T1–T4双端界面、库存七列及厂家／备注Excel配套。使用Node.js、PostgreSQL和静态前端，需要Node.js 22.13+，建议Node.js 24，数据库继续PostgreSQL18。正式部署取[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)的同版YML和镜像，默认自动识别主LAN IP，保留原PG18项目的runtime/、https/及UID/GID。真实PG18.6回归212/212、43JS及四项发布门禁通过，交付与有限验收边界见下文和[版本说明](CHANGELOG.md)。
 
-Windows 命令统一使用 PowerShell 7（`pwsh`）；本机当前验证为 7.6.7，通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
+2026-10-23[方案同步核对](PLAN_SYNC_REVIEW.md)更正范围：以上“T1–T4”指主要界面，T4临期色条尚未接入；D/E/F仍为后续路线图。公开版本仍为0.11.0，本地未提交的package／deploy已预填0.11.1，但同版Release／GHCR尚不存在；正式部署取`artifacts/releases/0.11.0/`的同版文件。
+
+后续同日按用户确认完成0.11.1的[Excel模板同步](EXCEL_IMPORT_EXPORT.md)源码候选，分支`feature/v0.11.1-excel-template-sync`。保留旧模板读取及金额权限合同，整理现有报表字段／样式／说明，并统一大单据恢复上限；不将其写作D/E/F整批完成。最终本机全套221项220通过／0失败／1Docker条件跳过、43JS及两种UI审计8/0/0通过；真实Edge Excel114断言／6图、全站布局通过。缓存为`artifacts/cache/0.11.1/excel-templates/`，单独54932 PG17.11已核对后停止，未触碰既有54931；实际恢复验证201行，不能冒称5000行容量验收。正式PG18、镜像和公开发布仍待本版新证据。
+
+Windows 命令统一使用 PowerShell 7（`pwsh`）；本机2026-10-23复核为7.6.8（此前观测为7.6.7），通过 `Get-Command pwsh` 定位到 WindowsApps 提供的入口。此前记录的 `C:\Program Files\PowerShell\7\pwsh.exe` 当前不存在，不再硬编码该路径；工具显式指定 `pwsh`，用 `$PSVersionTable` 确认实际版本。npm 打包命令和打包回归均调用 `pwsh`。此路径更正发生在 rc.5 冻结后，不改写已生成的版本产物；后续源码再打包需使用新版本号。
 
 ## 最新公开：0.11.0 库存信息与双端界面优化（2026-10-22）
 

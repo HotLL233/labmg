@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { spawnSync } = require('node:child_process');
 const { unzipSync, zipSync, strToU8, strFromU8 } = require('fflate');
-const { readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, excelColumn, importFailure, referenceFeature } = require('../src/material-xlsx');
+const { readCatalogWorkbook, CATALOG_HEADERS, PREVIOUS_CATALOG_HEADERS, LEGACY_CATALOG_HEADERS, readOpeningWorkbook, OPENING_HEADERS, PREVIOUS_OPENING_HEADERS, LEGACY_OPENING_HEADERS, excelColumn, importFailure, referenceFeature, workbookSheet } = require('../src/material-xlsx');
 
 const cell = value => value && typeof value === 'object' ? value : { type: typeof value === 'number' ? Number : String, value };
 const sheet = (name, headers, rows, options = {}) => ({ sheet: name, data: [headers.map(cell), ...rows.map(row => row.map(cell))], ...options });
@@ -37,6 +37,17 @@ test('manufacturer, batch notes and catalog remarks are literal optional columns
   const openingRow = ['试剂', '500 mL', '瓶', '区域 A', '默认仓库', '1', '2.34', '批次', '', '柜 A', '', '厂家 A', '=批次备注'];
   assert.deepEqual((await readCatalogWorkbook(upload(await workbook(CATALOG_HEADERS, [catalogRow])))).rows[0].values, values(CATALOG_HEADERS, catalogRow));
   assert.deepEqual((await readOpeningWorkbook(upload(await workbook(OPENING_HEADERS, [openingRow])))).rows[0].values, values(OPENING_HEADERS, openingRow));
+});
+
+test('shared workbook layout keeps Chinese headers readable and formula-like text round-trippable', async () => {
+  const row = ['=文字名称', '500 mL', '瓶', '区域甲', '默认仓库', '1.125', '12.34', '0000123', '', '柜一', '', '厂家甲', '=备注'.repeat(80)];
+  const bytes = await write([workbookSheet('期初明细', OPENING_HEADERS, [row])]);
+  const files = unzipSync(bytes), xml = strFromU8(files['xl/worksheets/sheet1.xml']), styles = strFromU8(files['xl/styles.xml']);
+  assert.match(xml, /<cols>/); assert.match(xml, /<pane[^>]*ySplit="1"[^>]*state="frozen"/);
+  assert.equal([...xml.matchAll(/<col\b[^>]*width="([\d.]+)"/g)].length, OPENING_HEADERS.length);
+  assert.match(styles, /Microsoft YaHei/); assert.match(styles, /wrapText="1"/); assert.match(styles, /24476b/i);
+  assert.doesNotMatch(xml, /<f(?:\s|>)/);
+  assert.deepEqual((await readOpeningWorkbook(upload(bytes))).rows[0].values, values(OPENING_HEADERS, row));
 });
 
 test('header mismatches and unsupported values report sheet, physical row, column, field and original value', async () => {

@@ -1143,7 +1143,12 @@ test('opening documents save multiple lines, import and export Excel, confirm po
   await click({dataset:{mw:'page',page:'openings'}});assert.ok(app.$('[data-mw=new-opening]'));await click('[data-mw=new-opening]');fill({title:'合成期初单',date:'2026-10-19'});await submit();assert.equal(created.title,'合成期初单');
   for(let i=0;i<2;i++){await click('[data-mw=opening-add-item]');fill({catalogId:'5',code:row.code,name:row.name,spec:row.spec,unit:row.unit,categoryId:'1',regionId:'2',warehouse:'MAIN',quantity:'1',amount:'2.50',location:'柜 A'});await click('[data-mw=position-read]');await submit();}
   assert.equal(doc.items.length,2);await click('[data-mw=opening-template]');await click('[data-mw=opening-export]');assert.ok(app.requests.some(r=>r.url.pathname.endsWith('/openings/template.xlsx')));assert.ok(app.requests.some(r=>r.url.pathname.endsWith('/openings/81/export.xlsx')));
-  await click('[data-mw=opening-import]');assert.equal(app.$('#mw-fields [name=file]').attrs.accept,'.xlsx');fill({file:{name:'synthetic.xlsx',size:9,type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});await submit();assert.equal(imported.content,'c3ludGhldGlj');assert.equal(doc.items.length,3);
+  await click('[data-mw=opening-import]');assert.equal(app.$('#mw-fields [name=file]').attrs.accept,'.xlsx');
+  assert.match(app.$('#mw-fields').textContent,/当前 13 列模板，也兼容旧格式/);
+  assert.match(app.$('#mw-intro').textContent,/“期初明细”.*“库存导入明细”.*“厂家”和“备注”.*“物资备注”分开/);
+  assert.match(app.$('#mw-intro').textContent,/金额脱敏报表及申报、验收、领用报表仅供查看，不支持回导/);
+  assert.equal(app.$('#mw-intro [data-mw=opening-template]').textContent,'下载导入模板');
+  fill({file:{name:'synthetic.xlsx',size:9,type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});await submit();assert.equal(imported.content,'c3ludGhldGlj');assert.equal(doc.items.length,3);
   await click('[data-mw=opening-post]');assert.match(app.$('#mw-intro').textContent,/生成 3 个/);await submit();assert.match(app.$('#mw-error').textContent,/按原内容重试/);await submit();assert.deepEqual(posts[0],posts[1]);assert.ok(posts[0].requestIdempotencyKey);
   assert.equal(app.$('[data-mw=opening-post]'),null);assert.ok(app.$('[data-mw=opening-units]'));await click('[data-mw=opening-units]');const lookup=app.requests.filter(r=>r.url.pathname==='/api/materials/stock/units').at(-1);assert.equal(lookup.url.searchParams.get('openingId'),'81');
 });
@@ -1198,12 +1203,47 @@ test('catalog Excel controls use a strict template and preserve the current expo
   app.$('#mw-catalog-management-query').value = '试剂 A'; await click('[data-mw=catalog-export]');
   assert.equal(app.requests.find(entry => entry.url.pathname === '/api/materials/catalog/export.xlsx').url.searchParams.get('q'), '试剂 A');
   await click('[data-mw=catalog-import]'); assert.equal(app.$('#mw-fields [name=file]').attrs.accept, '.xlsx');
+  assert.match(app.$('#mw-fields').textContent, /当前 6 列模板，也兼容旧格式/);
+  assert.match(app.$('#mw-intro').textContent, /“物资信息”工作表.*中文下拉选项.*物资备注描述物资本身.*不改变库存/);
+  assert.equal(app.$('#mw-intro [data-mw=catalog-template]').textContent, '下载导入模板');
   fill({ file: { name: 'old.xls', size: 9 } }); await submit(); assert.equal(imported, undefined); assert.match(app.$('#mw-error').textContent, /xlsx/);
   fill({ file: { name: '物资.xlsx', size: 9 } }); await submit(); assert.deepEqual(imported, { name: '物资.xlsx', content: 'c3ludGhldGlj' });
   assert.match(app.$('#mw-status').textContent, /新增 1 项，复用 2 项.*库存数量未改变/);
   assert.equal(app.requests.some(entry => entry.method === 'POST' && entry.url.pathname.includes('/stock')), false);
   const ordinary = await materialApp(false); await ordinary.click({ dataset: { mw: 'catalog-import' } });
   assert.equal(ordinary.app.$('#mw-dialog').open, false); assert.match(ordinary.app.$('#mw-status').textContent, /没有物资信息维护权限/);
+});
+
+test('Excel export labels and filenames distinguish reimport details, redacted reports and history without changing routes', async () => {
+  for (const viewAmount of [true, false]) {
+    const { app, click } = await materialApp();
+    app.state.materialCapabilities.viewAmount = viewAmount; await app.run("go('materials')");
+    const opening = { id: 81, no: 'QC-81', kind: 'opening', title: '导出核对', date: '2026-10-23', version: 3, status: 'draft', items: [] };
+    app.state.materialResponse = ({ url, method }) => url.pathname === '/api/materials/openings/81' && method === 'GET' ? { body: opening } : undefined;
+    const downloads = [], createElement = app.document.createElement.bind(app.document);
+    app.document.createElement = name => { const element = createElement(name); if (name === 'a') element.click = () => downloads.push(element.download); return element; };
+    const label = viewAmount ? '导出回导明细' : '导出 Excel（仅查看）', prefix = viewAmount ? '库存回导明细-' : '库存只读报表-';
+    await click({ dataset: { mw: 'page', page: 'inventory' } });
+    assert.equal(app.$('[data-mw=export]').textContent, label);
+    assert.match(app.$('#page').textContent, viewAmount ? /库存导入明细.*库存.*批次库存.*七列表/ : /金额脱敏的只读报表，不支持回导/);
+    await click('[data-mw=export]'); assert.ok(downloads.at(-1).startsWith(prefix));
+    assert.equal(app.requests.at(-1).url.pathname, '/api/materials/export.xlsx'); assert.equal(app.requests.at(-1).url.searchParams.get('type'), 'stock');
+    await click({ dataset: { mw: 'page', page: 'openings' } }); await click({ dataset: { mw: 'opening-detail', id: '81' } });
+    assert.equal(app.$('[data-mw=opening-template]').textContent, '下载导入模板');
+    assert.equal(app.$('[data-mw=opening-export]').textContent, label);
+    assert.match(app.$('#page').textContent, viewAmount ? /“期初明细”可导入新草稿.*避免重复入库/ : /金额脱敏的只读报表，不支持回导/);
+    assert.equal(Boolean(app.$('[data-mw=opening-import]')), viewAmount);
+    await click('[data-mw=opening-template]'); assert.equal(downloads.at(-1), '库存-期初与补录-导入模板.xlsx');
+    await click('[data-mw=opening-export]'); assert.equal(downloads.at(-1), prefix + 'QC-81.xlsx');
+    assert.equal(app.requests.at(-1).url.pathname, '/api/materials/openings/81/export.xlsx');
+    for (const [page, type, name] of [['requests', 'requests', '申报历史-'], ['issues', 'issues', '领用历史-']]) {
+      await click({ dataset: { mw: 'page', page } }); assert.equal(app.$('[data-mw=export]').textContent, '导出 Excel');
+      await click('[data-mw=export]'); assert.ok(downloads.at(-1).startsWith(name)); assert.equal(app.requests.at(-1).url.searchParams.get('type'), type);
+    }
+    await click('[data-mw=dictionaries]'); assert.equal(app.$('[data-mw=catalog-export]').textContent, '导出 Excel');
+    await click('[data-mw=catalog-template]'); assert.equal(downloads.at(-1), '物资信息库-导入模板.xlsx');
+    await click('[data-mw=catalog-export]'); assert.ok(downloads.at(-1).startsWith('物资信息库-'));
+  }
 });
 
 test('Excel validation displays every cell error as text and retains the selected file and opening version for retry', async () => {
@@ -1217,7 +1257,7 @@ test('Excel validation displays every cell error as text and retains the selecte
       if (url.pathname === '/api/materials/openings/81' && method === 'GET') return { body: opening };
       if (url.pathname === (kind === 'catalog' ? '/api/materials/catalog/import' : '/api/materials/openings/81/import')) {
         sent.push(body);
-        if (invalid) return { status: 400, body: { error: 'Excel 校验失败，未导入任何数据', code: 'IMPORT_VALIDATION', totalErrors: 3, errors: [
+        if (invalid) return { status: 400, body: { error: 'Excel 校验失败，未导入任何数据', code: 'IMPORT_VALIDATION', totalErrors: 5, errors: [
           { sheet: '库存明细', row: 2, column: 'C', field: '仓库', value: '<img src=x onerror=alert(1)>', message: '仓库不存在，请从下拉列表选择' },
           { sheet: '库存明细', row: 8, column: 'G', field: '数量', value: '-2', message: '数量必须大于零' },
           { sheet: '物资信息', row: 11, column: 'A', field: '物资名称', value: '', message: '物资名称不能为空' }
@@ -1234,6 +1274,10 @@ test('Excel validation displays every cell error as text and retains the selecte
     assert.match(error.textContent, /工作表「物资信息」 第 11 行 A 列 （物资名称）.*不能为空/);
     assert.match(error.textContent, /<img src=x onerror=alert\(1\)>/); assert.equal(error.querySelector('img'), null);
     assert.equal(error.attrs.tabindex, '0'); assert.equal(error.attrs.role, 'alert');
+    assert.match(error.textContent, /共 5 处错误，当前显示 3 处/);
+    const retained = error.textContent;
+    await click(app.$('#mw-intro [data-mw=' + (kind === 'catalog' ? 'catalog-template' : 'opening-template') + ']'));
+    assert.equal(error.textContent, retained); assert.match(app.$('#mw-intro').textContent, /修改原文件后重新选择并校验/);
     assert.equal(app.$('#mw-dialog').open, true); assert.equal(app.$('#mw-save').disabled, false);
     assert.equal(app.$('#mw-fields [name=file]').value, selected); assert.doesNotMatch(app.$('#mw-status').textContent, /导入完成|操作已保存/);
     invalid = false; await submit(); assert.deepEqual(sent[1], sent[0]);
