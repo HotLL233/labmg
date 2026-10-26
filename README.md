@@ -1,6 +1,8 @@
 # LabOS 实验室综合管理系统
 
-当前源码候选：**0.14.0／按单验收与到货清单**。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。源码正在最终回归，镜像和公开交付以[版本说明](docs/CHANGELOG.md)实际发布结果为准。升级前请按[完整备份恢复](docs/BACKUP_RESTORE.md)备份原PG18项目；本次新增0006加法迁移、schema8，不能用旧程序恢复新格式或直接回退已升级数据库。
+当前源码候选：**0.14.1／按单验收与到货清单**。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。源码正在最终回归，镜像和公开交付以[版本说明](docs/CHANGELOG.md)实际发布结果为准。升级前请按[完整备份恢复](docs/BACKUP_RESTORE.md)备份原PG18项目；本次新增0006加法迁移、schema8，不能用旧程序恢复新格式或直接回退已升级数据库。
+
+0.14.0保留为未公开候选：容器测试遗漏必填厂家字段，已在0.14.1补齐合成数据并重新执行发布验证；冻结标签和原附件不改写。
 
 当前公开版本：**0.13.1／R0–R2 界面基础与断点整改（2026-10-26）**。[0.13.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)已公开为prerelease，提供双架构镜像、两份YML、完整离线包和源码；统一字号、表格及三处响应式问题，R3/R4留后续0.13.2。正式PG18.6回归244/244、49JS、四项容器门禁及本机12件交付核验通过；匿名官方API元数据与10个非TAR附件下载、独立公开直链下载均通过。完整证据及硬件未验范围见[版本说明](docs/CHANGELOG.md)，未自动升级NAS。
 
@@ -45,7 +47,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.0/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.1/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -56,7 +58,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.0/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.1/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 

@@ -1007,3 +1007,9 @@ M1–M4已完成：三主入口、按完整申报单行内验收、单批事务�
 完整备份脚本模拟通过；另用本版独立PG18.4原生pg_dump／pg_restore在空目标恢复33表、2到货／3版资料／3个旧新文件SHA／5单件码并匹配。此专项HTTPS为合成标记，仅证明文件副本，不等于真实Docker脚本或CA恢复；后者与双架构镜像、三镜像TAR、正式PG18 CI均待发布阶段新证据。缓存集中0.14.0，不接NAS或业务库；硬件手机、USB及长期容量未验。
 
 冻包前复读发现PowerShell备份脚本合并Docker stderr会让Compose的obsolete version提示混入容器ID；改仅取stdout且继续核对原生exit code，mock每次成功compose都输出stderr警告，最终增量1/1通过（backup-runtime-compose-warning.tap）。完整271项为这次小修前，增量单列不重复叠加。独立PG18.4复核精确data_directory、仅本机54952及remaining=0后fast停止，stop-report.json为passed；不接NAS或其他PG实例。
+
+## 2026-10-26：保留0.14.0候选并准备0.14.1容器复验
+
+0.14.0冻结源码`1649beb57ebecba1bb57e5f5fcd4eb1ab2c0c922`及注解标签`v0.14.0`已同步。正式构建40276648959／job121420700261的原日志独立复核PG18.6测试262/262、54JS及amd64／arm64实际构建推送，索引`sha256:030a103035d2c96faedb67d37d3ebebaae4a7369d2feb5237594ef4aeb489d52`。验证40277541734／运维dd422ce59eae7312ec13b65d607709a12baa0c71双架构匿名拉取成功，但Gate1中冻结Docker测试两份旧入库fixture缺少新版必填实到厂家，接口400而非预期201。初始化预检已通过；后续门禁未执行，Release423900964保持草稿，不称公开或完整部署通过。原日志及官方失败诊断ZIP完整保留。
+
+从冻结提交建立`feature/v0.14.1-material-workflow`，仅修正Docker测试合成厂家、同步候选版本和文档，不放宽业务校验、不修改0006或schema8。0.14.0旧标签／资产和main保留，新缓存与交付隔离至0.14.1；新镜像、正式PG18、在线／离线、HTTPS及完整备份恢复须重新执行。本机无Docker，补齐的容器fixture仅做语法检查，实际结果由后续新门禁补记，旧271项不能算作0.14.1新跑。

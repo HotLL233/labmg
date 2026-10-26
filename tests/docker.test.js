@@ -295,9 +295,11 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     assert.equal(history.revisions[0].after.items[0].catalogId, catalog.id);
     const materialReceipt = await post('/api/materials/receipts', {
       requestId: materialRequest.id, itemId: materialRequest.items[0].id, requestVersion: materialRequest.version, version: materialRequest.items[0].version,
-      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34', batch: 'DOCKER-ISSUE-BATCH', expiryDate: '2027-12-31'
+      requestIdempotencyKey: crypto.randomUUID(), quantity: '1', amount: '12.34', batch: 'DOCKER-ISSUE-BATCH', expiryDate: '2027-12-31', manufacturer: '容器合成厂家'
     });
     assert.equal(materialReceipt.receipt.amountCents, 1234);
+    assert.equal(materialReceipt.receipt.manufacturer, '容器合成厂家');
+    assert.equal(materialReceipt.receipt.manufacturerStatus, 'known');
     const stockIdentity = { catalogId: catalog.id, regionId: region.id, warehouse: 'MAIN', batch: 'DOCKER-ISSUE-BATCH', expiryDate: '2027-12-31' };
     const location = '容器试剂柜 A-02';
     await request(first.base, '/api/materials/stock/location', {
@@ -361,9 +363,13 @@ test('PostgreSQL Compose creates a runtime beside its YML and preserves accounts
     const unitReceiptPayload = {
       requestId: unitRequest.id, itemId: unitRequest.items[0].id, requestVersion: unitRequest.version,
       version: unitRequest.items[0].version, requestIdempotencyKey: crypto.randomUUID(),
-      quantity: '3', amount: '1', batch: unitIdentity.batch, expiryDate: unitIdentity.expiryDate
+      quantity: '3', amount: '1', batch: unitIdentity.batch, expiryDate: unitIdentity.expiryDate,
+      manufacturer: '', manufacturerStatus: 'unknown', manufacturerReason: '合成样品包装无厂家标识'
     };
     const unitReceipt = (await post('/api/materials/receipts', unitReceiptPayload)).receipt;
+    assert.equal(unitReceipt.manufacturer, '');
+    assert.equal(unitReceipt.manufacturerStatus, 'unknown');
+    assert.equal(unitReceipt.manufacturerReason, unitReceiptPayload.manufacturerReason);
     assert.equal(unitReceipt.unitCount, 3); assert.equal(unitReceipt.units.length, 3);
     assert.deepEqual(unitReceipt.units.map(unit => unit.sequence), [1, 2, 3]);
     assert.equal(new Set(unitReceipt.units.map(unit => unit.code)).size, 3);
