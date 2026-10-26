@@ -1,0 +1,10 @@
+{
+  "version": "0.13.1",
+  "commit": "9e69574a4e0a707ce031e5f5d4b3b234fb67261a",
+  "indexDigest": "sha256:6f59c8510e86701f6572caa1201e0d586db7be908e13b083576c5cf1dbef310f",
+  "baseParent": "a2ec1854b6f342c6775bf2f16fc0f0b39742e222",
+  "featureBranch": "feature/v0.13.1-ui-foundation",
+  "status": "source-frozen",
+  "buildRunId": 40251837780,
+  "sourceTagObject": "6757fc25aed8f34c70a0ca6c384541fe3e079765"
+}
