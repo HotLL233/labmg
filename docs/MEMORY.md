@@ -2,7 +2,17 @@
 
 最后整理：2026-10-26（Asia/Shanghai，UTC+08:00）。本文件覆盖本次会话可见的全部项目历史、已确认决策和本次新增记忆；未取得的更早历史不作推测。详细事件见 [开发历程](HISTORY.md)，发布内容见 [版本更新说明](CHANGELOG.md)。
 
-## 当前开发：0.13.1 界面基础与断点整改（2026-10-26）
+## 最新公开：0.13.1 界面基础与断点整改（2026-10-26）
+
+[0.13.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)已公开为prerelease（Release423767121），本轮仅完成R0–R2，R3/R4留后续0.13.2。冻结源码`9e69574a4e0a707ce031e5f5d4b3b234fb67261a`／`v0.13.1`，注解对象`6757fc25aed8f34c70a0ca6c384541fe3e079765`；main和32个旧标签保持，不改冻结附件或移动标签。
+
+正式构建40251837780／job121345234999原日志确认PG18.6显式CI集合244/244、0失败／跳过及49JS通过；镜像索引`sha256:6f59c8510e86701f6572caa1201e0d586db7be908e13b083576c5cf1dbef310f`。验证40252932931／运维785622056cd26d6468565bf88afa657c40ed949c四门禁通过，root独立复读官方诊断ZIP内三原TAP、同次PG六项、四原JSON与严格可信空SNI自动HTTPS证据；ARM64使用QEMU，不是目标NAS或物理ARM64验收。
+
+本机`artifacts/releases/0.13.1/`完整12件489354460字节、11摘要、5份冻结原字节附件及双TAR三镜像／六config顺序核验通过，两TAR均已完整下载。正确源码包139源／140项；误从根目录生成的包已隔离且从未上传，详见本轮HISTORY。匿名官方API公开仓库／标签／Release／12资产／11摘要及10非TAR完整下载通过；独立公开直链匿名下载同10件1152732字节也通过、0凭据／0API／0TAR。不称匿名全量TAR或浏览器Release界面验证，publisher自身的`localArchiveDownloads:false`不代表本机缺少离线包。
+
+专用PG18.4（127.0.0.1:54951）核对精确data_directory和remaining=0后已fast停止，stop报告passed；不接业务库或NAS。无新依赖、SQL迁移或备份格式，沿用schema7；更新保留原PG18项目runtime/、https/和UID/GID并先备份。未自动升级NAS，实体手机、USB打印、缩放及其他浏览器未验。以下开发快照的“待冻结／待构建／未公开”由本节实际结果补充，原失败继续保留。
+
+## 开发阶段：0.13.1 界面基础与断点整改（2026-10-26，冻结前快照）
 
 用户要求按项目内[整改方案](UI_整改方案.md)开始优化。已从a2ec1854新建`feature/v0.13.1-ui-foundation`，按默认版本分工仅实施R0–R2，R3/R4留后续0.13.2；main、旧标签和旧交付不动。缓存与独立PG18.4 data位于`artifacts/cache/0.13.1/`，仅监听127.0.0.1:54951，不接NAS或日常数据库；所有命令显式PowerShell7.6.8。
 
@@ -12,7 +22,7 @@ R0/R1已落地七档字号、三档行高、22px页头、统一屏幕表格密�
 
 源码验收补充：R0–R2实际Edge最终2500检查／72图／0异常、五档对照通过，缓存workspace-layout-Up30E0与ui-comparison-wnhAzB；普通／严格UI审计9/0/0及49JS通过。三个操作宽度例外经真实computed断言确认160/152/144px，保持其余96px。打印pill13、table auto、操作static及原行高保留。完整首轮251项249通过／1打包超时／1Docker条件跳过；确认48次串行node检查全部exit0但47.85秒，改最多4并发且保留原生语义与30秒门限，新增checker及package2/2通过。按唯一用例合并252项251通过／1条件跳过，最终专项不重复计总。原chip断言、审计fallback及media选择器、打印和CSS特异性等失败保留，见UI_REMEDIATION_STATUS；当前进入冻结发布准备，未称已公开。
 
-## 最新公开：0.13.0 记录工作区（2026-10-23，公开验证版）
+## 上一公开：0.13.0 记录工作区（2026-10-23，公开验证版）
 
 用户批准按[页面密度与记录工作区方案](UI_WORKSPACE_OPTIMIZATION.md)实施。方案与原型先保存为687ba4d，随后在`feature/v0.13.0-record-workspaces`开发；缓存／交付隔离到0.13.0目录，不改main、旧标签、旧发布附件及外部.workbuddy／两份旧UI草稿。使用ponytail复用现有table、dialog、权限、API和原生CSS，不新增运行依赖。
 

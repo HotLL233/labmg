@@ -953,3 +953,15 @@ Release421514037已公开为prerelease，认证官方发布流程核对draft=fal
 最终真实工作区为workspace-layout-Up30E0，2500检查／72图／0异常；五档0.13.0对照在ui-comparison-wnhAzB。普通／严格审计9/0/0、49JS通过，前三个专项原失败均保留：chip旧越界判定、审计fallback及media首规则、打印字体漂移、列宽特异性、弹窗fixed测试假设。操作列只给物资160／验收152／领用144例外，其他96；打印13px徽章、auto表格、static操作及原行高保留。
 
 完整首轮251项249通过／1打包失败／1Docker条件跳过；独立重跑仍30秒超时后确认48次node --check均exit0但47.85秒，改最多4并发，不执行源码、不改语义或扩大门限。新增检查与完整package2/2通过、UI专项74/74及最终工作区通过；唯一用例合并252项251通过／1条件跳过，重叠专项不叠加，不声称一次全绿npm test。正式CI／镜像／公开交付尚待冻结后的新证据，R3/R4按后续0.13.2保留，未操作NAS。
+
+## 2026-10-26：0.13.1 冻结、正式验证与公开交付
+
+源码冻结`9e69574a4e0a707ce031e5f5d4b3b234fb67261a`，标签v0.13.1／注解对象6757fc25aed8f34c70a0ca6c384541fe3e079765。正式构建40251837780／job121345234999原日志由root独立复读：真实PG18.6显式CI集合244/244、0失败／跳过及49JS通过，双架构索引sha256:6f59c8510e86701f6572caa1201e0d586db7be908e13b083576c5cf1dbef310f。运维提交785622056cd26d6468565bf88afa657c40ed949c触发验证40252932931，四容器门禁通过；官方诊断ZIP内三原TAP各1/1、同次PG六项、四原JSON和严格可信空SNI自动HTTPS证据经root独立复读。ARM64使用QEMU，不是物理ARM64或目标NAS验收。
+
+初次从根目录打包误混入两份外部UI草稿，已隔离至artifacts/cache/0.13.1/rejected-root-package，未曾上传。正确源码ZIP从干净冻结worktree重生成，139源／140条目、992261字节，SHA256为cff0980d2882388a5c9dadd0e0b2be6ea10e2d7e581f8dbaaca6933df286e880；五份部署附件与冻结原字节比较通过。首次range下载缺少local-image-download-inputs，在网络前被preflight拒绝，原拒绝报告保留；绑定本次导入报告后，amd64 245733888字节／59段及arm64 242467840字节／58段均完整下载并通过整包核验。
+
+按顺序核验本机artifacts/releases/0.13.1/：完整12件489354460字节、11摘要、5份冻结原字节附件、双TAR各含labos:0.13.1／postgres:18-bookworm／caddy:2.11.7-alpine及六config，报告均passed。专用PG18.4为127.0.0.1:54951和artifacts/cache/0.13.1/postgres/data，精确核对data_directory与remaining=0后fast停止，stop-report passed；未操作业务库或NAS。
+
+Release423767121已公开为prerelease。verify-public-release-from-draft的verify-public／download-small流程匿名确认公开仓库、真实标签、Release公开状态、12资产及11摘要，并完整下载10非TAR附件，github-release-verification.json为passed；独立verify-public-asset-downloads通过官方公开直链匿名完整下载同10件1152732字节、0凭据／0API／0TAR，public-asset-download-verification.json也为passed。本版匿名API未沿用旧版403限制结论；不称匿名全量TAR或浏览器Release界面验证。publisher的localArchiveDownloads:false仅指其自身，本机完整双TAR由独立下载及交付报告证明。
+
+发布后仅补README、MEMORY、DEVELOPMENT、HISTORY、CHANGELOG、SYNOLOGY及UI_REMEDIATION_STATUS的当前状态，保留原开发快照和失败。main与32个旧标签保持，冻结附件不重打、标签不移动；本轮仅R0–R2，R3/R4留后续0.13.2。无新依赖、SQL迁移或备份格式，继续schema7；更新先备份原PG18和附件并保留runtime/、https/与UID/GID。未自动升级NAS，实体手机、USB打印、浏览器缩放及其他浏览器未验。
