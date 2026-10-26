@@ -965,3 +965,15 @@ Release421514037已公开为prerelease，认证官方发布流程核对draft=fal
 Release423767121已公开为prerelease。verify-public-release-from-draft的verify-public／download-small流程匿名确认公开仓库、真实标签、Release公开状态、12资产及11摘要，并完整下载10非TAR附件，github-release-verification.json为passed；独立verify-public-asset-downloads通过官方公开直链匿名完整下载同10件1152732字节、0凭据／0API／0TAR，public-asset-download-verification.json也为passed。本版匿名API未沿用旧版403限制结论；不称匿名全量TAR或浏览器Release界面验证。publisher的localArchiveDownloads:false仅指其自身，本机完整双TAR由独立下载及交付报告证明。
 
 发布后仅补README、MEMORY、DEVELOPMENT、HISTORY、CHANGELOG、SYNOLOGY及UI_REMEDIATION_STATUS的当前状态，保留原开发快照和失败。main与32个旧标签保持，冻结附件不重打、标签不移动；本轮仅R0–R2，R3/R4留后续0.13.2。无新依赖、SQL迁移或备份格式，继续schema7；更新先备份原PG18和附件并保留runtime/、https/与UID/GID。未自动升级NAS，实体手机、USB打印、浏览器缩放及其他浏览器未验。
+
+## 2026-10-26：按申报单验收、三入口及短操作设计
+
+用户反馈验收未围绕申报单、正常到货仍打开繁琐二级表单，并要求主入口仅保留申报、验收、库存，原始物资资料与配置迁入物资设置，先给优化方案。已按用户回答确认实际金额在验收表内填写；没有价格不能默认零元。开始前读取MEMORY、DEVELOPMENT及UI施工卡，继续使用ponytail，命令显式pwsh7.6.8。
+
+基于0.13.1发布后文档提交0f99965新建feature/material-workflow-simplification-design。新增MATERIAL_WORKFLOW_SIMPLIFICATION.md和配套离线HTML原型，建议按单分页＋完整明细、默认剩余数量、原位金额／位置、差异展开、成功留在原单，以及将期初／补录／领用留在库存内部。物资信息库仍允许原权限内普通查询，历史、身份锁定、补录原因、管理员发放、二维码与打印校准继续保留。
+
+后端只读核对确认申报无价格字段、当前acceptance按明细分页、单行receiptAction会递增父版本；整单验收必须补事务内复用及整批幂等，不能前端循环冒充原子成功。同批次位置统一，拒收不抵减后续合格需求，位置沿用可选／权限／版本合同。方案列出正式API、前端、回归和部署影响，本轮不改src、SQL、版本、YML、镜像或NAS，不将原R3/R4写成完成；外部.workbuddy与两份旧UI草稿保留，生成检查与截图放artifacts/cache/0.13.1/material-flow-design/。
+
+原型仅使用独立HTML、CSS与原生JS，合成数据在内存中模拟；辅助Excel／扫码／模板／发放入口明确说明未模拟，不调用业务API或真实打印。只读审查纠正方案的全单永久只读、厂家主档归属和重复导入去重假设：完成进度不取消受控修订／附件／冲正，厂家属申报与验收批次，期初导入追加草稿不保证业务去重。位置可选且修改需原权限，已在方案明确。
+
+最终Edge报告edge-g7jb4G为146断言／13图／0脚本异常／0网络请求通过，绑定HTML SHA256 b7eb51851ccc6e131da612915eeba6830a5a7786442422e9d1150a837317c793；覆盖五档尺寸及1366×480降级，含正常／差异、缺金额整批不写、零金额原因、纯拒收不入库、整数件数、行内匹配、只读历史、输入切换、身份模拟、申请不扣库存、当前事件打印及退出重进。初轮130断言通过后，目视发现成功提示将桌面底部推到屏外，补按可用高度约束及表体内部滚动，并追加成功状态操作条断言。增量edge-zp30fH／edge-jesYnE失败分别是测试仍期待“物资名称／现存数量”而实际保留“名称／数量”、以及把带同一data属性的按钮也计入历史记录；修正检查后通过，失败原报告保留。普通／严格生产审计各9/0/0，方案本地链接和关键约束通过，git确认src／package／deploy／scripts／tests无变化。未运行真实业务事务或整套生产回归，未启动PG或部署NAS；不将本次原型称为正式功能或新版本发布。

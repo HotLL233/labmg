@@ -1,5 +1,7 @@
 # 开发与版本管理
 
+当前设计任务（2026-10-26）：[按申报单验收与三入口简化方案](MATERIAL_WORKFLOW_SIMPLIFICATION.md)及[离线HTML参考](prototypes/material-workflow-simple.html)，分支`feature/material-workflow-simplification-design`基于0.13.1发布后文档提交`0f99965`。用户确认实付金额在验收表内填写；方案将主入口收敛为申报／验收／库存，资料与配置从物资设置进入，正常行直接验收、差异原位展开。整单写入需后端事务与整批幂等，不能只改前端。本轮仅设计，不修改正式源码、数据库、版本、YML或镜像，不操作NAS；正式公开仍为下方0.13.1，原R3/R4继续标为后续计划。
+
 最新公开 **0.13.1（界面基础与断点整改，2026-10-26）**，[Release423767121](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)为prerelease；分支`feature/v0.13.1-ui-foundation`，冻结`9e69574a4e0a707ce031e5f5d4b3b234fb67261a`／`v0.13.1`。按[整改方案](UI_整改方案.md)完成R0–R2，R3/R4留后续0.13.2。正式PG18.6 CI244/244、49JS及四项容器门禁通过；本机12件交付、11摘要、5份原字节附件和双TAR三镜像／六config通过，公开匿名元数据与10非TAR下载也已验证。实际标识与下载边界集中见[版本说明](CHANGELOG.md)，不借用旧版结果。
 
 本轮缓存与专用PG18.4位于`artifacts/cache/0.13.1/`，54951实例已核对remaining=0并fast停止，不接业务库或NAS。无新迁移或备份格式，继续schema7；更新前备份并保留原runtime/、https/和UID/GID。main、32个旧标签及冻结附件保持，后补文档不重打产物；未自动升级群晖，实体手机、USB、缩放及其他浏览器未验。下方源码验收与旧发布段落保留各自历史范围。
