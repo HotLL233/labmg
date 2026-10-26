@@ -6,7 +6,7 @@ version: '3.8'
 
 services:
   labos-init:
-    image: "labos:0.13.1"
+    image: "labos:0.14.0"
     pull_policy: never
     user: "0:0"
     restart: "no"
@@ -48,7 +48,7 @@ services:
         max-file: "3"
 
   labos:
-    image: "labos:0.13.1"
+    image: "labos:0.14.0"
     pull_policy: never
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:

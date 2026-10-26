@@ -15,7 +15,7 @@ class Element {
   constructor(tag = 'div', attrs = {}) {
     this.tagName = tag; this.attrs = attrs; this.children = []; this.style = {}; this.dataset = {};
     this._html = ''; this._text = ''; this.open = false; this.disabled = 'disabled' in attrs;
-    this.hidden = 'hidden' in attrs; this.checked = 'checked' in attrs;
+    this.hidden = 'hidden' in attrs; this.checked = 'checked' in attrs; this.scrollLeft = 0;
     this.classes = new Set((attrs.class || '').split(/\s+/));
     this.classList = {
       add: key => this.classes.add(key), remove: key => this.classes.delete(key),
@@ -61,6 +61,10 @@ class Element {
   append(child) { return this.appendChild(child); }
   remove() { if(this.parent)this.parent.children.splice(this.parent.children.indexOf(this),1); }
   contains(node) { return node===this||this.children.some(child=>child.contains(node)); }
+  closest(selector) {
+    for (let node=this;node;node=node.parent) if(node.parent?.querySelectorAll(selector).includes(node))return node;
+    return null;
+  }
   addEventListener(type, handler) {
     const handlers=(this.eventHandlers ||= {})[type] ||= [];handlers.push(handler);
     (this.listeners ||= {})[type]=event=>{
@@ -189,7 +193,10 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     if (url.pathname === '/api/permissions') return response(state.permissionData || { catalog: [], roles: [{ role: state.auth.user.role, permissions: state.auth.user.permissions }], roleNames: {}, sections: {} });
     if (url.pathname === '/api/users') return response([{ id: 1, display_name: "O'Brien <img src=x onerror=alert(1)>", username: 'fixture', role: state.auth.user.role }]);
     if (url.pathname === '/api/materials/meta') return response({ capabilities: state.materialCapabilities, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: state.materialOpeningClosed });
-    if (url.pathname === '/api/materials/requests') return response({ items: state.materialRequests, total: state.materialRequests.length, page: 1, pageSize: 50 });
+    if (url.pathname === '/api/materials/requests') {
+      const entries = state.materialRequests.map(row => ({ ...row, ...state.materialDetails[row.id] })).filter(row => !url.searchParams.get('status') || row.status === url.searchParams.get('status'));
+      return response({ items: entries, total: entries.length, page: Number(url.searchParams.get('page')) || 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 });
+    }
     if (/^\/api\/materials\/requests\/\d+$/.test(url.pathname)) return response(state.materialDetails[Number(url.pathname.split('/').at(-1))]);
     if (url.pathname === '/api/materials/acceptance') return response({ items: state.materialAcceptance, total: state.materialAcceptance.length, page: 1, pageSize: 50 });
     if (['/api/materials/categories', '/api/materials/regions', '/api/materials/catalog', '/api/materials/storage-places', '/api/materials/stock', '/api/materials/stock/manufacturers', '/api/materials/stock/batches', '/api/materials/stock/units', '/api/materials/stock/movements', '/api/materials/receipts', '/api/materials/issues', '/api/materials/openings', '/api/materials/numbering-rules'].includes(url.pathname)) {
@@ -386,7 +393,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['workspace.js', 'app.js', 'material-scan.js', 'material-labels.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['workspace.js', 'app.js', 'material-scan.js', 'material-labels.js', 'material-original.js', 'material-acceptance.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -777,10 +784,18 @@ test('unlinked request items remain neutral and authorized users complete their 
   await click(app.$('[data-mw=cancel]'));
   Object.assign(request, { status: 'submitted', revision: 1, canSubmit: false, canAddItem: false }); app.state.materialAcceptance = [free, bound];
   await click({ dataset: { mw: 'page', page: 'acceptance' } });
-  for (const action of ['receive', 'close-item']) {
+  for (const action of ['wf-receive-one', 'close-item']) {
     const buttons = app.document.querySelectorAll('[data-mw='+action+']'); assert.equal(buttons.length, 2); assert.equal(buttons[0].disabled, false); assert.equal(buttons[1].disabled, false);
-    await click(buttons[0]); assert.equal(app.$('#mw-dialog').open, true); assert.ok(app.$('#mw-fields [name=catalogId]'));
-    assert.equal(app.$('#mw-receipt-catalog').hidden, true); await click(app.$('[data-mw=cancel]'));
+    if (action === 'wf-receive-one') {
+      await click(app.$('[data-mw=wf-adjust]'));
+      assert.ok(acceptanceField(app, 'catalogId'));
+      await click(buttons[0]);
+      assert.equal(app.$('#mw-dialog').open, false);
+      assert.match(app.$('#mw-order-errors').textContent, /实付总额/);
+    } else {
+      await click(buttons[0]); assert.equal(app.$('#mw-dialog').open, true); assert.ok(app.$('#mw-fields [name=catalogId]'));
+      assert.equal(app.$('#mw-receipt-catalog').hidden, true); await click(app.$('[data-mw=cancel]'));
+    }
   }
   assert.equal(app.requests.some(entry => entry.method === 'POST' || entry.method === 'PATCH'), false);
 });
@@ -801,7 +816,7 @@ async function materialApp(manager = true) {
       return dispatch(app.$('[data-setting='+(node.includes('numbering')?'numbering':'places')+']'));
     }
     if(node==='[data-mw=category-profile]'&&!app.$(node)){await dispatch(app.$('[data-page=settings]'));await dispatch(app.$('[data-setting=categories]'));}
-    if(node==='[data-mw=label-template]'&&!app.$(node))await dispatch(app.$('[data-page=settings]'));
+    if(node==='[data-mw=label-template]'&&!app.$(node))await dispatch(app.$('[data-page=catalog]'));
     if(node==='[data-mw=batches]'&&app.$('[data-mw=stock-detail]')){
       for(let count=0;app.$('#mw-view')?.open&&count<8;count++)await dispatch(app.$('#mw-view [data-mw=close-view]'));
       await dispatch(app.$('[data-mw=stock-detail]'));
@@ -814,6 +829,19 @@ async function materialApp(manager = true) {
   return { app, row, item, request, click, fill, submit };
 }
 
+function acceptanceField(app, name, itemId = 11) {
+  return app.document.querySelectorAll('[data-wf-field=' + name + ']').find(node => String(node.dataset.wfItem) === String(itemId));
+}
+
+async function fillAcceptance(app, values, itemId = 11) {
+  for (const [name, value] of Object.entries(values)) {
+    const target = acceptanceField(app, name, itemId);
+    assert.ok(target, 'visible workflow field: ' + name);
+    target.value = value;
+    await app.document.listeners.input({ target });
+  }
+}
+
 test('material tabs start at the first entry, reveal only explicit tab clicks and retain manual scrolling across reloads', async () => {
   const { app, click } = await materialApp(false);
   const host=app.$('#page'),html=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
@@ -822,24 +850,26 @@ test('material tabs start at the first entry, reveal only explicit tab clicks an
     set(value){
       html.set.call(this,value);
       for(const nav of this.querySelectorAll('.mw-nav,.mw-subnav')){
-        const buttons=nav.querySelectorAll('button');nav.scrollLeft=0;nav.scrollWidth=buttons.length*90;nav.clientWidth=270;
+        const buttons=nav.querySelectorAll('button');nav.scrollLeft=0;nav.scrollWidth=buttons.length*90;nav.clientWidth=180;
         nav.getBoundingClientRect=()=>({left:0,right:nav.clientWidth});
         buttons.forEach((button,index)=>{button.getBoundingClientRect=()=>({left:index*90-nav.scrollLeft,right:(index+1)*90-nav.scrollLeft});});
       }
     }
   });
-  await click('[data-page=settings]');
-  assert.equal(app.$('.mw-nav').scrollLeft,360,'clicking a later primary tab reveals it after both DOM replacements');
+  await click('[data-page=inventory]');
+  assert.equal(app.$('.mw-nav').scrollLeft,90,'clicking the third business entry reveals it after both DOM replacements');
   assert.equal(app.$('.mw-nav').dataset.overflow,'true');
+  await click('[data-page=catalog]');await click('[data-page=settings]');
   await click('[data-setting=numbering]');
-  assert.equal(app.$('.mw-subnav').scrollLeft,90,'explicit secondary clicks reveal their own selected tab');
-  assert.equal(app.$('.mw-nav').scrollLeft,360,'secondary navigation preserves the primary navigation position');
+  const settingsNav=()=>app.document.querySelectorAll('.mw-subnav').find(node=>node.getAttribute('aria-label')==='基础设置分区');
+  assert.equal(settingsNav().scrollLeft,180,'explicit secondary clicks reveal their own selected tab');
+  assert.equal(app.$('.mw-nav').scrollLeft,90,'secondary navigation preserves the primary navigation position');
   await app.run("go('dashboard')");await app.run("go('materials')");
   assert.equal(app.$('.mw-nav').scrollLeft,0,'reentering the module does not scroll to its remembered late selected tab');
   assert.equal(app.$('.mw-subnav').scrollLeft,0,'the first render of a remembered secondary tab also starts at the beginning');
   assert.equal(app.$('.mw-nav').dataset.overflow,'true');
   app.$('.mw-nav').scrollLeft=25;app.$('.mw-subnav').scrollLeft=10;
-  await click('[data-mw=refresh]');
+  await click({dataset:{mw:'refresh'}});
   assert.equal(app.$('.mw-nav').scrollLeft,25,'refresh preserves manual scrolling without forcing the selected tab into view');
   assert.equal(app.$('.mw-subnav').scrollLeft,10);
   for(const nav of app.document.querySelectorAll('.mw-nav,.mw-subnav'))nav.clientWidth=800;
@@ -847,11 +877,13 @@ test('material tabs start at the first entry, reveal only explicit tab clicks an
   assert.equal(app.$('.mw-nav').dataset.overflow,'false','the existing resize listener recomputes overflow');
   assert.equal(app.$('.mw-subnav').dataset.overflow,'false');
   assert.equal(app.$('.mw-nav').scrollLeft,25,'resize does not move the navigation');
-  await click('[data-page=acceptance]');await click('[data-tab=events]');
-  assert.equal(app.$('.mw-subnav').getAttribute('aria-label'),'验收分区');
+  await click('[data-page=acceptance]');
+  assert.equal(app.$('.mw-subnav'),null,'without a submitted order the workspace has no per-order navigation');
+  app.state.materialDetails[101].status='submitted';await click({dataset:{mw:'refresh'}});await click({dataset:{mw:'wf-mode',mode:'events'}});
+  assert.equal(app.$('.mw-subnav').getAttribute('aria-label'),'本单验收分区');
   assert.equal(app.$('.mw-subnav').scrollLeft,0,'a different secondary navigation does not inherit the old settings scroll offset');
-  app.state.materialResponse=async({url})=>url.pathname==='/api/materials/acceptance'?{status:500,body:{error:'合成加载失败'}}:undefined;
-  app.$('.mw-nav').scrollLeft=15;await click('[data-tab=progress]');
+  app.state.materialResponse=async({url})=>url.pathname==='/api/materials/requests'?{status:500,body:{error:'合成加载失败'}}:undefined;
+  app.$('.mw-nav').scrollLeft=15;await click({dataset:{mw:'refresh'}});
   assert.match(app.$('#page').textContent,/合成加载失败/);
   assert.equal(app.$('.mw-nav').scrollLeft,15,'a failed load still restores navigation and keeps its overflow hint');
   assert.equal(app.$('.mw-nav').dataset.overflow,'true');
@@ -1015,8 +1047,8 @@ function materialScanner(app, scan, createQr = async () => new Blob(['synthetic 
 const stockQr = row => 'LABOS-STOCK:1:' + JSON.stringify({ catalogId: row.catalogId, catalogCode: row.code, regionId: row.regionId, warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiryDate });
 
 test('scanned packaging codes retain leading zeros and require selecting a current submitted acceptance row before accounting', async () => {
-  const { app, row, item, request, click, fill, submit } = await materialApp();
-  request.status = 'submitted'; request.version = 3; item.version = 4;
+  const { app, row, item, request, click } = await materialApp();
+  request.status = 'submitted'; request.version = 3; item.version = 4; item.manufacturer='申报厂家';
   const candidate = { ...item, requestNo: request.no };
   const scanner = materialScanner(app, async () => '001AbC'); let receipt;
   app.state.materialResponse = ({ url, method, body }) => {
@@ -1026,7 +1058,7 @@ test('scanned packaging codes retain leading zeros and require selecting a curre
       assert.equal(url.searchParams.has('warehouse'), false);
       return { body: { items: [candidate], total: 51, page: Number(url.searchParams.get('page')), pageSize: 50 } };
     }
-    if (url.pathname === '/api/materials/receipts' && method === 'POST') { receipt = body; return { body: { request } }; }
+    if (url.pathname === '/api/materials/requests/101/receipts/batch' && method === 'POST') { receipt = body; return { body: { request, arrivalId: 71, receipts: [] } }; }
   };
   await click('[data-mw=scan-receive]'); assert.equal(scanner.scans, 1);
   assert.match(app.$('#mw-view-body').textContent, /外包装条码只能定位物资/);
@@ -1036,14 +1068,14 @@ test('scanned packaging codes retain leading zeros and require selecting a curre
   assert.equal(app.requests.at(-1).url.searchParams.get('page'), '2');
   await click(stale); assert.match(app.$('#mw-status').textContent, /扫码候选已变化/);
   await click('[data-mw=scan-receive-item]');
-  assert.equal(app.$('#mw-fields [name=quantity]').value, ''); assert.equal(app.$('#mw-fields [name=amount]').value, '');
-  fill({ quantity: '1', amount: '2.50' }); await submit();
-  assert.equal(receipt.requestVersion, 3); assert.equal(receipt.version, 4); assert.equal(receipt.itemId, 11);
-  assert.equal(receipt.quantity, '1'); assert.equal(receipt.amount, '2.50'); assert.ok(receipt.requestIdempotencyKey);
+  assert.equal(app.$('#mw-dialog').open,false);assert.equal(acceptanceField(app,'quantity').value, '10.000'); assert.equal(acceptanceField(app,'amount').value, '');
+  await fillAcceptance(app,{quantity:'1',amount:'2.50'});await click('[data-mw=wf-receive-one]');
+  assert.equal(receipt.version, 3); assert.equal(receipt.items[0].itemVersion, 4); assert.equal(receipt.items[0].itemId, 11);
+  assert.equal(receipt.items[0].quantity, '1'); assert.equal(receipt.items[0].amount, '2.50'); assert.ok(receipt.requestIdempotencyKey);
 });
 
 test('internal batch scans narrow acceptance by warehouse and region and only prefill editable batch identity', async () => {
-  const { app, row, item, request, click, fill, submit } = await materialApp(); request.status = 'submitted';
+  const { app, row, item, request, click } = await materialApp(); request.status = 'submitted';item.manufacturer='申报厂家';
   const batch = { ...row, batch: 'LOT"<&', expiryDate: '2028-05-06' }; batch.qrPayload = stockQr(batch);
   materialScanner(app, async () => batch.qrPayload); let receipt;
   app.state.materialResponse = ({ url, method, body }) => {
@@ -1053,15 +1085,15 @@ test('internal batch scans narrow acceptance by warehouse and region and only pr
       assert.equal(url.searchParams.has('batch'), false);
       return { body: { items: [{ ...item, requestNo: request.no }], total: 1, page: 1, pageSize: 50 } };
     }
-    if (url.pathname === '/api/materials/receipts' && method === 'POST') { receipt = body; return { body: { request } }; }
+    if (url.pathname === '/api/materials/requests/101/receipts/batch' && method === 'POST') { receipt = body.items[0]; return { body: { request,arrivalId:72,receipts:[] } }; }
   };
   await click('[data-mw=scan-receive]'); await click('[data-mw=scan-receive-item]');
-  assert.equal(app.$('#mw-fields [name=batch]').value, 'LOT"<&'); assert.equal(app.$('#mw-fields [name=expiryDate]').value, '2028-05-06');
-  assert.match(app.$('#mw-intro').textContent, /以本次实际到货为准/);
-  fill({ batch: '核对后的到货批次', expiryDate: '2028-06-01', quantity: '1', amount: '1' }); await click('[data-mw=position-read]'); await submit();
+  assert.equal(acceptanceField(app,'batch').value, 'LOT"<&'); assert.equal(acceptanceField(app,'expiryDate').value, '2028-05-06');
+  assert.equal(app.$('#mw-dialog').open,false);
+  await fillAcceptance(app,{ batch: '核对后的到货批次', expiryDate: '2028-06-01', quantity: '1', amount: '1' }); await click('[data-mw=wf-position]'); await click('[data-mw=wf-receive-one]');
   assert.equal(receipt.batch, '核对后的到货批次'); assert.equal(receipt.expiryDate, '2028-06-01');
   await click('[data-mw=scan-receive]'); item.remainingQtyM = 0; await click('[data-mw=scan-receive-item]');
-  assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /已无待验数量/);
+  assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /无待验数量/);
 });
 
 test('ordinary packaging scans choose a full stock batch and still submit an application without money or direct issuance', async () => {
@@ -1345,21 +1377,20 @@ test('system QR labels reuse scoped rows and cancel after navigation without Bar
 });
 
 test('acceptance exposes storage location, guards the selected batch version and preserves input after a conflict',async()=>{
-  const {app,row,item,request,click,fill,submit}=await materialApp();request.status='submitted';row.location='试剂柜 A';row.locationVersion=3;let receipt,writes=0;
-  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/receipts'&&method==='POST'){writes++;if(writes===1)return {body:{error:'位置版本已变化'},status:409};receipt=body;return {body:{request}};}};
-  await click({dataset:{mw:'page',page:'acceptance'}});app.state.materialAcceptance=[item];await click({dataset:{mw:'refresh'}});await click('[data-mw=receive]');
-  assert.equal(app.$('#mw-fields [name=location]').value,'试剂柜 A');fill({quantity:'1',amount:'2.50',location:'试剂柜 B'});await submit();
-  assert.equal(app.$('#mw-fields [name=location]').value,'试剂柜 B');assert.equal(app.$('#mw-dialog [data-mw=reload-form]').hidden,false);
-  row.location='他人更新的柜';row.locationVersion=4;await click('[data-mw=reload-form]');await submit();
+  const {app,row,item,request,click}=await materialApp();request.status='submitted';item.manufacturer='申报厂家';row.location='试剂柜 A';row.locationVersion=3;let receipt,writes=0;
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){writes++;if(writes===1)return {body:{error:'位置版本已变化'},status:409};receipt=body.items[0];return {body:{request,arrivalId:71,receipts:[]}};}};
+  await click({dataset:{mw:'page',page:'acceptance'}});await click('[data-mw=wf-position]');
+  assert.equal(acceptanceField(app,'location').value,'试剂柜 A');await fillAcceptance(app,{quantity:'1',amount:'2.50',location:'试剂柜 B'});await click('[data-mw=wf-receive-one]');
+  assert.equal(acceptanceField(app,'location').value,'试剂柜 B');assert.ok(app.$('[data-mw=wf-reload]'));
+  row.location='他人更新的柜';row.locationVersion=4;await click('[data-mw=wf-reload]');await click('[data-mw=wf-receive-one]');
   assert.equal(receipt.location,'试剂柜 B');assert.equal(receipt.locationVersion,4);assert.equal(receipt.batch,'');assert.equal(receipt.expiryDate,'');
-  await click('[data-mw=receive]');fill({quantity:'1',amount:'2',batch:'新到货批次',location:'柜 C'});await submit();assert.match(app.$('#mw-error').textContent,/读取本批当前位置/);assert.equal(writes,2);
-  await click('[data-mw=position-read]');await submit();assert.equal(receipt.batch,'新到货批次');assert.equal(receipt.locationVersion,0);
+  await fillAcceptance(app,{quantity:'1',amount:'2',batch:'新到货批次',location:'柜 C'});await click('[data-mw=wf-receive-one]');assert.equal(writes,3);
+  assert.equal(receipt.batch,'新到货批次');assert.equal(receipt.locationVersion,0,'quick acceptance reads the new batch version automatically');
 });
 
-test('stock row application selects a precise real batch before creating a request',async()=>{
+test('stock row application selects the displayed real batch before creating a request',async()=>{
   const {app,row,click}=await materialApp(false);app.state.materialLists['/stock/batches']=[{...row,batch:'批次甲',location:'柜 A'},{...row,batch:'批次乙',location:'柜 B'}];
-  await click({dataset:{mw:'page',page:'inventory'}});assert.ok(app.$('[data-mw=stock-issue]'));await click('[data-mw=stock-issue]');assert.equal(app.$('#mw-dialog').open,false);assert.equal(app.$('#mw-view-body').querySelectorAll('[data-mw=issue-create]').length,2);
-  const actions=app.$('#mw-view-body').querySelectorAll('[data-mw=issue-create]');await click(actions[1]);assert.match(app.$('#mw-intro').textContent,/批次乙/);assert.match(app.$('#mw-intro').textContent,/柜 B/);
+  await click({dataset:{mw:'page',page:'inventory'}});const actions=app.document.querySelectorAll('[data-mw=stock-issue]');assert.equal(actions.length,2);await click(actions[1]);assert.equal(app.$('#mw-dialog').open,true);assert.match(app.$('#mw-intro').textContent,/批次乙/);assert.match(app.$('#mw-intro').textContent,/柜 B/);
 });
 
 test('opening documents save multiple lines, import and export Excel, confirm posting once and retain generated labels',async()=>{
@@ -1389,7 +1420,7 @@ test('opening documents save multiple lines, import and export Excel, confirm po
 test('closed openings stay visible and read-only while stock supplements require a reason and adjustment permission',async()=>{
   const {app,click,fill,submit}=await materialApp();app.state.materialOpeningClosed=true;const doc={id:82,no:'QC-82',kind:'opening',title:'闭账前草稿',date:'2026-10-19',version:1,status:'draft',items:[]};let created;
   app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/openings/82')return {body:doc};if(url.pathname==='/api/materials/openings'&&method==='POST'){created=body;return {body:{...doc,...body,id:83,no:'BL-83',kind:'supplement'}};}if(url.pathname==='/api/materials/openings/83')return {body:{...doc,...created,id:83,no:'BL-83',kind:'supplement'}};};
-  await click({dataset:{mw:'refresh'}});assert.ok(app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));await click({dataset:{mw:'page',page:'openings'}});assert.match(app.$('[data-mw=new-opening]').textContent,/存量补录/);assert.ok(app.$('[data-mw=opening-legacy]'));
+  await click({dataset:{mw:'refresh'}});await click({dataset:{mw:'page',page:'inventory'}});assert.ok(app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));await click({dataset:{mw:'page',page:'openings'}});assert.match(app.$('[data-mw=new-opening]').textContent,/存量补录/);assert.ok(app.$('[data-mw=opening-legacy]'));
   await click({dataset:{mw:'opening-detail',id:'82'}});assert.equal(app.$('[data-mw=opening-add-item]'),null);assert.ok(app.$('[data-mw=opening-export]'));assert.match(app.$('#page').textContent,/原期初单据保持只读/);
   await click('[data-mw=opening-back]');await click('[data-mw=new-opening]');fill({title:'已有账本补录',date:'2026-10-19'});await submit();assert.equal(created,undefined);assert.match(app.$('#mw-error').textContent,/补录原因/);fill({reason:'盘点发现遗漏登记的存量'});await submit();assert.equal(created.reason,'盘点发现遗漏登记的存量');assert.match(app.$('#page').textContent,/补录原因/);
   const ordinary=await materialApp(false);ordinary.app.state.materialOpeningClosed=true;await ordinary.click({dataset:{mw:'refresh'}});await ordinary.click({dataset:{mw:'page',page:'openings'}});assert.ok(ordinary.app.document.querySelectorAll('[data-mw=page]').find(node=>node.dataset.page==='openings'));assert.equal(ordinary.app.$('[data-mw=new-opening]'),null);
@@ -1870,11 +1901,91 @@ test('catalog server pagination keeps a stable capacity across long and short pa
 });
 
 test('acceptance progress and receipt events stay separate and readonly amounts remain redacted in event details',async()=>{
-  const {app,row,item,click}=await materialApp(false);app.state.materialAcceptance=[item];
+  const {app,row,request,click}=await materialApp(false);request.status='submitted';
   app.state.materialLists['/receipts']=[{id:91,requestId:101,itemId:11,type:'acceptance',requestRevision:1,date:'2026-10-23',snapshot:row,qtyM:1000,amountCents:987654,actorName:'合成办理人'}];
-  await click({dataset:{mw:'page',page:'acceptance'}});assert.ok(app.$('[data-mw=events]'));assert.equal(app.$('[data-mw=receipt-detail]'),null);
-  await click({dataset:{mw:'acceptance-tab',tab:'events'}});assert.ok(app.$('[data-mw=receipt-detail]'));assert.equal(app.$('#mw-filters'),null);
+  await click({dataset:{mw:'page',page:'acceptance'}});assert.equal(app.$('[data-mw=wf-event-detail]'),null);assert.equal(acceptanceField(app,'amount').disabled,true);
+  await click({dataset:{mw:'wf-mode',mode:'events'}});assert.ok(app.$('[data-mw=wf-event-detail]'));
   assert.doesNotMatch(app.$('#page').textContent,/9,876\.54/);assert.match(app.$('#page').textContent,/无权限/);
-  await click('[data-mw=receipt-detail]');assert.match(app.$('#mw-view-body').textContent,/本批含税总额无权限/);assert.equal(app.$('#mw-view [data-mw=reverse]'),null);
-  await click('[data-mw=close-view]');await click({dataset:{mw:'acceptance-tab',tab:'progress'}});assert.ok(app.$('#mw-filters'));assert.equal(app.$('[data-mw=receipt-detail]'),null);
+  await click('[data-mw=wf-event-detail]');assert.equal(app.$('[data-mw=reverse]'),null);assert.equal(app.$('[data-mw=receipt-files]'),null);
+  await click({dataset:{mw:'wf-mode',mode:'receive'}});assert.ok(app.$('#mw-filters'));assert.equal(app.$('[data-mw=wf-event-detail]'),null);
+});
+
+test('acceptance ignores an old batch-position read after the editable batch identity changes',async()=>{
+  const {app,row,item,request,click}=await materialApp();request.status='submitted';item.manufacturer='厂家甲';
+  let release;
+  app.state.materialResponse=async({url})=>{
+    if(url.pathname!=='/api/materials/stock/batches')return;
+    const batch=url.searchParams.get('batch');
+    if(batch==='旧批次')return new Promise(resolve=>{release=()=>resolve({body:{items:[{...row,batch,location:'旧批次柜',locationVersion:7}]}});});
+    if(batch==='新批次')return {body:{items:[{...row,batch,location:'新批次柜',locationVersion:8}]}};
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{batch:'旧批次'});
+  const pending=click('[data-mw=wf-position]');await new Promise(setImmediate);assert.equal(typeof release,'function');
+  await fillAcceptance(app,{batch:'新批次'});release();await pending;
+  assert.equal(acceptanceField(app,'location').value,'','late old-batch location must not enter the new-batch draft');
+  await click('[data-mw=wf-position]');assert.equal(acceptanceField(app,'location').value,'新批次柜');
+});
+
+test('acceptance search ignores older queries and changed catalog selections',async()=>{
+  const {app,item,request,click}=await materialApp();request.status='submitted';item.catalogId=null;
+  const responses=new Map();app.state.materialResponse=({url})=>{
+    if(url.pathname==='/api/materials/catalog'&&url.searchParams.has('q'))return new Promise(resolve=>responses.set(url.searchParams.get('q'),resolve));
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});await click('[data-mw=wf-adjust]');await fillAcceptance(app,{catalogQuery:'旧查询'});
+  const older=click('[data-mw=wf-search]');await new Promise(setImmediate);await fillAcceptance(app,{catalogQuery:'新查询'});
+  const newer=click('[data-mw=wf-search]');await new Promise(setImmediate);
+  responses.get('新查询')({body:{items:[{id:7,name:'新结果',spec:'规格',unit:'件',active:true}]}});await newer;
+  responses.get('旧查询')({body:{items:[{id:8,name:'旧结果',spec:'规格',unit:'件',active:true}]}});await older;
+  assert.match(acceptanceField(app,'catalogId').textContent,/新结果/);assert.doesNotMatch(acceptanceField(app,'catalogId').textContent,/旧结果/);
+  await fillAcceptance(app,{catalogQuery:'选择前查询'});const selection=click('[data-mw=wf-search]');await new Promise(setImmediate);
+  await fillAcceptance(app,{catalogId:'new'});responses.get('选择前查询')({body:{items:[{id:9,name:'迟到结果',spec:'规格',unit:'件',active:true}]}});await selection;
+  assert.equal(acceptanceField(app,'catalogId').value,'new');assert.doesNotMatch(acceptanceField(app,'catalogId').textContent,/迟到结果/);
+});
+
+test('order receipt retries retain the exact body and key, block switching and refresh the order summary only after confirmation',async()=>{
+  const {app,item,request,click}=await materialApp();request.status='submitted';request.revision=1;request.progress={pendingItems:1};item.manufacturer='厂家甲';
+  let release;const writes=[];
+  app.state.materialResponse=async({url,method,body})=>{
+    if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){
+      writes.push(body);if(writes.length===1){await new Promise(resolve=>{release=resolve;});throw Error('synthetic response loss');}
+      item.remainingQtyM=0;item.acceptedQtyM=item.qtyM;item.receiptStatus='done';item.version++;request.version++;request.progress={pendingItems:0};
+      return {body:{request,arrivalId:71,receipts:[{id:91,unitCount:10}]}};
+    }
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'20'});
+  const pending=click('[data-mw=wf-receive-all]');await new Promise(setImmediate);await click('[data-mw=wf-receive-all]');assert.equal(writes.length,1);
+  await click({dataset:{mw:'page',page:'inventory'}});assert.ok(app.$('#mw-order-workspace'));assert.equal(app.context.MaterialWorkflow.hasPending(),true);
+  release();await pending;assert.equal(acceptanceField(app,'amount').disabled,true);await fillAcceptance(app,{amount:'999'});
+  await click('[data-mw=wf-retry]');assert.deepEqual(writes[1],writes[0]);assert.equal(writes[1].items[0].amount,'20');
+  assert.equal(app.context.MaterialWorkflow.hasPending(),false);assert.match(app.$('#mw-order-picker').textContent,/待处理 0 项/);
+  assert.equal(app.$('[data-mw=wf-receive-all]').disabled,true);assert.match(app.$('#page').textContent,/到货 #71/);
+});
+
+test('arrival document reload locks switching and rejects a response belonging to another delivery',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  const arrivals=[{id:71,requestId:101,documentVersion:1,receipts:[]},{id:72,requestId:101,documentVersion:1,receipts:[]}];
+  let hold=false,release;
+  const docs=id=>({arrival:arrivals.find(row=>row.id===id),version:1,versions:[{id,version:1,files:[{id,name:'到货'+id+'.pdf',size:1,mimeType:'application/pdf'}]}]});
+  app.state.materialResponse=({url})=>{
+    if(url.pathname==='/api/materials/requests/101/arrivals')return {body:{items:arrivals,total:2,page:1,pageSize:20}};
+    if(url.pathname==='/api/materials/arrivals/71/documents')return hold?new Promise(resolve=>{release=resolve;}):{body:docs(71)};
+    if(url.pathname==='/api/materials/arrivals/72/documents')return {body:docs(72)};
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});await click({dataset:{mw:'wf-doc-open',arrival:'71'}});
+  assert.match(app.$('.mw-arrival-editor').textContent,/到货71.pdf/);hold=true;
+  const pending=click({dataset:{mw:'wf-doc-reload',arrival:'71'}});await new Promise(setImmediate);
+  await click({dataset:{mw:'wf-doc-open',arrival:'72'}});assert.equal(app.$('.mw-arrival-editor').dataset.arrival,'71');
+  assert.equal(app.context.MaterialWorkflow.hasPending(),true);release({body:docs(72)});await pending;
+  assert.equal(app.context.MaterialWorkflow.hasPending(),false);assert.match(app.$('.mw-arrival-editor').textContent,/到货71.pdf/);assert.doesNotMatch(app.$('.mw-arrival-editor').textContent,/到货72.pdf/);
+  await click({dataset:{mw:'wf-doc-open',arrival:'72'}});assert.equal(app.$('.mw-arrival-editor').dataset.arrival,'72');assert.match(app.$('.mw-arrival-editor').textContent,/到货72.pdf/);
+});
+
+test('keeping an acceptance draft permits navigation outside acceptance and restores the inputs on return',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'12.50'});
+  await click('[data-page=inventory]');assert.ok(app.$('[data-mw=wf-leave-keep]'));await click('[data-mw=wf-leave-keep]');
+  assert.ok(app.$('[data-mw=stock-issue]'),app.$('#page').textContent+' / '+app.$('#mw-status').textContent);await click('[data-page=catalog]');assert.match(app.$('#page').textContent,/物资信息库/);
+  await click('[data-page=requests]');assert.match(app.$('#page').textContent,/申报记录/);
+  await click('[data-page=acceptance]');assert.equal(acceptanceField(app,'amount').value,'12.50');
+  assert.equal(app.$('.mw-order-back').getAttribute('href'),'#mw-order-picker');
 });

@@ -112,6 +112,17 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     await page.locator(`.nav [data-nav="${target}"]`).click();
     await page.waitForFunction(target => current === target && !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'), target);
   };
+  const navigateMaterial = async target => {
+    if (target === 'catalog') await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+    else if (target === 'settings') {
+      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+      await page.locator('.mw-subnav [data-page="settings"]').click();
+    } else if (['issues', 'openings'].includes(target)) {
+      if (!(await page.locator(`.mw-subnav [data-page="${target}"]`).count())) await page.locator('.mw-nav [data-page="inventory"]').click();
+      await page.locator(`.mw-subnav [data-page="${target}"]`).click();
+    } else await page.locator(`.mw-nav [data-page="${target}"]`).click();
+    await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
+  };
   const checkShell = async (label, clickedTabs = true) => {
     check((await page.locator('#app-version').textContent()).includes(version), label + ': backend application version is visible');
     check(await visibleInViewport(page.locator('#app-version')), label + ': version is in the viewport');
@@ -202,8 +213,14 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await navigate('materials');
       await checkShell(`${size.width} materials`, false);
       for (const materialPage of ['catalog', 'requests', 'acceptance', 'inventory', 'issues', 'openings']) {
-        await page.locator(`.mw-nav [data-page="${materialPage}"]`).click();
-        await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
+        await navigateMaterial(materialPage);
+        if (materialPage === 'acceptance') {
+          // The seeded request is fully received; exercise its full historical order, not an empty open-order list.
+          await page.locator('#mw-filters [name="status"]').selectOption('done');
+          await page.locator('#mw-filters [type="submit"]').click();
+          await page.locator('#mw-order-workspace [data-wf-row]').first().waitFor();
+          check(await page.locator('#mw-order-workspace [data-wf-row]').count() === 2, `${size.width}: acceptance retains the complete real request detail`);
+        }
         await checkShell(`${size.width} ${materialPage}`);
         await checkCards(`${size.width} ${materialPage}`);
         if (['acceptance', 'inventory', 'issues'].includes(materialPage)) await screenshot(`${size.width}-${materialPage}`);
@@ -224,7 +241,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           if (await pager.count()) check(await visibleInViewport(pager), `${size.width} ${materialPage}: record pagination is on the first screen`);
         }
       }
-      await page.locator('.mw-nav [data-page="catalog"]').click();
+      await navigateMaterial('catalog');
       await page.locator('#page [data-mw="catalog-edit"]').first().waitFor();
       const firstName = page.locator('#page .table tbody tr').first().locator('td').first();
       check((await firstName.locator('strong').textContent()).includes('布局物资'), `${size.width}: material name is the primary field`);
@@ -308,7 +325,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await page.locator('#mw-dialog').waitFor({ state: 'hidden' });
       check((await page.locator('#mw-filters [name="q"]').inputValue()) === catalogContext.q && (await page.locator('#page .mw-pagebar').textContent()) === catalogContext.pagination,
         `${size.width}: returning from edit preserves the catalog filter and page`);
-      await page.locator('.mw-nav [data-page="settings"]').click();
+      await navigateMaterial('settings');
       for (const setting of ['categories', 'regions', 'places', 'numbering']) {
         await page.locator(`#page [data-mw="setting"][data-setting="${setting}"]`).click();
         await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
@@ -387,7 +404,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     }
     await page.setViewportSize({ width: 1366, height: 480 });
     await navigate('materials');
-    await page.locator('.mw-nav [data-page="catalog"]').click();
+    await navigateMaterial('catalog');
     await page.locator('#page [data-mw="catalog-edit"]').first().click();
     await page.locator('#mw-save').scrollIntoViewIfNeeded();
     check(await page.locator('#mw-save').isVisible(), 'low-height edit save remains reachable');

@@ -64,8 +64,8 @@ function field(n,l,type='text',opts=[],v=''){
 }
 function shell(){document.body.insertAdjacentHTML('afterbegin',`<div class="layout"><aside id="sidebar" class="side" aria-label="主导航"><button type="button" id="drawer-close" class="drawer-close" aria-label="关闭菜单">关闭菜单</button><div class="brand"><i>L</i><div><strong>LabOS</strong><small>实验室综合管理系统</small></div></div><nav class="nav"></nav><div class="side-foot"><span class="online">●</span>本地服务运行中</div></aside><button type="button" class="scrim" tabindex="-1" aria-label="关闭菜单"></button><main><header><div class="header-heading"><button type="button" id="menu-toggle" class="menu-toggle ghost" aria-controls="sidebar" aria-expanded="false">菜单</button><div><h1 id="title">工作台</h1><p id="subtitle">${esc(menuDef('dashboard')[2])}</p></div></div><div class="session"><span id="app-version">${appVersion?'v'+esc(appVersion):'版本不可用'}</span><span id="session-user">${esc(currentUser.display_name||currentUser.username||currentUser.role||'当前账号')}</span><button id="logout" class="ws-logout">退出登录</button></div></header><div class="page"><div class="header-tools actions"><input id="search" aria-label="搜索当前模块" placeholder="搜索名称、编号、负责人"><button id="add" class="primary">＋ 新建记录</button></div><section id="page"></section></div></main></div>`);const entries=navConfig.filter(x=>x.visible!==0&&canOpen(x.target)).sort((a,b)=>a.sort_order-b.sort_order||a.key.localeCompare(b.key));$('.nav').innerHTML=(entries.length?entries:Object.entries(M).filter(([key])=>canOpen(key)).map(([key,v])=>({key,label:v[0],icon:v[1],description:v[2],target:key,visible:1,sort_order:0}))).map(n=>`<button data-nav="${esc(n.target)}" class="${n.target==='dashboard'?'active':''}" aria-label="${esc(n.label)}" title="${esc(n.label)}${n.description?' · '+esc(n.description):''}"><span>${esc(n.icon)}</span><b>${esc(n.label)}</b></button>`).join('');setupDrawer();$('.nav').onclick=e=>{const n=e.target.closest('[data-nav]');if(n)go(n.dataset.nav)};$('#add').onclick=()=>openEditor();$('#logout').onclick=async()=>{if(!window.Workspace.guardLeave())return;try{await call('/api/auth/logout');location.reload()}catch(error){toast('退出失败：'+error.message)}};$('#search').oninput=()=>{clearTimeout(window.st);window.st=setTimeout(()=>load(),250)}}
 async function go(module){
-  if(!M[module]||!canOpen(module)){toast('没有权限查看该页面');return}
-  if(!window.Workspace.guardLeave())return;
+  if(!M[module]||!canOpen(module)){toast('没有权限查看该页面');return false}
+  if(!window.Workspace.guardLeave())return false;
   detailSequence++;selected=null;
   document.querySelectorAll('dialog').forEach(dialog=>{if(dialog.open&&dialog.classList.contains('ws-dialog'))window.Workspace.close(dialog,{force:true});});
   if(document.body.classList.contains('drawer-open'))setDrawer(false);
@@ -81,6 +81,7 @@ async function go(module){
   $('#page').innerHTML='<div class="empty">正在加载…</div>';
   applyPermissions();
   await load();
+  return true;
 }
 async function load(){
   const module=current,request=++loadSequence;
@@ -159,6 +160,7 @@ async function enter(user,version=appVersion){
   appVersion=typeof version==='string'?version:'';
   try{navConfig=await call('/api/ui-config/nav')}catch{navConfig=[]}
   shell();
+  if(await window.MaterialOriginal?.resume())return;
   const first=Object.keys(M).find(canOpen);
   if(first)await go(first);else{$('#page').innerHTML='<div class="empty">当前账号暂无可访问模块，请联系管理员。</div>';applyPermissions()}
 }

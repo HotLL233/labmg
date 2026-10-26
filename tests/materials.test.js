@@ -93,7 +93,11 @@ async function fixture(t) {
   const submit = async (order, actor) => (await request('POST', `/api/materials/requests/${order.id}/submit`, actor || await account('MATERIAL'), { requestVersion: order.version })).data;
   const receiptBody = (order, extra = {}, index = 0) => ({
     requestId: order.id, itemId: order.items[index].id, requestVersion: order.version, version: order.items[index].version,
-    requestIdempotencyKey: key(), quantity: '1', amount: '12.34', ...extra
+    requestIdempotencyKey: key(), quantity: '1', amount: '12.34',
+    manufacturer: extra.manufacturer ?? order.items[index].manufacturer ?? '',
+    manufacturerStatus: (extra.manufacturer ?? order.items[index].manufacturer) ? 'known' : 'unknown',
+    manufacturerReason: (extra.manufacturer ?? order.items[index].manufacturer) ? '' : '合成包装未标明厂家',
+    differenceReason: extra.manufacturer && order.items[index].manufacturer && extra.manufacturer !== order.items[index].manufacturer ? '合成厂家差异核对' : '', ...extra
   });
   const item = (seed, extra = {}) => ({ catalogId: seed.catalog.id, categoryId: seed.category.id, regionId: seed.region.id, warehouse: 'REAGENT', quantity: '10', purpose: 'HTTP fixture', ...extra });
   return { directory, runtime, db, request, account, customAccount, admin, get, dictionary, catalog, seed, add, order, submit, receiptBody, item };
@@ -109,7 +113,7 @@ function assertNoMoney(value) {
 }
 
 function previousMaterialFields(value) {
-  const result = structuredClone(value);
+  const result = previousArrivalFields(value);
   delete result.data.material_number_allocations; delete result.data.material_storage_places;
   for (const row of result.data.material_categories) { delete row.profile; delete row.version; }
   for (const row of result.data.material_catalog) { delete row.active; delete row.cas_number; delete row.purity; delete row.storage_conditions; delete row.sds_url; }
@@ -118,6 +122,14 @@ function previousMaterialFields(value) {
   for (const row of result.data.material_catalog) { delete row.remark; delete row.origin; delete row.merged_into; }
   for (const row of result.data.material_request_items) delete row.manufacturer;
   for (const row of [...result.data.material_receipts, ...result.data.material_stock_movements]) { delete row.manufacturer; delete row.note; }
+  return result;
+}
+
+function previousArrivalFields(value) {
+  const result = structuredClone(value);
+  delete result.data.material_arrivals; delete result.data.material_arrival_document_versions;
+  for (const row of result.data.material_receipts) for (const name of ['arrival_id', 'expected_manufacturer', 'manufacturer_status', 'manufacturer_reason', 'difference_reason']) delete row[name];
+  for (const row of result.data.material_attachments) { delete row.document_version_id; delete row.sha256; }
   return result;
 }
 
@@ -368,12 +380,12 @@ test('schema 6 backup round-trips catalog origin and remarks while schema 5 defa
   const received = (await f.request('POST', '/api/materials/receipts', s.material,
     f.receiptBody(order, { newCatalog: { name: '备份规范物资', spec: '10 g', unit: '盒', remark: '保留备注' } }), 201)).data;
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7);
+  assert.equal(backup.schemaVersion, 8);
   const legacy = previousMaterialFields(backup); legacy.schemaVersion = 5;
   for (const [payload, expectedOrigin, expectedRemark] of [[backup, 'receipt', '保留备注'], [legacy, 'manual', '']]) {
     const target = await fixture(t), material = await target.account('MATERIAL'); await target.account('TESTER');
     const malformed = structuredClone(payload);
-    if (payload.schemaVersion === 7) delete malformed.data.material_catalog[0].remark;
+    if (payload.schemaVersion === 8) delete malformed.data.material_catalog[0].remark;
     else malformed.data.material_catalog[0].origin = 'manual';
     await target.request('POST', '/api/materials/restore', target.admin, malformed, 400);
     await target.request('POST', '/api/materials/restore', target.admin, payload);
@@ -1404,7 +1416,7 @@ test('schema 6 backups restore issue sources, locations and user mapping; damage
   const cancelled = (await f.request('POST', '/api/materials/issues', ordinary, { ...applyBody, requestIdempotencyKey: key() }, 201)).data.issue;
   await f.request('POST', `/api/materials/issues/${cancelled.id}/cancel`, ordinary, { version: 1, reason: '备份取消', requestIdempotencyKey: key() }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
+  assert.equal(backup.schemaVersion, 8); assert.equal(backup.data.material_issues.length, 4); assert.equal(backup.data.material_stock_locations.length, 1);
   const target = await fixture(t);
   await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
@@ -1561,7 +1573,7 @@ test('schema 6 barcode backup maps creators and rejects damaged mappings while s
   const previous = legacyBackup((await f.request('GET', '/api/materials/backup', f.admin)).data, 2);
   const saved = (await f.request('POST', `/api/materials/catalog/${s.catalog.id}/barcodes`, s.material, { code: '0000Backup', reason: '备份映射' }, 201)).data.barcode;
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7); assert.equal(backup.data.material_barcodes.length, 1);
+  assert.equal(backup.schemaVersion, 8); assert.equal(backup.data.material_barcodes.length, 1);
   const target = await fixture(t); await target.account('TESTER'); const targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
   for (const change of [
@@ -1761,7 +1773,7 @@ test('schema 6 restores exact unit codes, lifecycle, rule and user mappings, rej
   await f.request('POST', `/api/materials/issues/${issue.id}/issue`, s.material, action, 201);
   await f.request('POST', '/api/materials/stock/adjustments', s.material, { ...identity, quantity: '1', amount: '0.34', direction: 'decrease', reason: '盘亏', requestIdempotencyKey: key(), unitIds: [opening.units[1].id] }, 201);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7); assert.equal(backup.data.material_stock_units.length, 3);
+  assert.equal(backup.schemaVersion, 8); assert.equal(backup.data.material_stock_units.length, 3);
   const target = await fixture(t); await target.account('FINANCE'); const targetOrdinary = await target.account('TESTER'), targetMaterial = await target.account('MATERIAL');
   assert.notEqual(targetMaterial.id, s.material.id);
   for (const change of [
@@ -2026,7 +2038,7 @@ test('schema 6 restores opening and supplement documents, exact labels and draft
   supplement = (await f.request('POST', `/api/materials/openings/${supplement.id}/post`, s.material,
     { version: supplement.version, requestIdempotencyKey: key() }, 201)).data.opening;
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7); assert.equal(backup.data.material_openings.length, 3);
+  assert.equal(backup.schemaVersion, 8); assert.equal(backup.data.material_openings.length, 3);
   const target = await fixture(t); await target.account('TESTER'); const material = await target.account('MATERIAL');
   for (const change of [
     data => { data.material_opening_items[0].qty_m += 1000; },
@@ -2203,7 +2215,7 @@ test('unified numbering is transaction-safe across creation paths and schema 7 s
   await f.request('PUT', '/api/materials/numbering-rules/catalog', s.material, { version: 1, template: 'X{SEQ}', padding: 3, reason: '过期版本' }, 409);
   await f.request('PUT', '/api/materials/numbering-rules/catalog', f.admin, { version: 2, template: 'NOSEQ', padding: 3, reason: '无流水' }, 400);
   const backup = (await f.request('GET', '/api/materials/backup', f.admin)).data;
-  assert.equal(backup.schemaVersion, 7); assert.equal(backup.data.material_number_allocations.length, 12);
+  assert.equal(backup.schemaVersion, 8); assert.equal(backup.data.material_number_allocations.length, 12);
   const target = await fixture(t); await target.account('MATERIAL');
   for (const change of [data => { data.material_state.find(row => row.key === 'number_sequence_catalog').value = '0'; },
     data => { data.material_state.find(row => row.key === 'number_sequence_catalog').value = '6'; },
@@ -2219,7 +2231,7 @@ test('unified numbering is transaction-safe across creation paths and schema 7 s
   const next = await target.catalog(s.category.id, { code: '', name: '恢复后新物资' });
   assert.equal(next.code, `SYN-${year}-006`);
   assert.equal((await target.request('GET', '/api/materials/numbering-rules', target.admin)).data.items[0].nextSequence, 7);
-  const legacy = structuredClone(backup); legacy.schemaVersion = 6;
+  const legacy = previousArrivalFields(backup); legacy.schemaVersion = 6;
   delete legacy.data.material_number_allocations; delete legacy.data.material_storage_places;
   for (const row of legacy.data.material_categories) { delete row.profile; delete row.version; }
   for (const row of legacy.data.material_catalog) { delete row.active; delete row.cas_number; delete row.purity; delete row.storage_conditions; delete row.sds_url; }
@@ -2240,6 +2252,149 @@ test('schema 7 restore rejects null material state keys as client errors before 
   assert.match(failure.error, /状态键必须为文本/);
   assert.equal((await f.request('GET', `/api/materials/catalog/${s.catalog.id}`, f.admin)).data.catalog.code, s.catalog.code);
   assert.deepEqual((await f.request('GET', '/api/materials/backup', f.admin)).data.data.material_state, backup.data.material_state);
+});
+
+test('order acceptance is atomic across catalog creation, stock, location, unit numbering and concurrent order versions', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed();
+  let order = await f.order(s.material, { ...f.item(s), catalogId: null, name: '合成新建A', spec: 'A', unit: '瓶' });
+  order = await f.add(order, s.material, { ...f.item(s), catalogId: null, name: '合成新建B', spec: 'B', unit: '瓶' });
+  order = await f.submit(order, s.material);
+  const route = `/api/materials/requests/${order.id}/receipts/batch`;
+  const items = order.items.map(line => ({ itemId: line.id, itemVersion: line.version, quantity: '2', amount: '3.00',
+    manufacturer: '合成厂家', manufacturerStatus: 'known', location: '合成柜', locationVersion: 0,
+    newCatalog: { name: line.name, spec: line.spec, unit: line.unit, categoryId: s.category.id, trackingMode: 'unit' } }));
+  const payload = { version: order.version, requestIdempotencyKey: key(), items };
+  const before = (await f.request('GET', '/api/materials/backup', f.admin)).data.data;
+  const failed = await f.request('POST', route, s.material, { ...payload, items: [items[0], { ...items[1], amount: '' }] }, 400);
+  assert.equal(failed.data.errors[0].itemId, items[1].itemId); assert.equal(failed.data.errors[0].field, 'amount');
+  assert.deepEqual((await f.request('GET', '/api/materials/backup', f.admin)).data.data, before, 'second-row failure rolls back masters, labels, arrival, stock, locations, counters and retry response');
+  const accepted = (await f.request('POST', route, s.material, payload, 201)).data;
+  assert.equal(accepted.receipts.length, 2); assert.ok(accepted.arrivalId);
+  assert.ok(accepted.receipts.every(receipt => receipt.arrivalId === accepted.arrivalId && receipt.units.length === 2));
+  assert.deepEqual((await f.request('POST', route, s.material, payload)).data, accepted);
+  await f.request('POST', route, s.material, { ...payload, items: [{ ...items[0], amount: '9' }, items[1]] }, 409);
+  await f.request('POST', route, s.material, { ...payload, requestIdempotencyKey: key() }, 409);
+  const filtered = (await f.request('GET', '/api/materials/requests?status=submitted&acceptanceStatus=partial&pageSize=1', s.material)).data;
+  assert.equal(filtered.total, 1); assert.equal(filtered.items[0].progress.acceptedQtyM, 4000);
+  assert.equal((await f.get(order.id)).items.length, 2);
+
+  let shared = await f.order(s.material, f.item(s)); shared = await f.add(shared, s.material, f.item(s)); shared = await f.submit(shared, s.material);
+  const sharedRoute = `/api/materials/requests/${shared.id}/receipts/batch`;
+  const sharedBody = { version: shared.version, requestIdempotencyKey: key(), items: shared.items.map(line => ({ itemId: line.id, itemVersion: line.version, quantity: '1', amount: '1', manufacturer: '合成厂家', location: '同批位置', locationVersion: 0 })) };
+  const sharedBefore = (await f.request('GET', '/api/materials/backup', f.admin)).data.data;
+  await f.request('POST', sharedRoute, s.material, { ...sharedBody, items: [sharedBody.items[0], { ...sharedBody.items[1], location: '另一位置' }] }, 409);
+  assert.deepEqual((await f.request('GET', '/api/materials/backup', f.admin)).data.data, sharedBefore);
+  const concurrent = await Promise.all([f.request('POST', sharedRoute, s.material, sharedBody, [201, 409]), f.request('POST', sharedRoute, s.material, { ...sharedBody, requestIdempotencyKey: key() }, [201, 409])]);
+  assert.deepEqual(concurrent.map(response => response.status).sort(), [201, 409]);
+  const location = (await f.request('GET', '/api/materials/stock/batches', s.material)).data.items.find(batch => batch.catalogId === s.catalog.id);
+  assert.equal(location.location, '同批位置'); assert.equal(location.locationVersion, 1);
+  const unitMaster = await f.catalog(s.category.id, { code: '', name: '合成总件数物资', trackingMode: 'unit' });
+  let tooMany = await f.order(s.material, f.item(s, { catalogId: unitMaster.id, quantity: '600' }));
+  tooMany = await f.add(tooMany, s.material, f.item(s, { catalogId: unitMaster.id, quantity: '600' })); tooMany = await f.submit(tooMany, s.material);
+  const unitBefore = (await f.request('GET', '/api/materials/backup', f.admin)).data.data;
+  const excess = await f.request('POST', `/api/materials/requests/${tooMany.id}/receipts/batch`, s.material,
+    { version: tooMany.version, requestIdempotencyKey: key(), items: tooMany.items.map(line => ({ itemId: line.id, itemVersion: line.version, quantity: '600', amount: '1', manufacturer: '合成厂家' })) }, 400);
+  assert.match(excess.data.error, /合计最多生成1000/);
+  assert.deepEqual((await f.request('GET', '/api/materials/backup', f.admin)).data.data, unitBefore);
+});
+
+test('manufacturer verification preserves expectations, requires difference or unknown reasons and fixed snapshots ignore receipt catalog linking', { timeout: 45000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  let order = await f.submit(await f.order(ordinary, f.item(s, { manufacturer: '原申报厂家' })), s.material);
+  const original = (await f.request('GET', `/api/materials/requests/${order.id}/snapshot?revision=1`, ordinary)).data;
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { manufacturer: '另一厂家', differenceReason: '' }), 400);
+  await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { manufacturer: '', manufacturerStatus: 'unknown', manufacturerReason: '' }), 400);
+  const accepted = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order, { manufacturer: '另一厂家', differenceReason: '供货经确认替换' }), 201)).data;
+  assert.equal(accepted.receipt.expectedManufacturer, '原申报厂家'); assert.equal(accepted.receipt.manufacturer, '另一厂家');
+  assert.equal(accepted.request.items[0].manufacturer, '原申报厂家');
+  const unknown = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(accepted.request, { manufacturer: '', manufacturerStatus: 'unknown', manufacturerReason: '包装无厂家标识' }), 201)).data;
+  assert.equal(unknown.receipt.manufacturerStatus, 'unknown'); assert.equal(unknown.receipt.manufacturerReason, '包装无厂家标识');
+  assert.deepEqual((await f.request('GET', `/api/materials/requests/${order.id}/snapshot?revision=1`, ordinary)).data, original);
+  assert.equal(original.snapshot.items[0].acceptedQtyM, undefined); assert.equal(original.snapshot.items[0].remainingQtyM, undefined);
+  order = unknown.request;
+  order = (await f.request('PATCH', `/api/materials/requests/${order.id}`, s.material, { requestVersion: order.version, title: '申报修订主题', reason: '合成修订' })).data;
+  const revised = (await f.request('GET', `/api/materials/requests/${order.id}/snapshot?revision=2`, ordinary)).data;
+  assert.equal(revised.snapshot.title, '申报修订主题'); assert.equal(revised.revision, 2);
+  assert.equal((await f.request('GET', `/api/materials/requests/${order.id}/snapshot?revision=1`, ordinary)).data.snapshot.title, original.snapshot.title);
+  const viewUrl = `https://172.28.10.200:8443/#material-original=${order.id}&revision=1`;
+  const exported = await f.request('GET', `/api/materials/requests/${order.id}/snapshot/export.xlsx?revision=1&viewUrl=${encodeURIComponent(viewUrl)}`, s.material);
+  const strings = workbookXml(exported.bytes).get('xl/sharedStrings.xml');
+  assert.ok(strings.includes('原申报厂家')); assert.ok(strings.includes('本次实到')); assert.ok(strings.includes('material-original=')); assert.ok(!strings.includes('另一厂家'));
+  const free = await f.submit(await f.order(s.material, f.item(s, { catalogId: null, name: '原纸面名称', spec: '未核规格', unit: '盒', manufacturer: '纸面厂家' })), s.material);
+  const fixed = (await f.request('GET', `/api/materials/requests/${free.id}/snapshot`, ordinary)).data;
+  const linked = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(free, { newCatalog: { name: '实际规范名称', spec: '10g', unit: '盒' } }), 201)).data;
+  assert.equal(linked.request.revision, 1); assert.equal(linked.request.items[0].name, '实际规范名称');
+  assert.deepEqual((await f.request('GET', `/api/materials/requests/${free.id}/snapshot`, ordinary)).data, fixed);
+});
+
+test('each delivery has independent document versions, protected files, idempotent replacement and complete strict schema 8 restore', { timeout: 60000 }, async t => {
+  const f = await fixture(t), s = await f.seed(), ordinary = await f.account('TESTER');
+  let order = await f.submit(await f.order(s.material, f.item(s)), s.material);
+  const first = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(order), 201)).data;
+  const legacy = previousArrivalFields((await f.request('GET', '/api/materials/backup', f.admin)).data); legacy.schemaVersion = 7;
+  const second = (await f.request('POST', '/api/materials/receipts', s.material, f.receiptBody(first.request), 201)).data;
+  assert.notEqual(first.arrivalId, second.arrivalId);
+  const png = { name: '合成勾选清单.png', mimeType: 'image/png', content: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/atcAAAAASUVORK5CYII=' };
+  const pdf = { name: '合成扫描件.pdf', mimeType: 'application/pdf', content: Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n').toString('base64') };
+  const route = id => `/api/materials/arrivals/${id}/documents`;
+  const upload = { version: 0, requestIdempotencyKey: key(), files: [png, pdf] };
+  const firstDocuments = (await f.request('POST', route(first.arrivalId), s.material, upload, 201)).data;
+  assert.equal(firstDocuments.version, 1); assert.equal(firstDocuments.versions[0].files.length, 2);
+  assert.deepEqual((await f.request('POST', route(first.arrivalId), s.material, upload)).data, firstDocuments);
+  const secondDocuments = (await f.request('POST', route(second.arrivalId), s.material, { ...upload, requestIdempotencyKey: key() }, 201)).data;
+  const before = (await f.request('GET', '/api/materials/backup', f.admin)).data.data;
+  await f.request('POST', route(second.arrivalId), s.material, { version: 1, requestIdempotencyKey: key(), files: [png] }, 400);
+  await f.request('POST', route(second.arrivalId), s.material, { version: 1, requestIdempotencyKey: key(), reason: '错误文件', files: [{ ...png, content: Buffer.from('fake png').toString('base64') }] }, 400);
+  for (const files of [[], Array(11).fill(png), [{ ...png, name: '伪造扩展名.pdf' }], [{ ...png, mimeType: 'application/pdf' }],
+    [{ ...pdf, content: Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64') }]]) {
+    await f.request('POST', route(second.arrivalId), s.material, { version: 1, requestIdempotencyKey: key(), reason: '验证边界', files }, 400);
+  }
+  const largePdf = Buffer.alloc(4 * 1024 * 1024, 32); largePdf.write('%PDF-1.4\n', 0); largePdf.write('\n%%EOF\n', largePdf.length - 8);
+  const totalFailure = await f.request('POST', route(second.arrivalId), s.material,
+    { version: 1, requestIdempotencyKey: key(), reason: '验证整组总量', files: Array(4).fill({ ...pdf, content: largePdf.toString('base64') }) }, 400);
+  assert.match(totalFailure.data.error, /超过15 MiB/);
+  assert.deepEqual((await f.request('GET', '/api/materials/backup', f.admin)).data.data, before);
+  const replace = { version: 1, requestIdempotencyKey: key(), reason: '补拍后替换本次', files: [png] };
+  const current = (await f.request('POST', route(second.arrivalId), s.material, replace, 201)).data;
+  assert.equal(current.version, 2); assert.deepEqual(current.versions.map(version => version.version), [2, 1]);
+  assert.deepEqual((await f.request('GET', route(first.arrivalId), s.material)).data, firstDocuments);
+  await f.request('POST', route(second.arrivalId), s.material, { ...replace, requestIdempotencyKey: key() }, 409);
+  assert.deepEqual((await f.request('POST', route(second.arrivalId), s.material, replace)).data, current);
+  const after = (await f.request('GET', '/api/materials/backup', f.admin)).data;
+  assert.deepEqual(after.data.material_stock_movements, before.material_stock_movements); assert.deepEqual(after.data.material_receipts, before.material_receipts);
+  assert.equal(after.schemaVersion, 8); assert.equal(after.files.length, 5); assert.equal(after.data.material_arrivals.length, 2);
+  await f.request('GET', route(second.arrivalId), ordinary, undefined, 403);
+  await f.request('POST', route(second.arrivalId), ordinary, { ...replace, version: 2, requestIdempotencyKey: key() }, 403);
+  await f.request('GET', `/api/materials/requests/${order.id}/arrivals`, ordinary, undefined, 403);
+  const oldId = secondDocuments.versions[0].files[0].id;
+  await f.request('GET', `/api/materials/attachments/${oldId}/download`, ordinary, undefined, 403);
+  assert.deepEqual((await f.request('GET', `/api/materials/attachments/${oldId}/download`, s.material)).bytes, Buffer.from(png.content, 'base64'));
+  await f.request('DELETE', `/api/materials/attachments/${oldId}`, s.material, {}, 403);
+  const materialPermissions = (await f.request('GET', '/api/permissions', f.admin)).data;
+  const currentRole = materialPermissions.roles.find(entry => entry.role === 'MATERIAL');
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: currentRole.permissions.filter(permission => permission !== 'materials.amount.read') });
+  await f.request('POST', route(second.arrivalId), s.material, replace, 403);
+  await f.request('POST', route(second.arrivalId), s.material, { ...replace, version: 2, requestIdempotencyKey: key() }, 403);
+  await f.request('PUT', '/api/permissions/roles/MATERIAL', f.admin, { permissions: currentRole.permissions });
+  const target = await fixture(t); await target.account('MATERIAL'); await target.account('TESTER');
+  for (const change of [data => { data.material_arrivals[1].document_version = 1; },
+    data => { data.material_arrival_document_versions[2].arrival_id = first.arrivalId; },
+    data => { data.material_receipts[0].arrival_id = second.arrivalId; data.material_arrivals[1].request_id = 999999; },
+    data => { data.material_attachments[0].sha256 = 'a'.repeat(64); }]) {
+    const damaged = structuredClone(after); change(damaged.data);
+    await target.request('POST', '/api/materials/restore', target.admin, damaged, 400);
+    assert.equal((await target.request('GET', '/api/materials/backup', target.admin)).data.data.material_arrivals.length, 0);
+  }
+  const missing = structuredClone(after); missing.files.pop(); await target.request('POST', '/api/materials/restore', target.admin, missing, 400);
+  await target.request('POST', '/api/materials/restore', target.admin, after);
+  const targetMaterial = await target.account('MATERIAL');
+  assert.equal((await target.request('GET', route(second.arrivalId), targetMaterial)).data.version, 2);
+  assert.deepEqual((await target.request('GET', `/api/materials/attachments/${oldId}/download`, targetMaterial)).bytes, Buffer.from(png.content, 'base64'));
+  const oldTarget = await fixture(t); await oldTarget.account('MATERIAL'); await oldTarget.account('TESTER');
+  await oldTarget.request('POST', '/api/materials/restore', oldTarget.admin, legacy);
+  const oldBackup = (await oldTarget.request('GET', '/api/materials/backup', oldTarget.admin)).data;
+  assert.equal(oldBackup.data.material_arrivals.length, 0); assert.equal(oldBackup.data.material_receipts[0].arrival_id, null);
+  assert.equal(oldBackup.data.material_receipts[0].manufacturer_status, 'legacy');
 });
 
 test('shared catalog reuse rejects nonempty laboratory conflicts atomically and preserves existing details when new fields are empty', { timeout: 45000 }, async t => {

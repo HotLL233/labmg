@@ -10,7 +10,7 @@ const { createTestDatabase } = require('./helpers/postgres');
 
 const root = path.resolve(__dirname, '..');
 const migration = '0003-material-catalog-decouple.sql';
-const migrations = [migration, '0004-material-maintenance-numbering.sql', '0005-material-lab.sql'];
+const migrations = [migration, '0004-material-maintenance-numbering.sql', '0005-material-lab.sql', '0006-material-arrivals.sql'];
 
 test('fresh databases apply additive migrations once, including concurrent startup and the migration CLI', async t => {
   const database = await createTestDatabase(t), [db, other] = await Promise.all([database.open(), database.open()]);
@@ -97,5 +97,31 @@ test('the frozen 0.11.1 schema upgrades without renumbering masters, documents o
   assert.deepEqual(await upgraded.prepare('SELECT cancelled_by,cancelled_at,cancel_reason FROM material_requests WHERE id=4').get(), { cancelled_by: null, cancelled_at: null, cancel_reason: '' });
   assert.equal((await upgraded.prepare('SELECT COUNT(*) AS n FROM material_number_allocations').get()).n, 0);
   assert.equal((await upgraded.prepare("SELECT COUNT(*) AS n FROM material_state WHERE key LIKE 'number_%'").get()).n, 8);
+  assert.deepEqual(await applyMigrations(upgraded), []);
+});
+
+test('arrival migration retains legacy receipt facts and attachment parents without inventing delivery rounds', async t => {
+  const database = await createTestDatabase(t), old = await database.open({ initialize: false });
+  await old.transaction(() => old.exec(fs.readFileSync(path.join(__dirname, 'fixtures/schema-0.11.1.sql'), 'utf8')));
+  const snapshot = '{ "name": "历史合成物资", "manufacturer": "原历史厂家" }';
+  await old.transaction(async () => {
+    await old.exec(`INSERT INTO users(id,username,password,display_name,role) VALUES(7,'arrival-upgrade','synthetic-hash','Upgrade','MATERIAL');
+      INSERT INTO material_categories(id,name,created_by) VALUES(2,'合成分类',7);
+      INSERT INTO material_regions(id,name,created_by) VALUES(3,'合成区域',7);
+      INSERT INTO material_catalog(id,code,name,spec,unit,category_id,created_by) VALUES(8,'MAT-HISTORICAL','历史合成物资','规格','瓶',2,7);
+      INSERT INTO material_requests(id,no,title,status,revision,created_by) VALUES(4,'WZ-HISTORICAL','历史申报','submitted',1,7);
+      INSERT INTO material_request_items(id,request_id,catalog_id,name,spec,unit,category_id,region_id,warehouse,qty_m,author_id) VALUES(5,4,8,'历史合成物资','规格','瓶',2,3,'MAIN',1000,7);`);
+    await old.prepare('INSERT INTO material_receipts(id,type,request_id,item_id,request_revision,snapshot,rejected_qty_m,rejected_reason,date,actor_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(6, 'rejection', 4, 5, 1, snapshot, 1000, '历史破损', '2026-10-22', 7);
+    await old.prepare('INSERT INTO material_attachments(id,receipt_id,name,mime_type,stored_name,size,actor_id) VALUES(?,?,?,?,?,?,?)')
+      .run(9, 6, '历史合成附件.txt', 'text/plain', '00000000-0000-4000-8000-000000000000.bin', 1, 7);
+  });
+  const upgraded = await database.open();
+  assert.equal((await upgraded.prepare('SELECT COUNT(*) AS n FROM material_arrivals').get()).n, 0);
+  assert.deepEqual(await upgraded.prepare('SELECT snapshot,arrival_id,manufacturer_status,expected_manufacturer FROM material_receipts WHERE id=6').get(),
+    { snapshot, arrival_id: null, manufacturer_status: 'legacy', expected_manufacturer: '' });
+  assert.deepEqual(await upgraded.prepare('SELECT receipt_id,request_id,document_version_id,sha256 FROM material_attachments WHERE id=9').get(),
+    { receipt_id: 6, request_id: null, document_version_id: null, sha256: '' });
+  await assert.rejects(upgraded.prepare('UPDATE material_attachments SET request_id=4 WHERE id=9').run(), error => error.code === '23514');
   assert.deepEqual(await applyMigrations(upgraded), []);
 });

@@ -1,4 +1,42 @@
-# 物资 API 合同（0.12.0开发）
+# 物资 API 合同（0.14.0 开发）
+
+## 0.14.0 按单验收、固定原单与分次清单
+
+下列路径均以 `/api/materials` 为前缀。本轮为正式源码开发，交付与实际验证状态见 MEMORY／CHANGELOG；旧段落的版本性描述保留作兼容背景，发生冲突时以本节为准。
+
+### 按单查询与原子验收
+
+- `GET /requests?status=submitted&acceptanceStatus=open` 按**单据**筛选、计数、分页；`acceptanceStatus=all|open|pending|partial|done|closed`，`q,from,to,page,pageSize` 沿用现有合同。返回摘要及整单验收进度，详情 `GET /requests/:id` 返回全部明细，不从旧 `/acceptance` 的一页明细反推整单。
+- `POST /requests/:id/receipts/batch` 正文 `{version,requestIdempotencyKey,items:[...]}`，`version` 为已读取父单版本；每行 `{itemId,itemVersion,quantity,amount,date?,rejectedQuantity?,rejectedReason?,zeroAmountReason?,batch?,expiryDate?,location?,locationVersion?,manufacturer?,manufacturerStatus?,manufacturerReason?,differenceReason?,note?,catalogId?,newCatalog?}`。数量、元金额为十进制字符串；`catalogId` 与 `newCatalog` 互斥，沿用原有首次关联／建档合同。
+- 每次1–5000行、同一行不可重复；逐件物资合格入库整组合计最多1000件，按数量管理沿用既有数量范围。全部行版本、身份、金额、厂家、批次库位在同一事务确认；任意行、编号或建档失败整批回滚，返回 `errors:[{itemId,field,message}]` 指向出错行。不会先提交成功行。
+- 首次成功201 `{arrivalId,receipts,request}`；同用户、同路由、同幂等键和正文重试200返回同结果；同键异正文409。网络／服务器响应不能确认时保留整批原正文与键，冻结编辑并按原内容重试，不能新建键再次记账。一次调用只产生一个明确的 `arrivalId`，供清单上传直接绑定。
+- 原 `POST /receipts` 保留，返回新增 `arrivalId`，也遵守厂家校验与独立到货登记。结案／冲正沿用原接口；已记账事实不能直接改金额／数量。拒收不扣需求：申报10、合格6、拒收2，剩余仍为4。
+
+厂家核对使用 `manufacturerStatus=known|unknown`；相符时实际厂家可沿用申报值，不同须 `differenceReason`。合格入库不能静默空厂家；实物确实未标明时明确传 `unknown`、实际厂家空串和 `manufacturerReason`。未指定／未标明不是厂家名称。验收事件增加 `arrivalId,expectedManufacturer,manufacturerStatus,manufacturerReason,differenceReason`，快照保留申报基准及实际核对依据；库存流水保留实际厂家。历史事件为 `legacy`，不冒充已核对。
+
+### 固定修订原单
+
+- `GET /requests/:id/snapshot?revision=N` → `{snapshot,revision,currentRevision}`。修订1取首次提交快照，修订N取对应修订的 `after_snapshot`，只输出申报字段及仓库中文名；不带当前进度、金额、验收附件或动态权限。草稿无固定提交版，返回409。
+- `GET /requests/:id/snapshot/export.xlsx?revision=N&viewUrl=...` 需要 `materials.export`。与纸单读取同一投影，含原单主题、单号、版本、厂家、完整明细及空白勾选／本次实到／备注栏；可选查看链接须为有效 HTTP(S) 实际地址，路径与 hash 精确对应本单修订。
+- 原单二维码为当前浏览器 origin 下 `/#material-original=ID&revision=N`，登录后返回同一版本。拒绝 localhost、回环／未指定地址及容器服务名；二维码不含登录凭据。旧纸单遇到新修订显示提示，可主动查看新版，不能自动替换旧原单。部署地址改变需保留旧地址可达性或重印。
+- 动态综合 `export.xlsx?type=requests` 仍保留当前办理及历史报表，页面标注“当前 Excel”，不作为固定原单。原单 A4 核对打印与库存实物标签为不同用途，原标签纸型、旋转和偏移校准保持。
+
+### 到货登记和独立资料版本
+
+- `GET /requests/:id/arrivals?page=&pageSize=` → `{items,total,page,pageSize}`，每项含 `id,requestId,requestRevision,actorId,actorName,createdAt,documentVersion,receiptIds,receipts`。
+- `GET /arrivals/:id/documents` → `{arrival,version,versions:[{id,version,reason,actorId,actorName,createdAt,files}]}`，版本倒序、`version` 为当前指针。所有新旧文件均归属该次到货，不能以单据最新时间猜归属。
+- `POST /arrivals/:id/documents` 正文 `{version,requestIdempotencyKey,reason?,files:[{name,mimeType,content:base64}]}`。`version=0` 为首次；替换当前版本必须原因。同轮递增版本，保留全部旧文件和前次到货；已完成申报仍可由有权限人员补传、替换。
+- 单份非空且最多5 MiB、每版1–10份、原始整组最多15 MiB；只接收 JPEG／PNG／PDF，校验文件名扩展、MIME及内容结构，HEIC需先转换。存储随机文件名和SHA256，事务失败清理本次新文件。
+- 上述登记、版本、文件名及历史读取均需 `materials.amount.read`；上传／替换还需 MATERIAL＋`materials.acceptance.write`。权限撤销后不能利用旧幂等键读回文件metadata。`GET /attachments/:id/download` 同样保护每一历史版本；资料不能挂到普通申报附件绕开金额权限。
+- 资料提交独立于入库。失败显示“入库成功，清单待补”，只重试原上传；上传未知结果冻结该组正文和幂等键，不能把重试变成再次验收。手机拍照使用系统文件选择器 `capture=environment`，也可选扫描PDF，不声称网页直接控制扫描仪或进行OCR。
+
+### 加法迁移与完整恢复
+
+迁移 `0006-material-arrivals.sql` 新增 `material_arrivals`、`material_arrival_document_versions`，验收事件追加可空到货关联和厂家核对字段，附件增加互斥第三归属及摘要。旧事件 `arrival_id=NULL`，不根据时间虚构历史轮次。
+
+完整物资JSON现为 **schema8、21张表**，保留严格schema1–7兼容；按各旧合同拒绝未来字段，再补空到货表、NULL关联及legacy厂家状态。恢复核对到货和事件的申报／修订／办理人归属、连续版本／当前指针、文件类型／数量／总量／摘要、厂家状态及原账本不变量，任何错误整次回滚。旧程序不能恢复schema8，回退使用升级前数据库及附件副本。
+
+在线JSON仍限制附件原始20 MiB及JSON25 MiB，不静默漏文件。较多历史资料使用[PostgreSQL18＋附件一致性备份／恢复](BACKUP_RESTORE.md)，通过原生逻辑快照和停写附件归档；不得复制运行中的PG物理目录。
 
 ## 0.12.0 维护与实验室字段增量
 

@@ -18,12 +18,13 @@ const BACKUP_LIMIT = 20 * 1024 * 1024;
 const STOCK_QR_PREFIX = 'LABOS-STOCK:1:';
 const TABLES = [
   'material_categories', 'material_regions', 'material_storage_places', 'material_catalog', 'material_barcodes', 'material_requests',
-  'material_request_items', 'material_request_revisions', 'material_receipts',
+  'material_request_items', 'material_request_revisions', 'material_arrivals', 'material_arrival_document_versions', 'material_receipts',
   'material_stock_locations', 'material_issues', 'material_openings', 'material_stock_movements',
   'material_opening_items', 'material_stock_units',
   'material_attachments', 'material_state', 'material_idempotency', 'material_number_allocations'
 ];
-const V6_TABLES = TABLES.filter(table => !['material_number_allocations', 'material_storage_places'].includes(table));
+const V7_TABLES = TABLES.filter(table => !['material_arrivals', 'material_arrival_document_versions'].includes(table));
+const V6_TABLES = V7_TABLES.filter(table => !['material_number_allocations', 'material_storage_places'].includes(table));
 const V4_TABLES = V6_TABLES.filter(table => !['material_openings', 'material_opening_items'].includes(table));
 const V3_TABLES = V4_TABLES.filter(table => table !== 'material_stock_units');
 const V2_TABLES = V3_TABLES.filter(table => table !== 'material_barcodes');
@@ -391,7 +392,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   function attachmentView(row) {
     return {
       id: row.id, name: row.name, mimeType: row.mime_type, size: row.size,
-      parentType: row.request_id ? 'request' : 'receipt', parentId: row.request_id || row.receipt_id,
+      parentType: row.request_id ? 'request' : row.receipt_id ? 'receipt' : 'arrivalDocument', parentId: row.request_id || row.receipt_id || row.document_version_id,
+      ...(row.sha256 ? { sha256: row.sha256 } : {}),
       createdAt: row.created_at, actorId: row.actor_id
     };
   }
@@ -422,7 +424,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       createdBy: order.created_by, creatorName: (await actorName(order.created_by)), createdAt: order.created_at,
       submittedBy: order.submitted_by, submittedAt: order.submitted_at, version: order.version, revision: order.revision,
       cancelledBy: order.cancelled_by, cancelledAt: order.cancelled_at, cancelReason: order.cancel_reason,
-      itemCount: items.length, progress: { pendingItems: items.filter(row => row.remainingQtyM > 0).length },
+      itemCount: items.length, progress: requestProgress(items),
       items, attachments: (await all('SELECT * FROM material_attachments WHERE request_id=? AND active=1 ORDER BY id', order.id)).map(attachmentView),
       ...(snapshot ? {} : {
         canEditHeader: mayHeader(order, user), canAddItem: order.status === 'draft',
@@ -432,14 +434,63 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       })
     };
   }
+  function requestProgress(items) {
+    const pendingItems = items.filter(row => row.remainingQtyM > 0).length;
+    const acceptedQtyM = safeSum(items.map(row => row.acceptedQtyM)), closedQtyM = safeSum(items.map(row => row.closedQtyM));
+    return { pendingItems, acceptedItems: items.filter(row => row.acceptedQtyM > 0).length,
+      doneItems: items.filter(row => row.remainingQtyM === 0 && row.closedQtyM === 0).length,
+      closedItems: items.filter(row => row.closedQtyM > 0).length,
+      remainingQtyM: safeSum(items.map(row => row.remainingQtyM)), acceptedQtyM, closedQtyM,
+      status: pendingItems ? acceptedQtyM || closedQtyM ? 'partial' : 'pending' : closedQtyM ? 'closed' : 'done' };
+  }
+  async function requestSnapshot(id, revisionValue) {
+    const order = await request(id);
+    if (!order.original_snapshot || order.revision < 1) conflict('草稿没有固定提交版本，请提交申报单后打印原单');
+    const revision = revisionValue === null || revisionValue === undefined ? order.revision : integer(revisionValue, '申报修订版');
+    if (revision > order.revision) error(404, '该申报修订版不存在');
+    const source = revision === 1 ? order.original_snapshot : (await one('SELECT after_snapshot FROM material_request_revisions WHERE request_id=? AND revision=?', order.id, revision))?.after_snapshot;
+    if (!source) error(409, '申报固定快照缺失，请检查修订历史');
+    const saved = JSON.parse(source), pick = (value, keys) => Object.fromEntries(keys.filter(key => Object.hasOwn(value, key)).map(key => [key, value[key]]));
+    const snapshot = pick(saved, ['id', 'no', 'title', 'description', 'status', 'createdBy', 'creatorName', 'createdAt', 'submittedBy', 'submittedAt', 'revision']);
+    snapshot.items = saved.items.map(line => pick(line, ['id', 'requestId', 'catalogId', 'code', 'name', 'spec', 'unit', 'categoryId', 'categoryName', 'regionId', 'regionName', 'warehouse', 'qtyM', 'purpose', 'manufacturer', 'trackingMode', 'authorId', 'authorName']));
+    for (const line of snapshot.items) line.warehouseName = warehouseName(line.warehouse);
+    snapshot.itemCount = snapshot.items.length;
+    return { snapshot, revision, currentRevision: order.revision };
+  }
+  async function exportRequestSnapshot(res, id, url, user) {
+    if (!permit(user, 'materials.export')) error(403, '没有物资导出权限');
+    const { snapshot, revision } = await requestSnapshot(id, url.searchParams.get('revision'));
+    const value = url.searchParams.get('viewUrl') || '';
+    let viewUrl = '';
+    if (value) {
+      let address; try { address = new URL(value); } catch { error(400, '原单查看链接无效'); }
+      const host = address.hostname.toLowerCase();
+      if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.pathname !== '/' || address.search ||
+          host.endsWith('.') || !host.includes('.') || /^(?:localhost|0\.0\.0\.0|127(?:\.\d+){3}|\[.*\])$/i.test(host)) error(400, '请使用实际可访问的系统地址生成原单链接');
+      const target = new URLSearchParams(address.hash.slice(1));
+      if ([...target].length !== 2 || target.get('material-original') !== String(snapshot.id) || target.get('revision') !== String(revision)) error(400, '原单查看链接须对应本单的确切修订版');
+      viewUrl = address.href;
+    }
+    const sheets = [sheet('申报单信息', ['单号', '主题', '说明', '修订版', '创建人', '提交时间', '原单查看链接'],
+      [[snapshot.no, snapshot.title, snapshot.description, revision, snapshot.creatorName, snapshot.submittedAt, viewUrl]]),
+      sheet('申报明细', ['核对√', '本次实到', '备注', '物资名称', '规格', '单位', '申报数量', '厂家', '分类', '归属区域', '仓库', '用途', '填报人', '物资编码'],
+        snapshot.items.map(line => ['', '', '', line.name, line.spec, line.unit, line.qtyM / 1000, line.manufacturer || '', line.categoryName, line.regionName, line.warehouseName, line.purpose, line.authorName, line.code])),
+      instructions(['此文件为固定申报版本，不含当前验收进度或验收金额；二维码核对单请使用系统的原单打印入口。', '纸上勾选和填写实到数量不会自动入库，须在系统核对后办理验收。'])];
+    const buffer = await (writeXlsx || require('write-excel-file/node').default)(sheets).toBuffer();
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="labos-request-${snapshot.id}-r${revision}.xlsx"`, 'Content-Length': buffer.length });
+    res.end(buffer);
+  }
   async function receiptView(row, includeUnits = false) {
     const sourceId = row.type === 'reversal' ? row.original_receipt_id : row.id;
     const unitCount = (await one(`SELECT COUNT(*) AS total FROM material_stock_units u JOIN material_stock_movements m ON m.id=u.source_movement_id WHERE m.receipt_id=?`, sourceId)).total;
     return {
       id: row.id, type: row.type, requestId: row.request_id, itemId: row.item_id,
-      requestRevision: row.request_revision, snapshot: JSON.parse(row.snapshot),
+      requestRevision: row.request_revision, arrivalId: row.arrival_id, snapshot: JSON.parse(row.snapshot),
       qtyM: row.qty_m, rejectedQtyM: row.rejected_qty_m, closedQtyM: row.closed_qty_m, amountCents: row.amount_cents,
       reason: row.reason, rejectedReason: row.rejected_reason, zeroAmountReason: row.zero_amount_reason, manufacturer: row.manufacturer, note: row.note,
+      expectedManufacturer: row.expected_manufacturer, manufacturerStatus: row.manufacturer_status,
+      manufacturerReason: row.manufacturer_reason, differenceReason: row.difference_reason,
       originalReceiptId: row.original_receipt_id, batch: row.batch, expiryDate: row.expiry_date,
       unitCount, ...(includeUnits ? { units: (await mapRows(await all(`SELECT u.* FROM material_stock_units u JOIN material_stock_movements m ON m.id=u.source_movement_id WHERE m.receipt_id=? ORDER BY u.id`, sourceId),unitView)) } : {}),
       date: row.date, actorId: row.actor_id, actorName: row.actor_name ?? (await actorName(row.actor_id)), createdAt: row.created_at,
@@ -985,11 +1036,12 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   async function insertReceipt(data, user) {
     const result = (await run(`INSERT INTO material_receipts(type,request_id,item_id,request_revision,snapshot,qty_m,
       rejected_qty_m,closed_qty_m,amount_cents,reason,rejected_reason,zero_amount_reason,original_receipt_id,
-      batch,expiry_date,date,actor_id,manufacturer,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      batch,expiry_date,date,actor_id,manufacturer,note,arrival_id,expected_manufacturer,manufacturer_status,manufacturer_reason,difference_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     data.type, data.request_id, data.item_id, data.request_revision, JSON.stringify(data.snapshot), data.qty_m || 0,
     data.rejected_qty_m || 0, data.closed_qty_m || 0, data.amount_cents || 0, data.reason || '',
     data.rejected_reason || '', data.zero_amount_reason || '', data.original_receipt_id || null,
-    data.batch || '', data.expiry_date || '', data.date || today(), user.id, data.manufacturer || '', data.note || ''));
+    data.batch || '', data.expiry_date || '', data.date || today(), user.id, data.manufacturer || '', data.note || '',
+    data.arrival_id || null, data.expected_manufacturer || '', data.manufacturer_status || 'legacy', data.manufacturer_reason || '', data.difference_reason || ''));
     return (await one('SELECT * FROM material_receipts WHERE id=?', result.lastInsertRowid));
   }
   async function checkedReceipt(id) {
@@ -999,12 +1051,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
   }
   async function receiptAction(user, input, route, kind, orderId, itemId, originalId) {
     requireMaterial(user, 'materials.acceptance.write');
-    return (await idempotent(user, route, input, async () => {
-      const original = originalId ? (await checkedReceipt(originalId)) : null;
-      let order = (await request(original?.request_id || orderId || input.requestId));
-      let line = (await item(order.id, original?.item_id || itemId || input.itemId));
-      versions(order, line, input);
-      if (order.status !== 'submitted') conflict('只有已提交申报可办理验收或结案');
+    return idempotent(user, route, input, () => receiptInTransaction(user, input, kind, orderId, itemId, originalId));
+  }
+  async function linkReceiptCatalog(order, line, input, user, kind) {
       const hasCatalog = input.catalogId !== undefined && input.catalogId !== null;
       const hasNew = Object.hasOwn(input, 'newCatalog');
       if (hasCatalog && hasNew) error(400, '已有物资与新物资信息只能选择一种');
@@ -1019,10 +1068,41 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           master.id, master.code, master.name, master.spec, master.unit, master.category_id, line.id);
         await bump(order.id, line.id);
         await log(user, 'LINK_CATALOG', 'material_request_items', line.id, JSON.stringify({ catalogId: master.id, source: 'receipt' }));
-        order = await request(order.id);
         line = await item(order.id, line.id);
       }
       if (!line.catalog_id) conflict('验收前请选择已有物资信息，或填写新物资信息');
+      return line;
+  }
+  async function createArrival(order, user) {
+    const result = await run('INSERT INTO material_arrivals(request_id,request_revision,actor_id,created_at) VALUES(?,?,?,?)', order.id, order.revision, user.id, now());
+    return result.lastInsertRowid;
+  }
+  function manufacturerCheck(line, input, quantity) {
+    const expected = line.manufacturer || '';
+    const manufacturer = manufacturerText(input.manufacturer === undefined ? expected : input.manufacturer);
+    const status = input.manufacturerStatus ?? 'known';
+    if (!['known', 'unknown'].includes(status)) error(400, '厂家核对状态无效');
+    const manufacturerReason = text(input.manufacturerReason ?? '', '厂家未标明原因', 1000, true);
+    const differenceReason = text(input.differenceReason ?? '', '厂家差异原因', 1000, true);
+    if (quantity > 0) {
+      if (status === 'unknown') {
+        if (!manufacturerReason) error(400, '厂家未标明时须填写原因');
+        if (manufacturer) error(400, '厂家未标明时实际厂家须留空');
+      } else {
+        if (!manufacturer || ['未指定', '厂家未标明'].includes(manufacturer)) error(400, '请填写实到厂家，确实未标明时选择厂家未标明并填写原因');
+        if (expected && identityNormalized(manufacturer) !== identityNormalized(expected) && !differenceReason) error(400, '实到厂家与申报厂家不同，请填写厂家差异原因');
+      }
+    }
+    return { manufacturer, expected_manufacturer: expected, manufacturer_status: status,
+      manufacturer_reason: manufacturerReason, difference_reason: differenceReason };
+  }
+  async function receiptInTransaction(user, input, kind, orderId, itemId, originalId, context = {}) {
+      const original = originalId ? (await checkedReceipt(originalId)) : null;
+      let order = (await request(original?.request_id || orderId || input.requestId));
+      let line = (await item(order.id, original?.item_id || itemId || input.itemId));
+      if (!context.prevalidated) versions(order, line, input);
+      if (order.status !== 'submitted') conflict('只有已提交申报可办理验收或结案');
+      if (!context.prevalidated) line = await linkReceiptCatalog(order, line, input, user, kind);
       const counts = (await activity(line.id));
       const remaining = safeSum([line.qty_m, -counts.accepted, -counts.closed]);
       const snapshot = (await itemView(line, order, user, true));
@@ -1044,7 +1124,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
           request_revision: order.revision, snapshot: JSON.parse(original.snapshot),
           qty_m: -original.qty_m, amount_cents: -original.amount_cents,
           original_receipt_id: original.id, reason: text(input.reason, '冲正原因', 1000),
-          batch: original.batch, expiry_date: original.expiry_date, manufacturer: original.manufacturer, note: original.note }, user));
+          batch: original.batch, expiry_date: original.expiry_date, manufacturer: original.manufacturer, note: original.note,
+          expected_manufacturer: original.expected_manufacturer, manufacturer_status: original.manufacturer_status,
+          manufacturer_reason: original.manufacturer_reason, difference_reason: original.difference_reason }, user));
         (await addMovement({ ...movement, type: 'reversal', qty_m: -movement.qty_m,
           amount_cents: -movement.amount_cents, receipt_id: event.id, source_key: `receipt:${event.id}`,
           snapshot: JSON.parse(movement.snapshot), reason: event.reason, date: today() }, user, units ? { unitIds: units.map(unit => unit.id) } : {}));
@@ -1062,14 +1144,19 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         if (quantity === 0 && amount !== 0) error(400, '纯拒收不能计入合格库存金额');
         const identity = { catalog_id: line.catalog_id, region_id: line.region_id, warehouse: line.warehouse,
           batch: text(input.batch ?? '', '批号', 100, true), expiry_date: date(input.expiryDate, '有效期', true) };
-        const manufacturer = input.manufacturer === undefined ? line.manufacturer : manufacturerText(input.manufacturer);
+        const checkedManufacturer = manufacturerCheck(line, input, quantity);
+        const manufacturer = checkedManufacturer.manufacturer;
+        Object.assign(snapshot, { expectedManufacturer: checkedManufacturer.expected_manufacturer, actualManufacturer: manufacturer,
+          manufacturerStatus: checkedManufacturer.manufacturer_status, manufacturerReason: checkedManufacturer.manufacturer_reason,
+          differenceReason: checkedManufacturer.difference_reason });
         const note = text(input.note ?? '', '批次备注', 2000, true);
         if (quantity > 0) snapshot.location = (await intakeLocation(identity, input, user, `${order.no} 验收入库位置`));
         event = (await insertReceipt({ type: quantity > 0 ? 'acceptance' : 'rejection', request_id: order.id,
           item_id: line.id, request_revision: order.revision, snapshot,
           qty_m: quantity, rejected_qty_m: rejected, amount_cents: amount,
           rejected_reason: rejectedReason, zero_amount_reason: zeroReason,
-          batch: identity.batch, expiry_date: identity.expiry_date, date: date(input.date), manufacturer, note }, user));
+          batch: identity.batch, expiry_date: identity.expiry_date, date: date(input.date), ...checkedManufacturer, note,
+          arrival_id: context.arrivalId || await createArrival(order, user) }, user));
         if (quantity > 0) {
           (await addMovement({ type: 'receipt', catalog_id: line.catalog_id, region_id: line.region_id,
             warehouse: line.warehouse, qty_m: quantity, amount_cents: amount, receipt_id: event.id,
@@ -1080,23 +1167,176 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }
       (await bump(order.id, line.id));
       (await log(user, event.type.toUpperCase(), 'material_receipts', event.id, order.no));
-      return { receipt: (await receiptView(event, true)), request: (await requestView(order.id, user)) };
-    }));
+      return { arrivalId: event.arrival_id, receipt: (await receiptView(event, true)), ...(!context.prevalidated ? { request: await requestView(order.id, user) } : {}) };
+  }
+  function rowFailure(failure, itemId) {
+    if (!failure.status && ['23505', '23503', '23514', '23502'].includes(failure.code)) {
+      const source = failure;
+      failure = fail(source.code === '23505' ? 409 : 400, source.code === '23505' ? '本行唯一编号或来源重复，整批操作未保存' : '本行业务数据违反完整性约束，整批操作未保存');
+    }
+    if (failure.status && failure.status < 500) {
+      const labels = [['零金额原因', 'zeroAmountReason'], ['拒收原因', 'rejectedReason'], ['拒收数量', 'rejectedQuantity'],
+        ['厂家差异原因', 'differenceReason'], ['厂家未标明', 'manufacturerReason'], ['位置整数版本', 'locationVersion'],
+        ['金额', 'amount'], ['厂家', 'manufacturer'], ['位置', 'location'], ['数量', 'quantity'], ['版本', 'itemVersion'], ['物资', 'catalogId']];
+      failure.errors = [{ itemId, field: labels.find(([label]) => failure.message.includes(label))?.[1] || 'item', message: failure.message }];
+    }
+    throw failure;
+  }
+  async function receiveBatch(user, orderId, input, route) {
+    requireMaterial(user, 'materials.acceptance.write');
+    return idempotent(user, route, input, async () => {
+      const order = await request(orderId);
+      versions(order, null, { requestVersion: input.version });
+      if (order.status !== 'submitted') conflict('只有已提交申报可办理验收');
+      if (!Array.isArray(input.items) || !input.items.length || input.items.length > 5000) error(400, '每次请选择1至5000条申报明细');
+      const seen = new Set(), prepared = [], locations = new Map();
+      let unitCount = 0;
+      for (const entry of input.items) {
+        try {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) error(400, '验收明细须为对象');
+          const id = integer(entry.itemId, '申报明细');
+          if (seen.has(id)) error(400, '同一申报明细不能重复选择');
+          seen.add(id);
+          const original = await item(order.id, id);
+          versions(order, original, { requestVersion: input.version, version: entry.itemVersion });
+          prepared.push({ input: { ...entry }, original });
+        } catch (failure) { rowFailure(failure, entry?.itemId); }
+      }
+      for (const entry of prepared) {
+        try {
+          const line = await linkReceiptCatalog(order, entry.original, entry.input, user, 'receive');
+          delete entry.input.catalogId; delete entry.input.newCatalog;
+          const quantity = decimal(entry.input.quantity, 3, '合格数量', true);
+          const master = await catalog(line.catalog_id);
+          unitQuantity(master, quantity, '合格数量', 1000);
+          if (master.tracking_mode === 'unit') unitCount = safeSum([unitCount, quantity / 1000]);
+          if (unitCount > 1000) error(400, '本次合计最多生成1000个单件编码，请分次验收');
+          if (quantity > 0 && Object.hasOwn(entry.input, 'location')) {
+            const identity = { catalog_id: line.catalog_id, region_id: line.region_id, warehouse: line.warehouse,
+              batch: text(entry.input.batch ?? '', '批号', 100, true), expiry_date: date(entry.input.expiryDate, '有效期', true) };
+            const location = await intakeLocation(identity, entry.input, user, `${order.no} 批量验收入库位置`, false);
+            const key = JSON.stringify(identityArgs(identity)), existing = locations.get(key);
+            if (existing && existing.location !== location) conflict('本次同一库存批次填写了不同存放位置，请统一后再验收');
+            locations.set(key, { identity, input: entry.input, location });
+          }
+        } catch (failure) { rowFailure(failure, entry.input.itemId); }
+      }
+      for (const value of locations.values()) await intakeLocation(value.identity, value.input, user, `${order.no} 批量验收入库位置`);
+      const arrivalId = await createArrival(order, user), receipts = [];
+      for (const entry of prepared) {
+        try {
+          const data = { ...entry.input }; delete data.location; delete data.locationVersion;
+          const result = await receiptInTransaction(user, data, 'receive', order.id, data.itemId, null, { prevalidated: true, arrivalId });
+          receipts.push(result.receipt);
+        } catch (failure) { rowFailure(failure, entry.input.itemId); }
+      }
+      return { arrivalId, receipts, request: await requestView(order.id, user) };
+    });
   }
   function attachmentInput(input) {
     const name = text(input.name, '文件名', 200);
     if (name === '.' || name === '..' || /[\\/]/.test(name)) error(400, '文件名不能包含路径');
     const mimeType = text(input.mimeType || 'application/octet-stream', '文件类型', 120);
     if (!/^[\w.+-]+\/[\w.+-]+$/.test(mimeType)) error(400, '文件类型无效');
-    if (typeof input.content !== 'string' || !input.content || input.content.length > Math.ceil(FILE_LIMIT / 3) * 4 ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.content)) error(400, '附件须为不超过5 MiB的有效base64');
+    if (typeof input.content !== 'string' || !input.content || input.content.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(input.content)) error(400, `文件“${name}”须为有效base64`);
+    if (input.content.length > Math.ceil(FILE_LIMIT / 3) * 4) error(400, `文件“${name}”解码约${Buffer.byteLength(input.content, 'base64')}字节，超过单份5 MiB（${FILE_LIMIT}字节）上限`);
     const content = Buffer.from(input.content, 'base64');
-    if (!content.length || content.length > FILE_LIMIT || content.toString('base64') !== input.content) error(400, '附件内容无效或超过5 MiB');
+    if (!content.length || content.toString('base64') !== input.content) error(400, `文件“${name}”附件内容无效`);
+    if (content.length > FILE_LIMIT) error(400, `文件“${name}”为${content.length}字节，超过单份5 MiB（${FILE_LIMIT}字节）上限`);
     return { name, mimeType, content };
   }
   function attachmentPath(storedName) {
     if (!/^[a-f0-9-]{36}\.bin$/.test(storedName)) error(400, '附件存储标识无效');
     return path.join(uploads, 'materials', storedName);
+  }
+  function deliveryFile(input) {
+    const file = attachmentInput({ ...input, mimeType: input.mimeType ?? input.mime });
+    const data = file.content, extension = path.extname(file.name).toLowerCase();
+    let png = false;
+    if (data.length >= 45 && data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && data.readUInt32BE(8) === 13 &&
+        data.toString('ascii', 12, 16) === 'IHDR' && data.readUInt32BE(16) > 0 && data.readUInt32BE(20) > 0) {
+      let imageData = false;
+      for (let offset = 8; offset + 12 <= data.length;) {
+        const length = data.readUInt32BE(offset), kind = data.toString('ascii', offset + 4, offset + 8);
+        offset += 12 + length;
+        if (offset > data.length) break;
+        if (kind === 'IDAT') imageData = true;
+        if (kind === 'IEND') { png = length === 0 && offset === data.length && imageData; break; }
+      }
+    }
+    let jpeg = false, dimensions = false;
+    if (data.length >= 12 && data[0] === 0xff && data[1] === 0xd8 && data.at(-2) === 0xff && data.at(-1) === 0xd9) {
+      for (let offset = 2; offset < data.length - 2;) {
+        if (data[offset++] !== 0xff) break;
+        while (data[offset] === 0xff) offset++;
+        const marker = data[offset++];
+        if (offset + 2 > data.length) break;
+        const length = data.readUInt16BE(offset);
+        if (length < 2 || offset + length > data.length) break;
+        if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker) && length >= 8) dimensions = data.readUInt16BE(offset + 3) > 0 && data.readUInt16BE(offset + 5) > 0;
+        if (marker === 0xda) { jpeg = dimensions; break; }
+        offset += length;
+      }
+    }
+    const pdf = /^%PDF-(?:1\.[0-9]|2\.0)/.test(data.toString('ascii', 0, 8)) && /%%EOF\s*$/.test(data.subarray(Math.max(0, data.length - 1024)).toString('ascii'));
+    const detected = png ? 'image/png' : jpeg ? 'image/jpeg' : pdf ? 'application/pdf' : '';
+    if (!detected || file.mimeType !== detected || !(detected === 'image/png' ? ['.png'] : detected === 'image/jpeg' ? ['.jpg', '.jpeg'] : ['.pdf']).includes(extension)) {
+      error(400, `文件“${file.name}”的实际内容、扩展名和类型不一致；仅支持JPEG、PNG、PDF，HEIC请先转换`);
+    }
+    return { ...file, sha256: crypto.createHash('sha256').update(data).digest('hex') };
+  }
+  function requireArrivalRead(user) {
+    if (!permit(user, 'materials.amount.read')) error(403, '到货清单及历史资料需要金额读取权限');
+  }
+  async function arrival(id) {
+    const row = await one('SELECT * FROM material_arrivals WHERE id=?', integer(id, '到货登记'));
+    if (!row) error(404, '到货登记不存在');
+    return row;
+  }
+  async function arrivalView(row, user, includeReceipts = false) {
+    const receipts = await all('SELECT * FROM material_receipts WHERE arrival_id=? ORDER BY id', row.id);
+    return { id: row.id, requestId: row.request_id, requestRevision: row.request_revision,
+      actorId: row.actor_id, actorName: await actorName(row.actor_id), createdAt: row.created_at,
+      documentVersion: row.document_version, receiptIds: receipts.map(receipt => receipt.id),
+      ...(includeReceipts ? { receipts: await mapRows(receipts, event => receiptView(event)) } : {}) };
+  }
+  async function arrivalDocuments(row, user) {
+    requireArrivalRead(user);
+    const versions = await all('SELECT * FROM material_arrival_document_versions WHERE arrival_id=? ORDER BY version DESC', row.id);
+    return { arrival: await arrivalView(row, user), version: row.document_version,
+      versions: await mapRows(versions, async version => ({ id: version.id, version: version.version, reason: version.reason,
+        createdAt: version.created_at, actorId: version.actor_id, actorName: await actorName(version.actor_id),
+        files: (await all('SELECT * FROM material_attachments WHERE document_version_id=? ORDER BY id', version.id)).map(attachmentView) })) };
+  }
+  async function saveArrivalDocuments(user, id, input, route) {
+    requireMaterial(user, 'materials.acceptance.write');
+    requireArrivalRead(user);
+    return idempotent(user, route, input, async () => {
+      const row = await arrival(id);
+      if (!Number.isSafeInteger(input.version) || input.version < 0) error(400, '请提供读取时的资料整数版本');
+      if (row.document_version !== input.version) conflict('本次到货资料已有新版本，请重新读取后确认');
+      const reason = text(input.reason ?? '', '替换本次清单原因', 1000, row.document_version === 0);
+      if (!Array.isArray(input.files) || !input.files.length || input.files.length > 10) error(400, '每版清单请选择1至10份文件，每份不超过5 MiB，整组合计不超过15 MiB');
+      const files = input.files.map((value, index) => {
+        try { return deliveryFile(value); }
+        catch (failure) { if (failure.status) failure.message = `第${index + 1}份清单：${failure.message}`; throw failure; }
+      });
+      const total = safeSum(files.map(file => file.content.length));
+      if (total > 15 * 1024 * 1024) error(400, `本组清单共${total}字节，超过15 MiB；请压缩图片或PDF后重试`);
+      const version = row.document_version + 1;
+      const inserted = await run('INSERT INTO material_arrival_document_versions(arrival_id,version,reason,actor_id,created_at) VALUES(?,?,?,?,?)', row.id, version, reason, user.id, now());
+      for (const file of files) {
+        const storedName = crypto.randomUUID() + '.bin', destination = attachmentPath(storedName);
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.writeFileSync(destination, file.content, { flag: 'wx', mode: 0o600 });
+        db.afterRollback(() => fs.rmSync(destination, { force: true }));
+        await run('INSERT INTO material_attachments(document_version_id,name,mime_type,stored_name,size,sha256,actor_id) VALUES(?,?,?,?,?,?,?)',
+          inserted.lastInsertRowid, file.name, file.mimeType, storedName, file.content.length, file.sha256, user.id);
+      }
+      await run('UPDATE material_arrivals SET document_version=? WHERE id=?', version, row.id);
+      await log(user, 'UPLOAD_DELIVERY_DOCUMENTS', 'material_arrivals', row.id, JSON.stringify({ version, reason, fileCount: files.length, totalBytes: total }));
+      return arrivalDocuments(await arrival(row.id), user);
+    });
   }
   async function saveAttachment(user, input, requestId, receiptId) {
     const parsed = attachmentInput(input);
@@ -1141,6 +1381,16 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const from = date(url.searchParams.get('from') || undefined, '开始日期', true);
     const to = date(url.searchParams.get('to') || undefined, '结束日期', true);
     const filters = [], args = [];
+    const acceptanceStatus = url.searchParams.get('acceptanceStatus');
+    if (acceptanceStatus && acceptanceStatus !== 'all') {
+      if (!['open', 'pending', 'partial', 'done', 'closed'].includes(acceptanceStatus)) error(400, '验收状态无效');
+      filters.push("r.status='submitted'");
+      const pending = `EXISTS(SELECT 1 FROM material_request_items p WHERE p.request_id=r.id AND p.qty_m>COALESCE((SELECT SUM(e.qty_m+e.closed_qty_m) FROM material_receipts e WHERE e.item_id=p.id),0))`;
+      const progressed = `COALESCE((SELECT SUM(e.qty_m+e.closed_qty_m) FROM material_receipts e WHERE e.request_id=r.id),0)>0`;
+      const closed = `EXISTS(SELECT 1 FROM material_receipts e WHERE e.request_id=r.id AND e.closed_qty_m>0)`;
+      filters.push(acceptanceStatus === 'open' ? pending : acceptanceStatus === 'pending' ? `${pending} AND NOT ${progressed}` :
+        acceptanceStatus === 'partial' ? `${pending} AND ${progressed}` : acceptanceStatus === 'closed' ? `NOT ${pending} AND ${closed}` : `NOT ${pending} AND NOT ${closed}`);
+    }
     if (status) { filters.push('r.status=?'); args.push(status); }
     if (from) { filters.push('substr(r.created_at,1,10)>=?'); args.push(from); }
     if (to) { filters.push('substr(r.created_at,1,10)<=?'); args.push(to); }
@@ -1169,10 +1419,15 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       (SELECT COUNT(*) FROM material_request_items i WHERE i.request_id=r.id AND i.qty_m>
         COALESCE((SELECT SUM(e.qty_m+e.closed_qty_m) FROM material_receipts e WHERE e.item_id=i.id),0)) AS pending_items
       ${source} ORDER BY r.id DESC LIMIT ? OFFSET ?`, ...args, pageSize, offset));
+    const progress = new Map(rows.map(row => [row.id, []]));
+    if (rows.length) for (const line of await all(`${ITEM_SELECT} WHERE i.request_id IN(${rows.map(() => '?').join(',')})`, ...rows.map(row => row.id))) {
+      progress.get(line.request_id).push({ acceptedQtyM: line.accepted_qty_m, closedQtyM: line.closed_qty_m,
+        remainingQtyM: safeSum([line.qty_m, -line.accepted_qty_m, -line.closed_qty_m]) });
+    }
     return { items: await mapRows(rows, async row => ({ id: row.id, no: row.no, title: row.title, description: row.description,
       status: row.status, createdBy: row.created_by, creatorName: row.creator_name, createdAt: row.created_at,
       submittedBy: row.submitted_by, submittedAt: row.submitted_at, version: row.version, revision: row.revision,
-      itemCount: row.item_count, progress: { pendingItems: row.pending_items }, canEditHeader: mayHeader(row, user),
+      itemCount: row.item_count, progress: requestProgress(progress.get(row.id)), canEditHeader: mayHeader(row, user),
       canDelete: await mayDeleteRequest(row, user), canCancel: row.status === 'submitted' && material(user, 'materials.request.edit_submitted') &&
         !(await one('SELECT 1 FROM material_receipts WHERE request_id=? LIMIT 1', row.id)),
       canAddItem: row.status === 'draft', canSubmit: row.status === 'draft' && row.item_count > 0 && material(user, 'materials.request.submit')
@@ -1798,6 +2053,28 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }));
       return reply(result);
     }
+    if ((match = route.match(/^\/requests\/(\d+)\/snapshot(\/export\.xlsx)?$/)) && method === 'GET') {
+      if (match[2]) return exportRequestSnapshot(res, match[1], url, user);
+      return reply(await requestSnapshot(match[1], url.searchParams.get('revision')));
+    }
+    if ((match = route.match(/^\/requests\/(\d+)\/receipts\/batch$/)) && method === 'POST') {
+      const result = await receiveBatch(user, match[1], input, route);
+      return reply(result.value, result.status);
+    }
+    if ((match = route.match(/^\/requests\/(\d+)\/arrivals$/)) && method === 'GET') {
+      requireArrivalRead(user);
+      const order = await request(match[1]), { page, pageSize, offset } = pageInput(url);
+      const total = (await one('SELECT COUNT(*) AS total FROM material_arrivals WHERE request_id=?', order.id)).total;
+      const rows = await all('SELECT * FROM material_arrivals WHERE request_id=? ORDER BY id DESC LIMIT ? OFFSET ?', order.id, pageSize, offset);
+      return reply({ items: await mapRows(rows, row => arrivalView(row, user, true)), total, page, pageSize });
+    }
+    if ((match = route.match(/^\/arrivals\/(\d+)\/documents$/))) {
+      if (method === 'GET') return reply(await arrivalDocuments(await arrival(match[1]), user));
+      if (method === 'POST') {
+        const result = await saveArrivalDocuments(user, match[1], input, route);
+        return reply(result.value, result.status);
+      }
+    }
     if ((match = route.match(/^\/requests\/(\d+)\/revisions$/)) && method === 'GET') {
       const order = (await request(match[1]));
       const revisions = (await mapRows(await all('SELECT * FROM material_request_revisions WHERE request_id=? ORDER BY revision', order.id),async row => ({
@@ -1952,7 +2229,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const attachment = (await one('SELECT * FROM material_attachments WHERE id=?', integer(match[1])));
       if (!attachment) error(404, '附件不存在');
       if (method === 'GET' && match[2]) {
-        if (attachment.receipt_id && !permit(user, 'materials.amount.read')) error(403, '验收附件需要金额读取权限');
+        if ((attachment.receipt_id || attachment.document_version_id) && !permit(user, 'materials.amount.read')) error(403, '验收附件需要金额读取权限');
         const file = attachmentPath(attachment.stored_name);
         if (!fs.existsSync(file)) error(404, '附件文件缺失');
         res.writeHead(200, { 'Content-Type': attachment.mime_type, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(attachment.name)}`,
@@ -2012,13 +2289,15 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (!fs.existsSync(file)) error(409, `附件 ${row.id} 缺失，不能生成声称完整的物资备份`);
       const contents = fs.readFileSync(file);
       if (contents.length !== row.size) error(409, `附件 ${row.id} 大小不符，请先检查存储`);
+      const digest = crypto.createHash('sha256').update(contents).digest('hex');
+      if (row.sha256 && row.sha256 !== digest) error(409, `附件 ${row.id} 摘要不符，请先检查存储`);
       totalBytes = safeSum([totalBytes, contents.length]);
-      if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请停服备份完整运行目录');
-      return { id: row.id, content: contents.toString('base64'), sha256: crypto.createHash('sha256').update(contents).digest('hex') };
+      if (totalBytes > BACKUP_LIMIT) error(413, '附件总量超过在线业务备份上限，请使用 scripts/backup-runtime.ps1 的 PostgreSQL＋附件一致性备份');
+      return { id: row.id, content: contents.toString('base64'), sha256: digest };
     });
-    const result = { type: 'labos-materials-backup', schemaVersion: 7, generatedAt: now(),
+    const result = { type: 'labos-materials-backup', schemaVersion: 8, generatedAt: now(),
       users: (await all('SELECT id,username FROM users ORDER BY id')), data, files };
-    if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请停服备份完整运行目录');
+    if (Buffer.byteLength(JSON.stringify(result)) > 25 * 1024 * 1024) error(413, '业务JSON备份超过在线恢复上限，请使用 scripts/backup-runtime.ps1 的 PostgreSQL＋附件一致性备份');
     return result;
     });
   }
@@ -2035,6 +2314,29 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     }));
   }
   async function validateRestoredLedger() {
+    for (const entry of await all('SELECT * FROM material_arrivals')) {
+      const order = await request(entry.request_id);
+      if (entry.request_revision < 1 || entry.request_revision > order.revision || !validTimestamp(entry.created_at)) error(400, '到货登记申报版本或时间无效');
+      const receipts = await all('SELECT * FROM material_receipts WHERE arrival_id=?', entry.id);
+      if (!receipts.length || receipts.some(row => !['acceptance', 'rejection'].includes(row.type) || row.request_id !== entry.request_id || row.request_revision !== entry.request_revision || row.actor_id !== entry.actor_id)) error(400, '到货登记与验收事件归属、版本或办理人不一致');
+      const versions = await all('SELECT * FROM material_arrival_document_versions WHERE arrival_id=? ORDER BY version', entry.id);
+      if (versions.length !== entry.document_version || versions.some((version, index) => version.version !== index + 1)) error(400, '到货清单当前指针或历史版本不连续');
+      for (const version of versions) {
+        if (!validTimestamp(version.created_at) || text(version.reason, '清单替换原因', 1000, version.version === 1) !== version.reason) error(400, '到货清单历史时间或原因无效');
+        const files = await all('SELECT * FROM material_attachments WHERE document_version_id=?', version.id);
+        if (!files.length || files.length > 10 || safeSum(files.map(file => file.size)) > 15 * 1024 * 1024 || files.some(file => file.active !== 1 || file.actor_id !== version.actor_id || !/^[a-f0-9]{64}$/.test(file.sha256))) error(400, '到货清单文件数量、总量、操作人或摘要无效');
+      }
+    }
+    for (const event of await all('SELECT * FROM material_receipts')) {
+      if (event.arrival_id && event.manufacturer_status === 'legacy') error(400, '新版到货验收不能缺少厂家核对依据');
+      if (event.manufacturer_status !== 'legacy' && ['acceptance', 'reversal', 'rejection'].includes(event.type)) {
+        const snapshot = JSON.parse(event.snapshot);
+        if ((snapshot.manufacturer || '') !== event.expected_manufacturer) error(400, '验收预期厂家与原申报快照不一致');
+        const checked = manufacturerCheck({ manufacturer: event.expected_manufacturer }, { manufacturer: event.manufacturer,
+          manufacturerStatus: event.manufacturer_status, manufacturerReason: event.manufacturer_reason, differenceReason: event.difference_reason }, Math.abs(event.qty_m));
+        if (checked.manufacturer !== event.manufacturer) error(400, '验收厂家未规范化');
+      }
+    }
     for (const row of (await all('SELECT * FROM material_catalog'))) {
       trackingMode(row.tracking_mode);
       if (![0, 1].includes(row.active) || !['manual', 'receipt'].includes(row.origin) || text(row.remark, '物资备注', 2000, true) !== row.remark || row.merged_into === row.id) error(400, '物资信息状态、来源、备注或合并归属无效');
@@ -2271,10 +2573,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const topKeys = ['type', 'schemaVersion', 'generatedAt', 'users', 'data', 'files'];
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
         Object.keys(payload).some(key => !topKeys.includes(key)) || topKeys.some(key => !Object.hasOwn(payload, key)) ||
-        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5, 6, 7].includes(payload.schemaVersion) || !payload.data ||
+        payload.type !== 'labos-materials-backup' || ![1, 2, 3, 4, 5, 6, 7, 8].includes(payload.schemaVersion) || !payload.data ||
         typeof payload.data !== 'object' || Array.isArray(payload.data) ||
         !Array.isArray(payload.users) || !Array.isArray(payload.files)) error(400, '无效的完整物资备份格式');
-    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : payload.schemaVersion < 7 ? V6_TABLES : TABLES;
+    const sourceTables = payload.schemaVersion === 1 ? V1_TABLES : payload.schemaVersion === 2 ? V2_TABLES : payload.schemaVersion === 3 ? V3_TABLES : payload.schemaVersion === 4 ? V4_TABLES : payload.schemaVersion < 7 ? V6_TABLES : payload.schemaVersion === 7 ? V7_TABLES : TABLES;
     if (sourceTables.some(table => !Array.isArray(payload.data[table])) ||
         Object.keys(payload.data).some(key => !sourceTables.includes(key))) error(400, '备份业务表无效');
     if (typeof payload.generatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.generatedAt) ||
@@ -2298,6 +2600,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       const columns = await db.columns(table);
       const allowed = new Map(columns.map(column => [column.name, column]));
       normalized[table] = (payload.data[table] || []).map(source => {
+        if (payload.schemaVersion < 8 && source && typeof source === 'object') {
+          const added = { material_receipts: { arrival_id: null, expected_manufacturer: '', manufacturer_status: 'legacy', manufacturer_reason: '', difference_reason: '' },
+            material_attachments: { document_version_id: null, sha256: '' } }[table];
+          if (added) {
+            if (Object.keys(added).some(key => Object.hasOwn(source, key))) error(400, '旧版备份不能包含新版到货字段');
+            source = { ...source, ...added };
+          }
+        }
         if (payload.schemaVersion < 7 && source && typeof source === 'object') {
           const added = { material_categories: { profile: 'general', version: 1 },
             material_catalog: { active: 1, cas_number: '', purity: '', storage_conditions: '', sds_url: '' },
@@ -2376,6 +2686,8 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (!attachment) error(400, '备份附件缺少元数据');
       const parsed = attachmentInput({ name: attachment.name, mimeType: attachment.mime_type, content: file.content });
       if (parsed.content.length !== attachment.size || crypto.createHash('sha256').update(parsed.content).digest('hex') !== file.sha256) error(400, '备份附件摘要或大小不符');
+      if (attachment.sha256 && attachment.sha256 !== file.sha256) error(400, '备份附件元数据摘要不符');
+      if (attachment.document_version_id) deliveryFile({ name: attachment.name, mimeType: attachment.mime_type, content: file.content });
       byteCount = safeSum([byteCount, parsed.content.length]);
       if (byteCount > BACKUP_LIMIT) error(413, '附件内容超过在线恢复上限');
       contents.set(file.id, parsed.content);
@@ -2571,10 +2883,11 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         sheet('申报单信息', ['单号', '主题', '说明', '状态', '修订版', '创建人', '提交时间'], orders.map(order => [order.no, order.title, order.description, statusName(order.status), order.revision, order.creatorName, order.submittedAt])),
         sheet('申报明细', ['单号', '物资编码', '名称', '分类', '规格', '单位', '归属区域', '仓库', '申报数量', '用途', '填报人', '厂家', '物资信息状态'],
           items.map(({ order, line }) => [order.no, line.code, line.name, line.categoryName, line.spec, line.unit, line.regionName, warehouseName(line.warehouse), line.qtyM / 1000, line.purpose, line.authorName, line.manufacturer || '', line.catalogId ? '已关联物资信息' : '验收时完善物资信息'])),
-        sheet('验收流水', ['事件ID', '类型', '申报修订版', '物资编码', '名称', '分类', '区域', '仓库', '合格数量', '拒收数量', '结案数量', ...(amount ? ['合格总金额（元）'] : []), '原因', '拒收原因', '日期', '规格', '单位', '厂家', '备注', '批号', '有效期', '存放位置', '零金额原因', '验收人', '验收时间'],
+        sheet('验收流水', ['事件ID', '类型', '申报修订版', '物资编码', '名称', '分类', '区域', '仓库', '合格数量', '拒收数量', '结案数量', ...(amount ? ['合格总金额（元）'] : []), '原因', '拒收原因', '日期', '规格', '单位', '厂家', '备注', '批号', '有效期', '存放位置', '零金额原因', '验收人', '验收时间', '到货登记ID', '申报厂家', '厂家核对状态', '厂家未标明原因', '厂家差异原因'],
           receipts.map(event => [event.id, receiptTypeName(event.type), event.requestRevision, event.snapshot.code, event.snapshot.name, event.snapshot.categoryName, event.snapshot.regionName, warehouseName(event.snapshot.warehouse),
             event.qtyM / 1000, event.rejectedQtyM / 1000, event.closedQtyM / 1000, ...(amount ? [event.amountCents / 100] : []), event.reason, event.rejectedReason, event.date,
-            event.snapshot.spec, event.snapshot.unit, event.manufacturer, event.note, event.batch, event.expiryDate, event.snapshot.location || '', event.zeroAmountReason, event.actorName, event.createdAt])),
+            event.snapshot.spec, event.snapshot.unit, event.manufacturer, event.note, event.batch, event.expiryDate, event.snapshot.location || '', event.zeroAmountReason, event.actorName, event.createdAt,
+            event.arrivalId, event.expectedManufacturer, ({ legacy: '历史未记录', known: '已核对实到厂家', unknown: '厂家未标明' })[event.manufacturerStatus], event.manufacturerReason, event.differenceReason])),
         sheet('修订记录', ['申报单ID', '修订版', '修改原因', '操作人', '时间', '修改前快照摘要', '修改后快照摘要'],
           (await mapRows(revisions,async row => [row.request_id, row.revision, row.reason, (await actorName(row.actor_id)), row.created_at,
             snapshotSummary(row.before_snapshot), snapshotSummary(row.after_snapshot)])))

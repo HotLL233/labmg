@@ -85,6 +85,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       const items = materialLists[url.pathname.slice('/api/materials/'.length)] || [];
       body = { items, total: items.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 };
       if (url.pathname === '/api/materials/unit-label-rule') body = { rule: { template: 'LAB-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1 }, nextSequence: 31, dateBasis: 'UTC' };
+      const acceptanceRequest = { ...materialLists.requests[0], status: 'submitted', revision: 1, version: 1,
+        progress: { pendingItems: 1 }, items: [{ ...materialLists.acceptance[0], qtyM: 1000, version: 1, manufacturer: '合成厂家甲' }] };
+      if (url.pathname === '/api/materials/requests' && url.searchParams.get('status') === 'submitted') body = { ...body, items: [acceptanceRequest], total: 1 };
+      if (url.pathname === '/api/materials/requests/101') body = acceptanceRequest;
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -93,7 +97,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     const result = await page.evaluate(() => {
       const width = innerWidth;
       const outside = [...document.querySelectorAll('.layout>main>header input,.layout>main>header button,#page button,#page input,#page select')]
-        .filter(node => node.getClientRects().length && !node.closest('.table,.mw-table,.asset-flow,.mw-nav,.nav,.archive-menu'))
+        .filter(node => node.getClientRects().length && !node.closest('.table,.mw-table,.asset-flow,.mw-nav,.mw-subnav,.nav,.archive-menu'))
         .filter(node => { const box = node.getBoundingClientRect(); return box.left < -1 || box.right > width + 1; })
         .map(node => ({ text: node.textContent || node.id || node.name, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right }));
       // 文字被挤成多行不会触发横向溢出，却会让控件变形（如「菜单」变竖排两字），
@@ -125,6 +129,17 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.equal(await page.locator('body').evaluate(node => node.classList.contains('drawer-open')), false, 'navigation closes the drawer');
     assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false, 'navigation restores the main controls');
     return button;
+  };
+  const navigateMaterial = async target => {
+    if (target === 'catalog') await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+    else if (target === 'settings') {
+      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+      await page.locator('.mw-subnav [data-page="settings"]').click();
+    } else if (['issues', 'openings'].includes(target)) {
+      if (!(await page.locator(`.mw-subnav [data-page="${target}"]`).count())) await page.locator('.mw-nav [data-page="inventory"]').click();
+      await page.locator(`.mw-subnav [data-page="${target}"]`).click();
+    } else await page.locator(`.mw-nav [data-page="${target}"]`).click();
+    await page.waitForFunction(target => (target === 'settings' ? document.querySelector('[data-mw="setting"]') : document.querySelector('#mw-filters')) && !document.querySelector('#page .mw-empty'), target);
   };
   const checkTables = async (label, selector = '#page .table') => {
     const tables = await page.locator(selector).evaluateAll(nodes => nodes.map(container => {
@@ -227,8 +242,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     }
     await navigate('materials');
     for (const materialPage of ['requests', 'acceptance', 'inventory', 'issues', 'openings']) {
-      await page.locator(`.mw-nav [data-page="${materialPage}"]`).click();
-      await page.waitForFunction(() => document.querySelector('#mw-filters') && !document.querySelector('#page .mw-empty'));
+      await navigateMaterial(materialPage);
       await checkLayout(`${width}px materials ${materialPage}`);
       await checkTables(`${width}px materials ${materialPage}`);
       if (materialPage === 'inventory') {
@@ -248,7 +262,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       }
       if ([390, 1440].includes(width) && ['acceptance', 'inventory'].includes(materialPage)) await page.screenshot({ path: path.join(screenshots, `${width}-materials-${materialPage}.png`), fullPage: true });
     }
-    await page.locator('.mw-nav [data-page="catalog"]').click();
+    await navigateMaterial('catalog');
     await page.locator('#page [data-mw="catalog-edit"]').waitFor();
     await checkTables(`${width}px material catalog workspace`);
     assert.ok(await page.locator('#page .table').evaluate(node => node.scrollWidth <= node.clientWidth + 1 || innerWidth >= 768), 'catalog card layout stays inside its workspace');
@@ -261,7 +275,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'catalog edit keeps fields inside the dialog');
     if ([390, 1440].includes(width)) await page.screenshot({ path: path.join(screenshots, `${width}-catalog-edit.png`) });
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
-    await page.locator('.mw-nav [data-page="settings"]').click();
+    await navigateMaterial('settings');
     await page.locator('#page [data-mw="setting"][data-setting="numbering"]').click();
     await page.locator('#page [data-mw="numbering-edit"]').first().waitFor();
     await checkTables(`${width}px numbering rules workspace`);
@@ -280,7 +294,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'place edit remains within the dialog');
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
     await page.locator('#page [data-mw="setting"][data-setting="numbering"]').click();
-    await page.locator('#page [data-mw="label-template"]').click();
+    await page.locator('.mw-subnav[aria-label="物资设置分区"] [data-mw="label-template"]').click();
     await page.locator('#material-label-designer').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#material-label-designer table').evaluate(node => getComputedStyle(node).display), 'table', 'label design coordinates retain their table layout');
     assert.equal(await page.locator('#material-label-designer thead').evaluate(node => getComputedStyle(node).display), 'table-header-group', 'label designer does not use business card labels');

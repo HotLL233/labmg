@@ -130,7 +130,7 @@ test('full backup preserves laboratory fields and storage paths, rejects cycles 
   const parent = (await f.call('POST', '/storage-places', { name: '实验室' })).data;
   const child = (await f.call('POST', '/storage-places', { name: '柜一', parentId: parent.id })).data;
   const backup = await f.materials.backup(f.user);
-  assert.equal(backup.schemaVersion, 7);
+  assert.equal(backup.schemaVersion, 8);
   const corruptTree = structuredClone(backup);
   corruptTree.data.material_storage_places[0].parent_id = child.id;
   await assert.rejects(target.materials.restore(corruptTree, target.user), { status: 400 });

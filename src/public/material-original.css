@@ -1,0 +1,39 @@
+/* 固定原单的屏幕核对与 A4 纸单，不影响库存实物标签。 */
+.mo-sheet{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--c-text);overflow-wrap:anywhere}
+.mo-heading{display:flex;gap:var(--sp-4);align-items:flex-start;justify-content:space-between}
+.mo-heading h2{font-size:var(--fs-panel);line-height:var(--lh-tight);margin:0 0 var(--sp-2)}
+.mo-heading p{margin:var(--sp-1) 0}
+.mo-heading figure{margin:0;text-align:center;flex-shrink:0;font-size:var(--fs-note)}
+.mo-qr{display:block;width:28mm;height:28mm;object-fit:contain}
+.mo-handwrite{padding:var(--sp-3) 0;border-block:1px solid var(--c-line)}
+.mo-records table{width:100%;min-width:0;table-layout:fixed;white-space:normal}
+.mo-records th,.mo-records td{overflow-wrap:anywhere;vertical-align:top}
+.mo-records td small{display:block;font-size:var(--fs-note);margin-top:var(--sp-1);color:var(--c-text-2)}
+.mo-note,.mo-link,.mo-version-notice{font-size:var(--fs-note);line-height:var(--lh-body)}
+.mo-version-notice{background:var(--c-primary-50);padding:var(--sp-2) var(--sp-3)}
+.mo-status{flex:1 1 100%;margin:0;color:var(--c-danger);font-size:var(--fs-label)}
+.mo-print{margin:0;background:var(--c-subtle)}
+.mo-print .mo-tools{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-3);padding:var(--sp-3);background:var(--c-surface)}
+.mo-print .mo-tools button{min-height:44px;font-size:var(--fs-body)}
+.mo-print .mo-tools p{margin:0;font-size:var(--fs-label)}
+.mo-print .mo-sheet{padding:var(--sp-4);background:var(--c-surface)}
+.mo-print .mo-records{overflow:auto}
+.mo-print .mo-records th,.mo-print .mo-records td{padding:var(--sp-2);border:1px solid var(--c-line);font-size:var(--fs-label);text-align:left}
+@media screen and (max-width:767px){
+  #material-original .mo-heading{flex-wrap:wrap}
+  #material-original .mo-heading figure{display:flex;align-items:center;gap:var(--sp-2)}
+  #material-original .mo-records table{table-layout:auto}
+  #material-original .mo-records colgroup{display:none}
+}
+@media print{
+  @page material-original{size:A4 landscape;margin:10mm}
+  .mo-print{background:white}
+  .mo-print .mo-tools{display:none}
+  .mo-print .mo-sheet{page:material-original;padding:0;color:black}
+  .mo-print .mo-records{overflow:visible;border:0}
+  .mo-print .mo-records table{min-width:0;width:100%;table-layout:fixed;white-space:normal}
+  .mo-print .mo-records thead{display:table-header-group}
+  .mo-print .mo-records tr{break-inside:avoid}
+  .mo-print .mo-records th,.mo-print .mo-records td{border:1px solid #555;padding:2mm;font-size:12px;white-space:normal;overflow:visible}
+  .mo-print .mo-check{text-align:center}
+}
