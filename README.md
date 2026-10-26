@@ -1,12 +1,18 @@
 # LabOS 实验室综合管理系统
 
-当前源码候选：**0.14.1／按单验收与到货清单**。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。源码正在最终回归，镜像和公开交付以[版本说明](docs/CHANGELOG.md)实际发布结果为准。升级前请按[完整备份恢复](docs/BACKUP_RESTORE.md)备份原PG18项目；本次新增0006加法迁移、schema8，不能用旧程序恢复新格式或直接回退已升级数据库。
+当前公开版本：**0.14.1／按单验收与到货清单（2026-10-26）**。[0.14.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.1)已公开为prerelease（Release423914394），提供双架构镜像、两份YML、完整离线包和源码。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。
+
+冻结源码`f223e4c`／`v0.14.1`；正式构建40278890455的真实PostgreSQL18.6回归262/262、54JS通过。验证40281052371／运维提交`a41f7fdb8453d5204f17453471353a38d8a09a83`四项容器门禁及真实Docker完整备份／空库恢复12项通过，ARM64使用QEMU。本机`artifacts/releases/0.14.1/`完整12件489533376字节、11摘要、5份冻结原字节附件及双TAR三镜像／六config核验通过；两TAR经59／58段完整下载和整包SHA256核对。
+
+认证官方API已核对真实标签、公开Release及12资产元数据；匿名API流程返回403，原failed报告保留。独立官方公开直链匿名完整下载10个非TAR附件1277376字节通过，0凭据／0API／0TAR；组合结果为`passed-with-anonymous-api-limitations`，不称匿名API整体通过或匿名全量TAR下载。升级前按[完整备份恢复](docs/BACKUP_RESTORE.md)备份原PG18数据库、附件和证书；本轮引入0006加法迁移及schema8，保留原项目`runtime/`、`https/`和UID/GID，回退须恢复升级前完整副本。未自动升级NAS，实体手机、USB打印及长期容量未验；完整边界见[版本说明](docs/CHANGELOG.md)。
+
+冻结前候选说明（以下为当时状态）：**0.14.1／按单验收与到货清单**。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。源码正在最终回归，镜像和公开交付以[版本说明](docs/CHANGELOG.md)实际发布结果为准。升级前请按[完整备份恢复](docs/BACKUP_RESTORE.md)备份原PG18项目；本次新增0006加法迁移、schema8，不能用旧程序恢复新格式或直接回退已升级数据库。该阶段由上方正式发布结果补充，冻结附件保留当时快照，不重打资产或移动标签。
 
 0.14.0保留为未公开候选：容器测试遗漏必填厂家字段，已在0.14.1补齐合成数据并重新执行发布验证；冻结标签和原附件不改写。
 
-当前公开版本：**0.13.1／R0–R2 界面基础与断点整改（2026-10-26）**。[0.13.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)已公开为prerelease，提供双架构镜像、两份YML、完整离线包和源码；统一字号、表格及三处响应式问题，R3/R4留后续0.13.2。正式PG18.6回归244/244、49JS、四项容器门禁及本机12件交付核验通过；匿名官方API元数据与10个非TAR附件下载、独立公开直链下载均通过。完整证据及硬件未验范围见[版本说明](docs/CHANGELOG.md)，未自动升级NAS。
+上一公开版本：**0.13.1／R0–R2 界面基础与断点整改（2026-10-26）**。[0.13.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)已公开为prerelease，提供双架构镜像、两份YML、完整离线包和源码；统一字号、表格及三处响应式问题，R3/R4留后续0.13.2。正式PG18.6回归244/244、49JS、四项容器门禁及本机12件交付核验通过；匿名官方API元数据与10个非TAR附件下载、独立公开直链下载均通过。完整证据及硬件未验范围见[版本说明](docs/CHANGELOG.md)，未自动升级NAS。
 
-上一公开版本：**0.13.0（记录工作区，公开验证版，2026-10-23）**。按已确认的[界面方案](docs/UI_WORKSPACE_OPTIMIZATION.md)改造常驻运行版本／退出、名称优先的物资库、分类设置、记录表与多级返回，保留既有权限、库存七列、全局合计、Excel、二维码和系统打印。[0.13.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.0)已公开为prerelease（Release421514037），提供双架构镜像、两份YML、完整离线包与源码。
+历史公开版本：**0.13.0（记录工作区，公开验证版，2026-10-23）**。按已确认的[界面方案](docs/UI_WORKSPACE_OPTIMIZATION.md)改造常驻运行版本／退出、名称优先的物资库、分类设置、记录表与多级返回，保留既有权限、库存七列、全局合计、Excel、二维码和系统打印。[0.13.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.0)已公开为prerelease（Release421514037），提供双架构镜像、两份YML、完整离线包与源码。
 
 0.13.0冻结于`1a15ae0`／`v0.13.0`，正式构建39910796864的真实PostgreSQL18.6回归243/243、47份JS检查及验证39911550455的四项容器门禁通过，ARM64使用QEMU。本机`artifacts/releases/0.13.0/`完整12件489308976字节，11摘要、5份冻结源附件及双TAR三镜像／六config核验通过。认证官方发布元数据核对通过，10个非TAR附件1110320字节经公开直链匿名完整下载通过；匿名API首请求403限流，匿名元数据流程未完成，完整边界见[版本说明](docs/CHANGELOG.md)。未自动升级NAS，真手机、原生打印窗口／USB及长期容量未验；发布后文档不改写冻结附件或移动标签。
 
@@ -82,16 +88,16 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。0.13.1已交付：在线应用镜像为 `ghcr.io/hotll233/labmg:0.13.1`，本地三镜像包使用 `labos:0.13.1`。从[0.13.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.13.1)下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL与附件，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。0.14.1已交付：在线应用镜像为 `ghcr.io/hotll233/labmg:0.14.1`，本地三镜像包使用 `labos:0.14.1`。从[0.14.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.1)下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.13.1 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.13.1/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.13.1 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.13.1/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.14.1 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.1/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.14.1 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.1/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
 本轮两份配置继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
-首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。升级前备份数据库、附件及证书；schema7物资备份不能交不支持schema7的旧版恢复，需回退时使用升级前数据库副本。0.13.1继续使用0.12.0已支持的schema7，没有新增SQL迁移或备份格式变更，本次不提供 PostgreSQL 主版本迁移。
+首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。0.14.1包含本轮新增0006到货关联迁移及schema8物资备份，旧验收记录不猜到货轮次。升级前按[完整备份恢复](docs/BACKUP_RESTORE.md)备份数据库、附件及证书；schema8不能交不支持该格式的旧程序恢复，回退须恢复升级前完整副本，不能只更换旧镜像。本次不提供PostgreSQL主版本迁移。
 
 数据保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令，`https-config/Caddyfile`是0.9.4初始化生成的代理配置。HTTPS证书继续保存在旁边的`https/data/`；群晖首次部署先创建`runtime/`与`https/`父目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 
