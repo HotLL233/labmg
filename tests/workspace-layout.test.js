@@ -112,7 +112,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     await page.locator(`.nav [data-nav="${target}"]`).click();
     await page.waitForFunction(target => current === target && !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'), target);
   };
-  const checkShell = async label => {
+  const checkShell = async (label, clickedTabs = true) => {
     check((await page.locator('#app-version').textContent()).includes(version), label + ': backend application version is visible');
     check(await visibleInViewport(page.locator('#app-version')), label + ': version is in the viewport');
     check(await visibleInViewport(page.locator('#session-user')), label + ': current account is in the viewport');
@@ -125,11 +125,43 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       const active = nav.querySelector('[aria-current="page"]') || nav.querySelector('.active');
       if (!active) return null;
       const a = active.getBoundingClientRect(), n = nav.getBoundingClientRect();
-      return { label: active.textContent, left: a.left, right: a.right, navLeft: n.left, navRight: n.right };
+      const first = nav.firstElementChild.getBoundingClientRect();
+      return { label: active.textContent, left: a.left, right: a.right, navLeft: n.left, navRight: n.right,
+        firstLeft: first.left, firstRight: first.right, scrollLeft: nav.scrollLeft, overflow: nav.dataset.overflow,
+        expectedOverflow: String(nav.scrollWidth > nav.clientWidth) };
     }).filter(Boolean));
-    for (const tab of tabs) check(tab.left >= tab.navLeft - 1 && tab.right <= tab.navRight + 1, label + ': selected navigation tab is fully visible within its scroll container', tab);
+    for (const tab of tabs) {
+      check(tab.overflow === tab.expectedOverflow, label + ': navigation overflow metadata matches its current size', tab);
+      if (clickedTabs) check(tab.left >= tab.navLeft - 1 && tab.right <= tab.navRight + 1, label + ': clicked navigation tab is fully visible within its scroll container', tab);
+      else check(tab.scrollLeft === 0 && tab.firstLeft >= tab.navLeft - 1 && tab.firstRight <= tab.navRight + 1,
+        label + ': entering materials starts with the first tab fully visible', tab);
+    }
+    const heading = await page.locator('#title').evaluate(node => getComputedStyle(node).fontSize);
+    check(heading === '22px', label + ': page title uses the page font token at every breakpoint', heading);
   };
   const checkCards = async (label, selector = '#page .table') => {
+    if (page.viewportSize().width >= 768) {
+      const layouts = await page.locator(selector).evaluateAll(containers => containers.map(container => {
+        const table = container.querySelector('table');
+        const expected = table.querySelector('td.cell-act [data-mw="catalog-detail"]') ? 160
+          : table.querySelector('td.cell-act [data-mw="issue-detail"]') ? 144
+          : table.querySelector('td.cell-act [data-mw="events"]') && table.querySelector('td.cell-act [data-mw="request"]') ? 152 : null;
+        const name = table.querySelector('tbody td strong'), headings = [...table.querySelectorAll('th')];
+        let stable = true;
+        if (name && table.closest('.page')) {
+          const original = name.textContent, before = headings.map(th => th.getBoundingClientRect().width);
+          name.textContent = '长名称物资'.repeat(6);
+          stable = headings.every((th, index) => Math.abs(th.getBoundingClientRect().width - before[index]) < 1);
+          name.textContent = original;
+        }
+        return { fixed: Boolean(table.closest('.page')), stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width) };
+      }));
+      for (const layout of layouts) {
+        if (layout.fixed) check(layout.layout === 'fixed', label + ': the real page table controls column widths', layout);
+        if (layout.fixed) check(layout.stable, label + ': a thirty-character name does not move other columns', layout);
+        if (layout.fixed && layout.expected) check(Math.abs(layout.actual - layout.expected) < 1, label + ': per-table operation width wins the generic rule', layout);
+      }
+    }
     const result = await page.locator(selector).evaluateAll(containers => containers.map(container => {
       const table = container.querySelector('table');
       const headers = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
@@ -139,6 +171,22 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     for (const row of result) if (page.viewportSize().width < 768) {
       check(row.display === 'block' && row.scroll <= row.width + 1, label + ': same table DOM becomes cards without horizontal scroll', row);
       for (const cell of row.cells) if (cell.expected && !cell.selection) check(cell.label === cell.expected, label + ': card field names come from the table header', cell);
+    }
+    if (page.viewportSize().width >= 768 && page.viewportSize().width < 1280) {
+      const operations = await page.locator(selector).evaluateAll(containers => containers.flatMap(container => {
+        const cell = container.querySelector('tbody tr:not([hidden]) td.cell-act');
+        if (!cell) return [];
+        const original = container.scrollLeft, snapshots = [];
+        for (const position of [0, container.scrollWidth]) {
+          container.scrollLeft = position;
+          const bounds = container.getBoundingClientRect(), rect = cell.getBoundingClientRect();
+          snapshots.push({ left: rect.left, right: rect.right, containerLeft: bounds.left, containerRight: bounds.right, position: getComputedStyle(cell).position });
+        }
+        container.scrollLeft = original;
+        return snapshots;
+      }));
+      for (const operation of operations) check(operation.position === 'sticky' && operation.left >= operation.containerLeft - 1 && operation.right <= operation.containerRight + 1,
+        label + ': real operation cells stay reachable at both horizontal scroll ends', operation);
     }
   };
 
@@ -152,12 +200,13 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size);
       await navigate('materials');
-      await checkShell(`${size.width} materials`);
+      await checkShell(`${size.width} materials`, false);
       for (const materialPage of ['catalog', 'requests', 'acceptance', 'inventory', 'issues', 'openings']) {
         await page.locator(`.mw-nav [data-page="${materialPage}"]`).click();
         await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
         await checkShell(`${size.width} ${materialPage}`);
         await checkCards(`${size.width} ${materialPage}`);
+        if (['acceptance', 'inventory', 'issues'].includes(materialPage)) await screenshot(`${size.width}-${materialPage}`);
         if (materialPage === 'inventory' && size.width === 390) {
           await page.emulateMedia({ media: 'print' });
           const printed = await page.locator('#page .table table').evaluate(table => ({
@@ -180,6 +229,10 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       const firstName = page.locator('#page .table tbody tr').first().locator('td').first();
       check((await firstName.locator('strong').textContent()).includes('布局物资'), `${size.width}: material name is the primary field`);
       check((await firstName.locator('small').first().textContent()).includes('LAYOUT-'), `${size.width}: material code is secondary`);
+      const materialDensity = await page.locator('#page .table').first().evaluate(container => {
+        const header = getComputedStyle(container.querySelector('th')), cell = getComputedStyle(container.querySelector('tbody td'));
+        return { headerFont: header.fontSize, headerPadding: header.padding, cellFont: cell.fontSize, cellPadding: cell.padding, lineHeight: cell.lineHeight, border: cell.borderRightWidth };
+      });
       await screenshot(`${size.width}-catalog`);
       if (size.width === 1366) {
         const seen = new Set();
@@ -267,16 +320,30 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await page.locator('#page .ws-pagination').waitFor();
       await checkShell(`${size.width} archives`);
       await checkCards(`${size.width} archives`);
+      if (size.width >= 768) {
+        const archiveDensity = await page.locator('#page .table').first().evaluate(container => {
+          const header = getComputedStyle(container.querySelector('th')), cell = getComputedStyle(container.querySelector('tbody td'));
+          return { headerFont: header.fontSize, headerPadding: header.padding, cellFont: cell.fontSize, cellPadding: cell.padding, lineHeight: cell.lineHeight, border: cell.borderRightWidth };
+        });
+        check(JSON.stringify(materialDensity) === JSON.stringify(archiveDensity), `${size.width}: archives and materials use the same record density`, { materialDensity, archiveDensity });
+        check(archiveDensity.headerFont === '13px' && archiveDensity.cellFont === '14px' && archiveDensity.cellPadding === '8px 12px' && archiveDensity.lineHeight === '21px', `${size.width}: record typography matches R0/R1`, archiveDensity);
+      } else {
+        const categories = await page.locator('#page .archive-menu').evaluate(node => ({ height: node.getBoundingClientRect().height, wrap: getComputedStyle(node).flexWrap,
+          counts: [...node.querySelectorAll('button:not(.active) small')].map(small => getComputedStyle(small).display), activeCount: getComputedStyle(node.querySelector('button.active small')).display }));
+        check(categories.height <= 56 && categories.wrap === 'nowrap' && categories.counts.every(display => display === 'none') && categories.activeCount !== 'none', 'phone archive categories form one compact chip row with the selected count', categories);
+        check(await visibleInViewport(page.locator('#page .table tbody tr:not([hidden])').first()), 'phone archive first record fits completely in the initial viewport');
+      }
       if (size.width >= 1280) check(await visibleInViewport(page.locator('#page .ws-pagination').first()), `${size.width}: archive pagination remains in the viewport`);
       await screenshot(`${size.width}-archives`);
       if (size.width === 390) {
         await page.emulateMedia({ media: 'print' });
         const printing = await page.locator('#page .table tbody tr').evaluateAll(rows => rows.map(row => getComputedStyle(row).display));
         check(printing.length === archiveTotal && printing.every(display => display === 'table-row'), `print media includes all ${archiveTotal} archive records rather than only the screen page`, printing);
+        check(await page.locator('#page .pill').first().evaluate(node => getComputedStyle(node).fontSize) === '13px', 'screen micro badges preserve the original print font size');
         await page.emulateMedia({ media: 'screen' });
       }
     }
-    for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    for (const size of [{ width: 1440, height: 900 }, { width: 1366, height: 768 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size);
       await navigate('datahub');
       for (const tab of ['general', 'materials', 'recovery']) {
@@ -313,6 +380,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           await page.waitForFunction(({ attribute, value }) => document.querySelector(`[${attribute}="${value}"]`)?.classList.contains('active'), { attribute, value });
           await checkShell(`${size.width} ${module} ${value}`);
           await checkCards(`${size.width} ${module} ${value}`);
+          if (value === 'all') await screenshot(`${size.width}-${module}-records`);
         }
         await screenshot(`${size.width}-${module}-sections`);
       }

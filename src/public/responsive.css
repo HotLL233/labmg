@@ -11,6 +11,12 @@
   .side .nav button{width:56px;min-height:44px;display:flex;justify-content:center;align-items:center;padding:10px}
   .side .nav span{width:auto}
   .layout>main{margin-left:72px;width:calc(100% - 72px)}
+  :is(.page,.ws-dialog) .table td.cell-act{
+    position:sticky;right:0;z-index:2;background:var(--c-surface);box-shadow:-8px 0 8px -8px #14263d26;
+  }
+  :is(.page,.ws-dialog) .table table:has(>tbody>tr>td.cell-act) thead th:last-child{
+    position:sticky;right:0;z-index:3;background:var(--c-subtle);box-shadow:-8px 0 8px -8px #14263d26;
+  }
 }
 
 @media screen and (max-width:767px){
@@ -38,6 +44,7 @@
   .page{padding:14px}
   .page button,.nav button{min-height:44px}
   .bulkbar{bottom:calc(68px + env(safe-area-inset-bottom))}
+  .mw-nav,.mw-subnav{overscroll-behavior-x:contain}
 
   .page .table,.mw-dialog .table{overflow:visible;border:0;background:transparent}
   .page .table table,.mw-dialog .table table{min-width:0;display:block;white-space:normal}
@@ -64,6 +71,12 @@
   .page .table td.cell-select,.mw-dialog .table td.cell-select{min-height:24px}
   .page .table .cell-select input,.mw-dialog .table .cell-select input{position:absolute;top:12px;right:14px}
   .page .table tr:has(> .cell-select) td:nth-child(2),.mw-dialog .table tr:has(> .cell-select) td:nth-child(2){grid-column:1/-1;font-weight:600}
+}
+
+@supports (mask-image:linear-gradient(#000,#000)){
+  @media screen and (max-width:767px){
+    :is(.mw-nav,.mw-subnav)[data-overflow="true"]{mask-image:linear-gradient(90deg,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%)}
+  }
 }
 
 @media screen and (max-width:390px){

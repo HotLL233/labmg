@@ -11,11 +11,14 @@
   --c-subtle:#fafbfd;
   --c-surface:#fff;
   --c-text-3:#8a98ab;
+  --fs-micro:11px;
   --fs-page:22px;
   --fs-panel:18px;
   --fs-body:14px;
   --fs-label:13px;
   --fs-note:12px;
+  --fs-metric:24px;
+  --lh-tight:1.3; --lh-body:1.5; --lh-prose:1.7;
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
   --sp-5:20px; --sp-6:24px; --sp-7:32px;
   --h-control:36px;
@@ -27,7 +30,6 @@
 
 .page .table th{font-size:var(--fs-label);padding:10px 14px}
 .page .table td{font-size:var(--fs-body);padding:11px 14px}
-.page .table td:has(> strong){line-height:1.35}
 .pill{font-size:var(--fs-label);padding:3px 9px;border-radius:20px;font-weight:500}
 .mw-badge,.mw-toolbar label,.mw-field label{font-size:var(--fs-label)}
 .ms-files input{font-size:var(--fs-label)}
@@ -37,3 +39,47 @@ td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw
   outline:2px solid var(--c-primary-500);outline-offset:2px;box-shadow:var(--ring)
 }
 .side :is(button,a):focus-visible{outline-color:#7fa9ff}
+
+@media screen{
+  .pill{font-size:var(--fs-micro)}
+  .page h2,.hero h2,.mw-dialog-head h2{font-size:var(--fs-panel);line-height:var(--lh-tight)}
+  .page h3,.mw-panel-top h3{font-size:var(--fs-body);font-weight:600;line-height:var(--lh-tight)}
+  .module h3{font-size:var(--fs-panel)}
+  .card strong,.asset-cards strong{font-size:var(--fs-metric);line-height:var(--lh-tight)}
+  .mw-head h2{font-size:var(--fs-page);line-height:var(--lh-tight)}
+  .page .table th{font-size:var(--fs-label);padding:var(--sp-2) var(--sp-3);line-height:var(--lh-body);background:var(--c-subtle);border-right:1px solid var(--c-line)}
+  .page .table td{font-size:var(--fs-body);padding:var(--sp-2) var(--sp-3);line-height:var(--lh-body);border-right:1px solid var(--c-line)}
+  .page .table tr>:last-child{border-right:0}
+  .page .table td strong{font-size:var(--fs-body);font-weight:600;line-height:var(--lh-tight)}
+  .page .table td small{display:block;font-size:var(--fs-note);line-height:var(--lh-body);margin-top:var(--sp-1);color:var(--c-text-2)}
+  .page .table .num,.page .table td.num{white-space:nowrap}
+  .detail-item,.mw-field{line-height:var(--lh-body)}
+  .mw-hint,.mw-sub,.mw-pagebar{line-height:var(--lh-prose)}
+  .empty,.mw-empty,.page .table td.mw-empty{padding:var(--sp-7) var(--sp-4)}
+}
+@media screen and (min-width:768px){
+  .page .table table{table-layout:fixed}
+  .page .table th:first-child{width:26%}
+  .page .table table:has(td.cell-act) th:last-child{width:96px}
+  /* 这些表的多项操作会被96px挤成纵列，按实际按钮最小宽度分别保留一行或两行。 */
+  .page .table table:has(td.cell-act [data-mw="catalog-detail"]) th:last-child{width:160px}
+  .page .table table:has(td.cell-act [data-mw="events"]):has(td.cell-act [data-mw="request"]) th:last-child{width:152px}
+  .page .table table:has(td.cell-act [data-mw="issue-detail"]) th:last-child{width:144px}
+  .page .table td,.page .table th{overflow-wrap:anywhere;white-space:normal}
+  .page .table td.num,.page .table th.num{width:104px;white-space:nowrap}
+  .page .table table:has(tbody td:nth-child(3).num) th:nth-child(3),
+  .page .table table:has(tbody td:nth-child(4).num) th:nth-child(4),
+  .page .table table:has(tbody td:nth-child(5).num) th:nth-child(5),
+  .page .table table:has(tbody td:nth-child(6).num) th:nth-child(6){width:104px}
+  /* 入库时间先于名称；库存没有末尾操作列，备注继续按剩余空间排版。 */
+  .page .table table:has(td.stock-name) th:first-child,
+  .page .table table:has(td:nth-child(2).mw-name) th:first-child,
+  .page .table table:has([data-mw="receipt-detail"]) th:first-child{width:136px}
+  .page .table table:has(td.stock-name) th:nth-child(2),
+  .page .table table:has(td:nth-child(2).mw-name) th:nth-child(2),
+  .page .table table:has([data-mw="receipt-detail"]) th:nth-child(2){width:26%}
+  .page .table td.cell-act .mw-actions{flex-wrap:wrap}
+}
+@media print{
+  .page .table td:has(> strong){line-height:1.35}
+}

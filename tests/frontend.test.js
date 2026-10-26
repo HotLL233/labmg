@@ -154,7 +154,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     data: { asset_stage: '检定/校准', quality_section: '质量手册', is_current: '是', material_type: '试剂', flow: '库存台账', access_roles: user?.role || 'ADMIN', retained: 'keep' }
   }));
   records.push({ ...structuredClone(records[1]), id: 20, title: 'active-device', data: { asset_stage: '投入使用' } });
-  const requests = [], timers = new Map();
+  const requests = [], timers = new Map(), windowListeners = new Map();
   const state = { conflict: false, hold: null, auth: { user, appVersion: require('../package.json').version, setupRequired: false, setupUsername: 'admin', ...auth }, authError: null, authHold: null, permissionData: null,
     materialOpeningClosed: false, materialCapabilities: { createRequest: true }, materialDetails: {}, materialAcceptance: [], materialLists: {}, materialResponse: null,
     materialRequests: [{ id: 101, no: 'WZ-HTTP-101', title: '专用申报单', creatorName: 'tester', itemCount: 1, createdAt: '2026-10-17', status: 'draft', revision: 0 }] };
@@ -226,9 +226,12 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   }
   const context = {
     document, fetch, FormData, URL, URLSearchParams, Blob, Date, console, crypto, location: { origin: 'http://localhost', reload() {} },
-    confirm: () => true, prompt: () => null, addEventListener() {}, removeEventListener() {},
+    confirm: () => true, prompt: () => null,
+    addEventListener(type,handler) { const handlers=windowListeners.get(type)||[];handlers.push(handler);windowListeners.set(type,handlers); },
+    removeEventListener(type,handler) { windowListeners.set(type,(windowListeners.get(type)||[]).filter(entry=>entry!==handler)); },
     setTimeout(callback, delay) { const id = Symbol(); timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id), setInterval() {},
+    requestAnimationFrame: callback => context.setTimeout(callback,0), cancelAnimationFrame: id => timers.delete(id),
     editor: document.querySelector('#editor'), detail: document.querySelector('#detail'), login: document.querySelector('#login')
   };
   context.window = context; vm.createContext(context);
@@ -237,6 +240,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   await run('start()');
   return {
     run, document, requests, records, state, context,
+    async windowEvent(type) { for(const handler of windowListeners.get(type)||[])await handler(); },
     $: selector => document.querySelector(selector),
     async timers(delay) { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); await timer.callback(); } },
     async submit(title) {
@@ -809,6 +813,50 @@ async function materialApp(manager = true) {
   await app.run("go('materials')");
   return { app, row, item, request, click, fill, submit };
 }
+
+test('material tabs start at the first entry, reveal only explicit tab clicks and retain manual scrolling across reloads', async () => {
+  const { app, click } = await materialApp(false);
+  const host=app.$('#page'),html=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+  Object.defineProperty(host,'innerHTML',{
+    get(){return html.get.call(this);},
+    set(value){
+      html.set.call(this,value);
+      for(const nav of this.querySelectorAll('.mw-nav,.mw-subnav')){
+        const buttons=nav.querySelectorAll('button');nav.scrollLeft=0;nav.scrollWidth=buttons.length*90;nav.clientWidth=270;
+        nav.getBoundingClientRect=()=>({left:0,right:nav.clientWidth});
+        buttons.forEach((button,index)=>{button.getBoundingClientRect=()=>({left:index*90-nav.scrollLeft,right:(index+1)*90-nav.scrollLeft});});
+      }
+    }
+  });
+  await click('[data-page=settings]');
+  assert.equal(app.$('.mw-nav').scrollLeft,360,'clicking a later primary tab reveals it after both DOM replacements');
+  assert.equal(app.$('.mw-nav').dataset.overflow,'true');
+  await click('[data-setting=numbering]');
+  assert.equal(app.$('.mw-subnav').scrollLeft,90,'explicit secondary clicks reveal their own selected tab');
+  assert.equal(app.$('.mw-nav').scrollLeft,360,'secondary navigation preserves the primary navigation position');
+  await app.run("go('dashboard')");await app.run("go('materials')");
+  assert.equal(app.$('.mw-nav').scrollLeft,0,'reentering the module does not scroll to its remembered late selected tab');
+  assert.equal(app.$('.mw-subnav').scrollLeft,0,'the first render of a remembered secondary tab also starts at the beginning');
+  assert.equal(app.$('.mw-nav').dataset.overflow,'true');
+  app.$('.mw-nav').scrollLeft=25;app.$('.mw-subnav').scrollLeft=10;
+  await click('[data-mw=refresh]');
+  assert.equal(app.$('.mw-nav').scrollLeft,25,'refresh preserves manual scrolling without forcing the selected tab into view');
+  assert.equal(app.$('.mw-subnav').scrollLeft,10);
+  for(const nav of app.document.querySelectorAll('.mw-nav,.mw-subnav'))nav.clientWidth=800;
+  await app.windowEvent('resize');await app.timers(120);
+  assert.equal(app.$('.mw-nav').dataset.overflow,'false','the existing resize listener recomputes overflow');
+  assert.equal(app.$('.mw-subnav').dataset.overflow,'false');
+  assert.equal(app.$('.mw-nav').scrollLeft,25,'resize does not move the navigation');
+  await click('[data-page=acceptance]');await click('[data-tab=events]');
+  assert.equal(app.$('.mw-subnav').getAttribute('aria-label'),'验收分区');
+  assert.equal(app.$('.mw-subnav').scrollLeft,0,'a different secondary navigation does not inherit the old settings scroll offset');
+  app.state.materialResponse=async({url})=>url.pathname==='/api/materials/acceptance'?{status:500,body:{error:'合成加载失败'}}:undefined;
+  app.$('.mw-nav').scrollLeft=15;await click('[data-tab=progress]');
+  assert.match(app.$('#page').textContent,/合成加载失败/);
+  assert.equal(app.$('.mw-nav').scrollLeft,15,'a failed load still restores navigation and keeps its overflow hint');
+  assert.equal(app.$('.mw-nav').dataset.overflow,'true');
+  host.remove();await app.windowEvent('resize');await app.timers(120);
+});
 
 test('batch balances preserve exact empty or quoted batch filters through movement pagination and reject stale row actions', async () => {
   const { app, row, click } = await materialApp();

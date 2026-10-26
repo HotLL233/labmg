@@ -57,11 +57,16 @@ function renderRequest(request){const unmatched=request.items.filter(row=>!row.c
 function listContext(){return Object.fromEntries(['page','query','status','from','to','regionId','warehouse','pageNo','pageSize','setting','acceptanceTab'].map(key=>[key,state[key]]));}
 function switchPage(page){state.contexts[state.page]=listContext();const saved=state.contexts[page];state.page=page;state.request=null;state.opening=null;state.sourceContext=null;resetFilters();if(saved)Object.assign(state,saved);}
 function acceptanceNav(){return `<nav class="mw-subnav" aria-label="验收分区">${[['progress','待办／进度'],['events','历史事件']].map(([key,label])=>btn('acceptance-tab',label,`data-tab="${key}"${state.acceptanceTab===key?' aria-current="page"':''}`,state.acceptanceTab===key?'primary':'ghost')).join('')}</nav>`;}
-function revealTabs(host){host.querySelectorAll('.mw-nav,.mw-subnav').forEach(nav=>{const selected=nav.querySelector('[aria-current="page"]');if(!selected?.getBoundingClientRect||!nav.getBoundingClientRect)return;const item=selected.getBoundingClientRect(),box=nav.getBoundingClientRect();if(item.left<box.left)nav.scrollLeft=(nav.scrollLeft||0)+item.left-box.left;else if(item.right>box.right)nav.scrollLeft=(nav.scrollLeft||0)+item.right-box.right;});}
+function revealTabs(host,reveal='',scrolls){host?.querySelectorAll('.mw-nav,.mw-subnav').forEach(nav=>{
+  if(scrolls)nav.scrollLeft=scrolls.get(nav.getAttribute('aria-label'))||0;
+  const selected=nav.querySelector('[aria-current="page"]');
+  if(reveal&&nav.classList.contains(reveal)&&selected?.getBoundingClientRect&&nav.getBoundingClientRect){const item=selected.getBoundingClientRect(),box=nav.getBoundingClientRect();if(item.left<box.left)nav.scrollLeft=(nav.scrollLeft||0)+item.left-box.left;else if(item.right>box.right)nav.scrollLeft=(nav.scrollLeft||0)+item.right-box.right;}
+  nav.dataset.overflow=String(nav.scrollWidth>nav.clientWidth);
+});}
 function receiptRows(data){return table(['验收日期','物资名称 / 来源','事件','合格 / 拒收 / 结案','含税总额','办理人','操作'],data.items.map((row,index)=>`<tr><td>${h(row.date||'—')}<small>${h(timestamp(row.createdAt))}</small></td><td><strong>${h(row.snapshot?.name)}</strong><small>${h(row.snapshot?.code)} · 原申报 #${row.requestId} / v${row.requestRevision}</small></td><td>${badge(row.type)}${row.reversed?'<small>已冲正</small>':''}</td><td class="num">${fmt(row.qtyM||0)} / ${fmt(row.rejectedQtyM||0)} / ${fmt(row.closedQtyM||0)}</td><td class="num">${amount(row.amountCents)}</td><td>${h(row.actorName)}</td><td>${btn('receipt-detail','查看',`data-row-index="${index}"`,'mw-link')}</td></tr>`).join(''),'暂无历史验收事件。每次验收、拒收、结案和冲正均独立记录。',true);}
-async function loadPage(){
+async function loadPage(reveal=''){
   closeScanner();const ticket=++state.ticket;if(typeof current!=='undefined'&&current!=='materials')return;
-  const host=root();host.innerHTML=shell('<div class="mw-empty">正在加载…</div>');
+  const host=root(),scrolls=new Map([...host.querySelectorAll('.mw-nav,.mw-subnav')].map(nav=>[nav.getAttribute('aria-label'),nav.scrollLeft||0]));host.innerHTML=shell('<div class="mw-empty">正在加载…</div>');revealTabs(host,reveal,scrolls);
   try{
     let content;
     if(state.page==='requests'&&state.request){const request=await api('/requests/'+id(state.request.id));if(!active(ticket))return;state.request=request;content=renderRequest(request);}
@@ -81,10 +86,10 @@ async function loadPage(){
       if(state.page==='inventory'){actions+=btn('opening-list','期初／补录');if(cap('adjustStock'))actions+=btn('adjustment','库存调整');if(cap('backup'))actions+=btn('backup','业务备份');}
       content=`<section class="mw-panel mw-records"><div class="mw-panel-top"><h3>${titles[state.page]}</h3><div class="mw-actions">${actions}</div></div>${state.page==='acceptance'?acceptanceNav():''}${!events?filterBar():''}${events?receiptRows(data):{requests:requestRows,acceptance:acceptanceRows,inventory:stockRows,issues:issueRows}[state.page](data)}${pagination(data)}</section>`;
     }
-    if(!active(ticket))return;host.innerHTML=shell(content);revealTabs(host);enhance(host);
+    if(!active(ticket))return;host.innerHTML=shell(content);revealTabs(host,reveal,scrolls);enhance(host);
     el('mw-filters')?.addEventListener('submit',event=>{event.preventDefault();const fields=new FormData(event.target);state.query=String(fields.get('q')||'');state.status=String(fields.get('status')||'');state.from=String(fields.get('from')||'');state.to=String(fields.get('to')||'');state.regionId=String(fields.get('regionId')||'');state.warehouse=String(fields.get('warehouse')||'');state.pageNo=1;loadPage();});
     fitRecords();
-  }catch(error){if(active(ticket))host.innerHTML=shell(`<div class="mw-empty">${h(error.message)}<p>${btn('refresh','重新加载')}</p></div>`);}
+  }catch(error){if(active(ticket)){host.innerHTML=shell(`<div class="mw-empty">${h(error.message)}<p>${btn('refresh','重新加载')}</p></div>`);revealTabs(host,reveal,scrolls);}}
 }
 function fitRecords(){
   const panel=root()?.querySelector('.mw-records'),data=state.rows;if(!panel||!data||!window.innerHeight)return;
@@ -96,7 +101,7 @@ function fitRecords(){
   const size=Math.max(1,Math.min(50,Math.floor(available/height)));
   if(size!==state.pageSize){const offset=(state.pageNo-1)*state.pageSize;state.pageSize=size;state.pageNo=Math.floor(offset/size)+1;loadPage();}
 }
-let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(fitRecords,120);});
+let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{revealTabs(root());fitRecords();},120);});
 function openingWritable(opening){if(opening?.status==='posted')return false;return opening?.kind==='supplement'||(!opening&&state.meta.openingClosed)?cap('adjustStock'):cap('initialize')&&!state.meta.openingClosed;}
 function openingHint(){return state.meta.openingClosed?'期初已关闭，原期初单据保持只读。已有账本可新建“存量补录单”，填写补录原因后整单入库，以库存调整流水保留来源；不重新开放期初，不修改原账。':'期初仅用于开始新账。可保存多行草稿、导入 Excel，核对后整单入库；草稿不计入库存。首次合格验收入库或管理员确认后关闭期初。';}
 function openingRows(data){return table(['期初单 / 日期','创建人','明细 / 单件码','状态','操作'],data.items.map(row=>`<tr><td><strong>${h(row.title)}</strong><small>${h(row.no)} · ${h(row.date)} · ${row.kind==='supplement'?'存量补录':'期初'}</small></td><td>${h(row.creatorName)}<small>${h(timestamp(row.createdAt))}</small></td><td>${row.itemCount||0} 项<small>${row.unitCount||0} 个单件码</small></td><td>${row.status==='posted'?'<span class="mw-badge green">已入库</span>':badge('draft')}</td><td>${btn('opening-detail','查看明细 →',`data-id="${row.id}"`,'mw-link')}</td></tr>`).join(''),'暂无期初单。旧版本单行登记可在“旧版期初流水”中查看。');}
@@ -395,8 +400,8 @@ async function handleAction(event){const button=event.target.closest('[data-mw]'
   if(action==='revision-original'){if(!state.revisionData)throw Error('请重新读取修订记录。');showView('原提交版 v1',snapshotTable(state.revisionData.originalSnapshot,state.revisionData.title));return;}
   if(action==='revision-detail'){const row=state.revisionData?.revisions[Number(button.dataset.rowIndex)];if(!row)throw Error('修订记录已变化，请重新读取。');showView('修订 v'+row.revision,`${recordFields([['修订时间',timestamp(row.createdAt)],['办理人',row.actorName],['修改原因',row.reason]])}<div class="mw-detail-toolbar">${btn('revision-snapshot','修改前',`data-row-index="${button.dataset.rowIndex}" data-side="before"`)}${btn('revision-snapshot','修改后',`data-row-index="${button.dataset.rowIndex}" data-side="after"`,'primary')}</div>`);return;}
   if(action==='revision-snapshot'){const row=state.revisionData?.revisions[Number(button.dataset.rowIndex)];if(!row||!['before','after'].includes(button.dataset.side))throw Error('快照已变化，请重新读取。');showView('修订 v'+row.revision+' · '+(button.dataset.side==='before'?'修改前':'修改后'),snapshotTable(row[button.dataset.side],state.revisionData.title));return;}
-  if(action==='setting'){state.setting=button.dataset.setting;if(!['categories','regions','places','numbering'].includes(state.setting))return;if(state.page!=='settings')switchPage('settings');state.setting=button.dataset.setting;await loadPage();return;}
-  if(action==='acceptance-tab'){if(!['progress','events'].includes(button.dataset.tab))return;state.acceptanceContexts||={};state.acceptanceContexts[state.acceptanceTab]=listContext();const saved=state.acceptanceContexts[button.dataset.tab];state.acceptanceTab=button.dataset.tab;resetFilters();if(saved)Object.assign(state,saved);await loadPage();return;}
+  if(action==='setting'){state.setting=button.dataset.setting;if(!['categories','regions','places','numbering'].includes(state.setting))return;if(state.page!=='settings')switchPage('settings');state.setting=button.dataset.setting;await loadPage('mw-subnav');return;}
+  if(action==='acceptance-tab'){if(!['progress','events'].includes(button.dataset.tab))return;state.acceptanceContexts||={};state.acceptanceContexts[state.acceptanceTab]=listContext();const saved=state.acceptanceContexts[button.dataset.tab];state.acceptanceTab=button.dataset.tab;resetFilters();if(saved)Object.assign(state,saved);await loadPage('mw-subnav');return;}
   if(action==='label-template'){if(!window.MaterialLabels)throw Error('标签模块未加载，请刷新页面。');window.MaterialLabels.configure();return;}
   if(action==='position-read'){await readFormPosition();return;}
   if(action==='opening-list'){state.page='openings';state.opening=null;resetFilters();await loadPage();return;}
@@ -430,7 +435,7 @@ async function handleAction(event){const button=event.target.closest('[data-mw]'
   if(action==='manage-catalog-search'){await showDictionaries(el('mw-catalog-management-query').value);return;}
   if(action==='barcodes'||action==='barcode-page'||action==='barcode-add'){const catalog=state.catalog.find(row=>String(row.id)===button.dataset.catalog)||state.barcodeView?.catalog;if(!catalog||String(catalog.id)!==button.dataset.catalog||!cap('manageCatalog'))throw Error('物资信息或当前维护权限已变化，请重新查询。');if(action==='barcode-add')openForm({mode:'barcode-add',catalog},'绑定外包装条码',input('code','外包装条码','',{max:512,full:true})+btn('barcode-scan','相机／图片／手动识别')+reasonField(),'外包装条码只定位物资信息；保留前导零和大小写，绑定前请核对包装及物资规格。','确认绑定');else await showBarcodes(catalog,Number(button.dataset.historyPage)||1);return;}
   if(action==='barcode-delete'){const view=state.barcodeView,barcode=view?.items.find(row=>String(row.id)===button.dataset.barcode);if(!view||!active(view.ticket)||!barcode||!cap('manageCatalog'))throw Error('条码列表或当前权限已变化，请重新查询。');openForm({mode:'barcode-delete',catalog:view.catalog,barcode},'解绑外包装条码',reasonField(),`${h(view.catalog.name)} · ${h(barcode.code)}。解绑后该包装码不再定位此物资，已有申报、库存与领用记录保留。`,'确认解绑');return;}
-  if(action==='page'){if(!['requests','acceptance','inventory','openings','issues','catalog','settings'].includes(button.dataset.page))return;if(el('mw-view').open)closeView(true);switchPage(button.dataset.page);await loadPage();return;}
+  if(action==='page'){if(!['requests','acceptance','inventory','openings','issues','catalog','settings'].includes(button.dataset.page))return;if(el('mw-view').open)closeView(true);switchPage(button.dataset.page);await loadPage('mw-nav');return;}
   if(action==='refresh'){await bootstrap();await loadPage();return;}if(action==='reset'){resetFilters();await loadPage();return;}
   if(action==='previous'||action==='next'){state.pageNo+=action==='next'?1:-1;await loadPage();return;}
   if(action==='legacy'){state.page='legacy';state.request=null;await loadPage();return;}

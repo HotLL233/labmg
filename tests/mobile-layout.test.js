@@ -93,7 +93,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     const result = await page.evaluate(() => {
       const width = innerWidth;
       const outside = [...document.querySelectorAll('.layout>main>header input,.layout>main>header button,#page button,#page input,#page select')]
-        .filter(node => node.getClientRects().length && !node.closest('.table,.mw-table,.asset-flow,.mw-nav,.nav'))
+        .filter(node => node.getClientRects().length && !node.closest('.table,.mw-table,.asset-flow,.mw-nav,.nav,.archive-menu'))
         .filter(node => { const box = node.getBoundingClientRect(); return box.left < -1 || box.right > width + 1; })
         .map(node => ({ text: node.textContent || node.id || node.name, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right }));
       // 文字被挤成多行不会触发横向溢出，却会让控件变形（如「菜单」变竖排两字），
@@ -192,7 +192,18 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       const button = await navigate(module);
       await checkLayout(`${width}px ${module}`);
       await checkTables(`${width}px ${module}`);
-      const fonts = module === 'finance' ? [['#page th', '13px'], ['#page td', '14px'], ['#page .pill', '13px']]
+      if (width === 390 && module === 'archives') {
+        const chips = await page.locator('#page .archive-menu').evaluate(menu => {
+          const box = menu.getBoundingClientRect();
+          menu.scrollLeft = menu.scrollWidth;
+          const last = menu.lastElementChild.getBoundingClientRect();
+          menu.scrollLeft = 0;
+          return { left: box.left, right: box.right, height: box.height, overflow: getComputedStyle(menu).overflowX, lastRight: last.right };
+        });
+        assert.ok(chips.left >= 0 && chips.right <= width && chips.height <= 56 && chips.overflow === 'auto' && chips.lastRight <= chips.right + 1,
+          `phone archive categories scroll inside a compact, reachable chip container: ${JSON.stringify(chips)}`);
+      }
+      const fonts = module === 'finance' ? [['#page th', '13px'], ['#page td', '14px'], ['#page .pill', '11px']]
         : module === 'materials' ? [['#page .mw-badge', '13px'], ['#page .mw-toolbar label', '13px'], ['#page .mw small', '12px']] : [];
       for (const [selector, size] of fonts) assert.equal(await page.locator(selector).first().evaluate(node => getComputedStyle(node).fontSize), size, `${width}px ${selector} uses the T1 font size`);
       if (width < 900 && ['dashboard', 'archives'].includes(module)) await page.screenshot({ path: path.join(screenshots, `${width}-${module}.png`), fullPage: true });

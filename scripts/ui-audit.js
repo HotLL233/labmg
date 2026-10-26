@@ -43,7 +43,7 @@ function pass(item, detail) { results.push({ level: 'pass', item, detail }); }
 function fail(item, detail) { results.push({ level: 'fail', item, detail }); }
 function warn(item, detail) { results.push({ level: 'warn', item, detail }); }
 
-// ---------- 规则 1：字号下限 13px ----------
+// ---------- 规则 1：正文、说明字号下限 ----------
 // 判定方式：11px 及以下的声明必须「按选择器处置」——由 tokens.css 的覆盖层接管。
 // 原文件里的旧声明保留（铁律：不改紧凑单行 CSS），只要覆盖层带上了同选择器即视为已处置。
 // 未在已知清单里的新声明 = 新增违规，直接失败。
@@ -64,8 +64,8 @@ const KNOWN_SMALL = new Set([
 function selectorAt(text, index) {
   const open = text.lastIndexOf('{', index);
   if (open === -1) return '';
-  const close = text.lastIndexOf('}', open);
-  return text.slice(close + 1, open).trim();
+  const boundary = Math.max(text.lastIndexOf('}', open), text.lastIndexOf('{', open - 1));
+  return text.slice(boundary + 1, open).replace(/\/\*[\s\S]*?\*\//g, '').trim();
 }
 
 (function checkFontSize() {
@@ -174,7 +174,8 @@ function selectorAt(text, index) {
     return;
   }
 
-  const required = ['--fs-body', '--fs-label', '--fs-page', '--c-primary-500', '--c-text-2', '--h-row', '--ring'];
+  const required = ['--fs-micro', '--fs-note', '--fs-label', '--fs-body', '--fs-panel', '--fs-page', '--fs-metric',
+    '--lh-tight', '--lh-body', '--lh-prose', '--c-primary-500', '--c-text-2', '--h-row', '--ring'];
   const missing = required.filter(v => !new RegExp(v.replace(/-/g, '\\-') + '\\s*:').test(tokens));
   if (missing.length) {
     fail('设计令牌', `tokens.css 缺少必需令牌：${missing.join(', ')}`);
@@ -192,10 +193,23 @@ function selectorAt(text, index) {
     pass('令牌引用', '品牌色全部引用旧变量');
   }
 
-  // 字号档位不得出现 11px
-  if (/font-size:\s*11px/.test(tokens)) {
-    fail('令牌字号', 'tokens.css 内出现 11px');
+  // R0 仅允许角标／状态／版本使用 micro；不能通过变量把正文降到 11px。
+  const microSelectors = new Set(['.pill', '#app-version', '.ws-context [data-ws-version]']);
+  const microErrors = [];
+  for (const file of listCss()) {
+    const text = read(file) || '';
+    for (const m of text.matchAll(/var\(\s*--fs-micro\s*(?=[,)])/g)) {
+      const selector = selectorAt(text, m.index);
+      const declaration = text.slice(Math.max(text.lastIndexOf('{', m.index), text.lastIndexOf(';', m.index)) + 1, m.index).trim();
+      if (declaration !== 'font-size:' || !selector.split(',').every(part => microSelectors.has(part.trim()))) {
+        microErrors.push(`${file} ${selector}`);
+      }
+    }
   }
+  if (/font-size:\s*(?:[0-9]|1[01])(?:\.\d+)?px/.test(tokens)) microErrors.push('tokens.css 裸小字号');
+  if (!/--fs-micro:\s*11px\s*;/.test(tokens)) microErrors.push('--fs-micro 必须为 11px');
+  if (microErrors.length) fail('令牌字号', `micro 只允许状态徽章和版本角标：${microErrors.join('；')}`);
+  else pass('令牌字号', '11px 仅由 micro 令牌用于状态徽章和版本角标');
 })();
 
 // ---------- 规则 5：令牌加载顺序 ----------
