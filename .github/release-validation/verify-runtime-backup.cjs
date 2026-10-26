@@ -6,6 +6,15 @@ const execute=promisify(execFile),root=path.resolve(__dirname,'../../..'),versio
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const checkNames=['frozen-powershell-script-and-compose-bytes','same-run-native-amd64-images','two-arrivals-three-retained-document-files','actual-backup-and-verify-with-running-services','logical-dump-excludes-live-pgdata','empty-isolated-target-and-atomic-pg18-restore','all-database-tables-identical-before-app-start','all-history-file-bytes-and-current-pointers','database-secret-owner-mode-and-ca-preserved','restored-accounts-roles-stock-unit-identities','restored-trusted-no-sni-https','marked-project-and-runtime-cleanup'];
+function assertNativeContainerImage(container,identity,service){
+ const descriptor=container.ImageManifestDescriptor,message=JSON.stringify({service,image:container.Image,selectedManifest:descriptor?.digest,platform:descriptor?.platform&&{os:descriptor.platform.os,architecture:descriptor.platform.architecture}});
+ if(descriptor){
+  assert.equal(descriptor.digest,identity.manifestDigest,message);
+  if(descriptor.platform){assert.equal(descriptor.platform.os,'linux',message);assert.equal(descriptor.platform.architecture,'amd64',message);}
+ }
+ // Docker's multi-platform store can expose the index as Image; its selected manifest must still be this run's native amd64 manifest.
+ assert.ok([identity.configDigest,identity.manifestDigest].includes(container.Image)||(container.Image===identity.indexDigest&&descriptor?.digest===identity.manifestDigest),message);
+}
 function assertRuntimeBackupEvidence(value,anonymous,manifest){
  assert.equal(value.status,'passed');assert.equal(value.version,version);assert.equal(value.commit,anonymous.commit);
  assert.equal(value.method,'frozen-powershell-docker-pgdump-empty-restore');assert.equal(value.platform,'linux/amd64');
@@ -48,7 +57,7 @@ async function main(){
   for(const service of ['labos-init','labos','postgres','labos-https']){
    const id=(await compose(['ps','--all','--quiet',service])).trim(),container=await inspect(id);
    assert.equal(container.Config.Labels['com.docker.compose.project'],name);assert.equal(container.Config.Labels['com.docker.compose.service'],service);assert.equal(container.State.Running,false);result.ids[service]=container.Id;
-   assert.ok(imageIds[service==='labos-init'?'labos':service].includes(container.Image));
+   assertNativeContainerImage(container,imageIds[service==='labos-init'?'labos':service],service);
    const binds=container.Mounts.filter(mount=>mount.Type==='bind');assert.equal(binds.length,Object.keys(expectedBinds[service]).length);
    for(const mount of binds){const relative=expectedBinds[service][mount.Destination];assert.ok(relative);assert.equal(path.resolve(mount.Source),path.join(base,relative));}
    for(const mount of container.Mounts.filter(mount=>mount.Type!=='bind')){assert.equal(service,'labos-https');assert.equal(mount.Type,'volume');assert.ok(['/data','/config'].includes(mount.Destination));assert.match(mount.Name,/^[a-f0-9]{64}$/);anonymousVolumes.add(mount.Name);}
@@ -78,8 +87,8 @@ async function main(){
   const extract=String.raw`$ErrorActionPreference='Stop';Add-Type -AssemblyName System.IO.Compression.FileSystem;$zip=[IO.Compression.ZipFile]::OpenRead($env:LABOS_BACKUP_GATE_ZIP);try{foreach($name in @('scripts/backup-runtime.ps1','deploy/docker-compose.yml')){$matches=@($zip.Entries|Where-Object {$_.FullName -ceq $name});if($matches.Count -ne 1){throw 'Missing frozen input'};$target=[IO.Path]::Combine($env:LABOS_BACKUP_GATE_FROZEN,$name);[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))|Out-Null;[IO.Compression.ZipFileExtensions]::ExtractToFile($matches[0],$target,$false)}}finally{$zip.Dispose()}`;
   environment.LABOS_BACKUP_GATE_ZIP=zip;environment.LABOS_BACKUP_GATE_FROZEN=path.join(directory,'frozen');await run('pwsh',['-NoProfile','-NonInteractive','-Command',extract]);delete environment.LABOS_BACKUP_GATE_ZIP;delete environment.LABOS_BACKUP_GATE_FROZEN;
   for(const relative of ['scripts/backup-runtime.ps1','deploy/docker-compose.yml']){const bytes=fs.readFileSync(path.join(directory,'frozen',relative)),expected=manifest.sources.find(row=>row.path===relative);assert.ok(expected);assert.equal(bytes.length,expected.size);assert.equal(sha(bytes),expected.sha256);if(relative.startsWith('scripts/'))report.script={path:relative,size:bytes.length,sha256:sha(bytes)};}mark('frozen-powershell-script-and-compose-bytes');
-  report.stage='native-images';const app=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',image]))[0],appRemote=anonymous.registry.architectures.find(row=>row.architecture==='amd64');assert.equal(app.Architecture,'amd64');assert.ok([appRemote.configDigest,appRemote.manifestDigest].includes(app.Id));assert.equal(app.Config.Labels['org.opencontainers.image.revision'],config.commit);assert.equal(app.Config.Labels['org.opencontainers.image.version'],version);imageIds.labos=[appRemote.configDigest,appRemote.manifestDigest];
-  for(const [tag,identity,service]of [['postgres:18-bookworm',anonymous.postgres,'postgres'],['caddy:2.11.7-alpine',anonymous.httpsProxy,'labos-https']]){const metadata=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',tag]))[0],remote=identity.architectures.find(row=>row.architecture==='amd64');assert.equal(metadata.Architecture,'amd64');assert.ok([remote.configDigest,remote.manifestDigest].includes(metadata.Id));imageIds[service]=[remote.configDigest,remote.manifestDigest];}mark('same-run-native-amd64-images');
+  report.stage='native-images';const app=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',image]))[0],appRemote=anonymous.registry.architectures.find(row=>row.architecture==='amd64');assert.equal(app.Architecture,'amd64');assert.ok([appRemote.configDigest,appRemote.manifestDigest].includes(app.Id));assert.equal(app.Config.Labels['org.opencontainers.image.revision'],config.commit);assert.equal(app.Config.Labels['org.opencontainers.image.version'],version);imageIds.labos={configDigest:appRemote.configDigest,manifestDigest:appRemote.manifestDigest,indexDigest:config.indexDigest};
+  for(const [tag,identity,service]of [['postgres:18-bookworm',anonymous.postgres,'postgres'],['caddy:2.11.7-alpine',anonymous.httpsProxy,'labos-https']]){const metadata=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',tag]))[0],remote=identity.architectures.find(row=>row.architecture==='amd64');assert.equal(metadata.Architecture,'amd64');assert.ok([remote.configDigest,remote.manifestDigest].includes(metadata.Id));imageIds[service]={configDigest:remote.configDigest,manifestDigest:remote.manifestDigest,indexDigest:identity.indexDigest};}mark('same-run-native-amd64-images');
   report.stage='synthetic-source';const source=await project('source');await source.compose(['up','--detach','--pull','never'],180000);const sourceBase=await baseUrl(source,'labos',3000);await wait(async()=>{return(await api(sourceBase,'GET','/api/auth/me',undefined,200,'')).data.setupRequired===true;});
   const admin={username:'backup-admin',password:'Synthetic-'+crypto.randomBytes(16).toString('hex')},reader={username:'backup-reader',password:'Synthetic-'+crypto.randomBytes(16).toString('hex')};
   await api(sourceBase,'POST','/api/auth/setup',{...admin,passwordConfirm:admin.password},201,'');cookie=await login(sourceBase,admin.username,admin.password);
@@ -140,6 +149,11 @@ async function main(){
 }
 if(require.main===module){
  if(process.argv.includes('--self-check')){
+  const identity={configDigest:'sha256:'+'1'.repeat(64),manifestDigest:'sha256:'+'2'.repeat(64),indexDigest:'sha256:'+'3'.repeat(64)},descriptor={digest:identity.manifestDigest,platform:{os:'linux',architecture:'amd64'}};
+  for(const Image of [identity.configDigest,identity.manifestDigest])assertNativeContainerImage({Image},identity,'synthetic');
+  assertNativeContainerImage({Image:identity.indexDigest,ImageManifestDescriptor:descriptor},identity,'synthetic');
+  assertNativeContainerImage({Image:identity.indexDigest,ImageManifestDescriptor:{digest:identity.manifestDigest}},identity,'synthetic');
+  for(const container of [{Image:identity.indexDigest},{Image:'sha256:'+'4'.repeat(64),ImageManifestDescriptor:descriptor},{Image:identity.indexDigest,ImageManifestDescriptor:{...descriptor,digest:'sha256:'+'4'.repeat(64)}},{Image:identity.indexDigest,ImageManifestDescriptor:{...descriptor,platform:{os:'linux',architecture:'arm64'}}},{Image:identity.manifestDigest,ImageManifestDescriptor:{...descriptor,platform:{os:'windows',architecture:'amd64'}}}])assert.throws(()=>assertNativeContainerImage(container,identity,'synthetic'));
   const anonymous={commit:'a'.repeat(40),expectedIndexDigest:'sha256:'+'b'.repeat(64),postgres:{indexDigest:'sha256:'+'c'.repeat(64)},httpsProxy:{indexDigest:'sha256:'+'d'.repeat(64)},engineHost:'unix:///var/run/docker.sock',verificationEnvironment:{provider:'GitHub Actions',os:'linux',architecture:'x64',runId:'1',headSha:'e'.repeat(40),workflowSha:'e'.repeat(40)}};
   const value={status:'passed',version,commit:anonymous.commit,method:'frozen-powershell-docker-pgdump-empty-restore',platform:'linux/amd64',indexDigest:anonymous.expectedIndexDigest,postgresIndexDigest:anonymous.postgres.indexDigest,httpsProxyIndexDigest:anonymous.httpsProxy.indexDigest,engineHost:anonymous.engineHost,syntheticOnly:true,productionData:false,pullPolicy:'never',sourceHttpsReady:true,database:{major:18,tables:33},arrivals:2,documentVersions:3,attachments:3,units:5,cleanup:{passed:true,remainingProjectContainers:0,remainingHelpers:0,privateFilesRemoved:true},checks:checkNames.map(name=>({name,passed:true})),script:{path:'scripts/backup-runtime.ps1',size:123,sha256:'f'.repeat(64)},backupManifestSha256:'1'.repeat(64),databaseProjectionSha256:'2'.repeat(64),verificationEnvironment:anonymous.verificationEnvironment};
   const manifest={commit:value.commit,sources:[value.script]};assertRuntimeBackupEvidence(value,anonymous,manifest);
@@ -148,4 +162,4 @@ if(require.main===module){
  }else if(process.argv.includes('--execute-after-image-gates'))main().catch(error=>{console.error(error.message);process.exitCode=1;});
  else console.log('Prepared only. Use --self-check offline; actual execution requires frozen source, same-run image gates and a Linux Actions Docker engine.');
 }
-module.exports={assertRuntimeBackupEvidence};
+module.exports={assertRuntimeBackupEvidence,assertNativeContainerImage};
