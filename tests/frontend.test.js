@@ -119,9 +119,17 @@ class Element {
     });
   }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
-  showModal() { this.open = true; }
-  close() { this.open = false; }
-  click() { return this.onclick?.(); }
+  matches(selector) { return selector === ':modal' && this.open && this.modal; }
+  showModal() { this.open = true; this.modal = true; this.focus(); }
+  show() { this.open = true; this.modal = false; this.focus(); }
+  close() { this.open = false; this.modal = false; }
+  dispatchEvent(event) { this.listeners?.[event.type]?.(event); return !event.defaultPrevented; }
+  click() {
+    let owner=this;for(let node=this;node;node=node.parent){if(node.inert)return;owner=node;}
+    const modal=owner.querySelectorAll('dialog').findLast(node=>node.matches(':modal'));
+    if(modal&&!modal.contains(this))return;
+    return this.onclick?.();
+  }
   focus() { let owner = this; while (owner.parent) owner = owner.parent; owner.activeElement = this; }
 }
 
@@ -232,7 +240,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
     [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
   }
   const context = {
-    document, fetch, FormData, URL, URLSearchParams, Blob, Date, console, crypto, location: { origin: 'http://localhost', reload() {} },
+    document, fetch, FormData, URL, URLSearchParams, Blob, Date, Event, console, crypto, location: { origin: 'http://localhost', reload() {} },
     confirm: () => true, prompt: () => null,
     addEventListener(type,handler) { const handlers=windowListeners.get(type)||[];handlers.push(handler);windowListeners.set(type,handlers); },
     removeEventListener(type,handler) { windowListeners.set(type,(windowListeners.get(type)||[]).filter(entry=>entry!==handler)); },
@@ -247,7 +255,7 @@ async function browser(user = { role: 'ADMIN', permissions: ['*'] }, auth = {}) 
   await run('start()');
   return {
     run, document, requests, records, state, context,
-    async windowEvent(type) { for(const handler of windowListeners.get(type)||[])await handler(); },
+    async windowEvent(type,event={}) { for(const handler of windowListeners.get(type)||[])await handler(event); },
     $: selector => document.querySelector(selector),
     async timers(delay) { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); await timer.callback(); } },
     async submit(title) {
@@ -431,13 +439,14 @@ test('workspace uses the running version and keeps uncommitted input behind retu
   assert.equal(app.$('#session-user').textContent, '合成管理员');
   assert.equal(app.$('#logout').textContent, '退出登录');
   await app.run("go('finance')");app.run('openEditor()');
-  assert.equal(app.$('#editor [data-ws-version]').textContent, 'v99.1.2');
-  assert.equal(app.$('#editor [data-ws-user]').textContent, '合成管理员');
+  assert.equal(app.$('#editor .ws-context'), null);
+  assert.equal(app.$('#editor').modal, false);
+  assert.equal(app.$('.page').inert, true);
   app.$('[name=title]').value = '尚未保存的记录';
   let confirmations = 0;app.context.confirm = () => { confirmations++;return false; };
   assert.equal(app.run('Workspace.close(editor)'), false);
   await app.run("go('people')");
-  await app.$('#editor [data-ws-logout]').onclick();
+  await app.$('#logout').click();
   assert.equal(app.run('current'), 'finance');
   assert.equal(app.context.editor.open, true);
   assert.equal(app.$('[name=title]').value, '尚未保存的记录');
@@ -449,8 +458,53 @@ test('workspace uses the running version and keeps uncommitted input behind retu
   delete app.context.editor.dataset.wsBusy;
   assert.equal(app.run('Workspace.close(editor)'), true);
   assert.equal(app.context.editor.open, false);
+  assert.equal(app.$('.page').inert, false);
   const unavailable = await browser(undefined, { appVersion: undefined });
   assert.equal(unavailable.$('#app-version').textContent, '版本不可用', 'an absent server version must not be replaced by a guessed version');
+});
+
+test('workspace layers keep the global header interactive, restore focus and respect Escape guards',async()=>{
+  const app=await browser();await app.run("go('finance')");
+  const opener=app.$('#add');opener.focus();app.run('openEditor()');
+  assert.equal(app.$('#editor').dataset.wsActive,'true');
+  assert.equal(app.document.querySelectorAll('.ws-context').length,0);
+  assert.equal(app.$('.page').inert,true);
+  assert.notEqual(app.$('#logout').inert,true);
+  app.run('Workspace.show(detail)');
+  assert.equal(app.$('#editor').inert,true);
+  assert.equal(app.$('#editor').dataset.wsActive,'false');
+  assert.equal(app.$('#detail').dataset.wsActive,'true');
+  const escape=()=>({key:'Escape',defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}});
+  await app.windowEvent('keydown',escape());
+  assert.equal(app.$('#detail').open,false);
+  assert.equal(app.$('#editor').open,true);
+  assert.equal(app.$('#editor').inert,false);
+  assert.equal(app.$('#editor').dataset.wsActive,'true');
+  assert.equal(app.document.activeElement,app.$('#editor'));
+  app.$('[name=title]').value='必须保留的草稿';app.context.confirm=()=>false;
+  await app.windowEvent('keydown',escape());assert.equal(app.$('#editor').open,true);
+  app.context.confirm=()=>true;app.$('#editor').dataset.wsBusy='true';
+  await app.windowEvent('keydown',escape());assert.equal(app.$('#editor').open,true);
+  delete app.$('#editor').dataset.wsBusy;
+  app.$('#login').showModal();const nativeEscape=escape();await app.windowEvent('keydown',nativeEscape);
+  assert.equal(nativeEscape.defaultPrevented,false,'a real modal retains its own Escape handling');
+  assert.equal(app.$('#editor').open,true);app.$('#login').close();
+  await app.windowEvent('keydown',escape());
+  assert.equal(app.$('#editor').open,false);assert.equal(app.$('.page').inert,false);
+  assert.equal(app.document.body.classList.contains('ws-panel-open'),false);
+  assert.equal(app.document.activeElement,opener);
+  app.run('openEditor()');app.context.confirm=()=>true;
+  await app.$('#logout').click();
+  assert.ok(app.requests.some(request=>request.url.pathname==='/api/auth/logout'),'the single actual header control remains clickable from a child page');
+});
+
+test('workspace restores a prior inert background when a dialog is closed directly',async()=>{
+  const app=await browser();app.$('.page').inert=true;
+  app.run('Workspace.show(detail)');app.$('#detail').close();
+  await app.$('#detail').listeners.close({type:'close'});
+  assert.equal(app.$('.page').inert,true);
+  assert.equal(app.document.body.classList.contains('ws-panel-open'),false);
+  assert.equal(app.$('#detail').dataset.wsActive,undefined);
 });
 
 test('workspace pages the original rows by available height and leaves server pagination alone', async () => {
@@ -1436,15 +1490,17 @@ test('a slow stock lookup cannot replace a newer batch application or reopen aft
   assert.match(app.$('#page').textContent,/申报记录/);
 });
 
-test('compact material forms do not duplicate the account context of full record workspaces',async()=>{
+test('material details and compact forms keep the single account header outside their workspaces',async()=>{
   const {app,click}=await materialApp();
   await click('[data-page=catalog]');
   await click('[data-mw=catalog-detail]');
-  assert.ok(app.$('#mw-view .ws-context'));
+  assert.equal(app.$('#mw-view .ws-context'),null);
+  assert.equal(app.$('#mw-view').modal,false);
   await click('[data-mw=close-view]');
   await click('[data-mw=new-catalog]');
   assert.equal(app.$('#mw-dialog .ws-context'),null);
   assert.ok(app.$('#logout'));
+  assert.equal(app.$('#mw-dialog').modal,false);
 });
 
 test('opening documents save multiple lines, import and export Excel, confirm posting once and retain generated labels',async()=>{
@@ -1467,7 +1523,11 @@ test('opening documents save multiple lines, import and export Excel, confirm po
   assert.match(app.$('#mw-intro').textContent,/金额脱敏报表及申报、验收、领用报表仅供查看，不支持回导/);
   assert.equal(app.$('#mw-intro [data-mw=opening-template]').textContent,'下载导入模板');
   fill({file:{name:'synthetic.xlsx',size:9,type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});await submit();assert.equal(imported.content,'c3ludGhldGlj');assert.equal(doc.items.length,3);
-  await click('[data-mw=opening-post]');assert.match(app.$('#mw-intro').textContent,/生成 3 个/);await submit();assert.match(app.$('#mw-error').textContent,/按原内容重试/);await submit();assert.deepEqual(posts[0],posts[1]);assert.ok(posts[0].requestIdempotencyKey);
+  await click('[data-mw=opening-post]');assert.match(app.$('#mw-intro').textContent,/生成 3 个/);await submit();assert.match(app.$('#mw-error').textContent,/按原内容重试/);
+  await app.windowEvent('keydown',{key:'Escape',preventDefault(){}});await app.$('#logout').click();
+  assert.equal(app.$('#mw-dialog').open,true,'the material cancel handler preserves an uncertain posting after Escape');
+  assert.equal(app.requests.some(request=>request.url.pathname==='/api/auth/logout'),false,'uncertain posting also guards the actual global logout control');
+  await submit();assert.deepEqual(posts[0],posts[1]);assert.ok(posts[0].requestIdempotencyKey);
   assert.equal(app.$('[data-mw=opening-post]'),null);assert.ok(app.$('[data-mw=opening-units]'));await click('[data-mw=opening-units]');const lookup=app.requests.filter(r=>r.url.pathname==='/api/materials/stock/units').at(-1);assert.equal(lookup.url.searchParams.get('openingId'),'81');
 });
 

@@ -1,7 +1,7 @@
 (function(){
   'use strict';
-  const clean=new WeakMap(),tables=new WeakMap();
-  let frame;
+  const clean=new WeakMap(),tables=new WeakMap(),prepared=new WeakSet(),panels=[];
+  let frame,blockedPage;
   const query=(root,selector)=>Array.from((root||document).querySelectorAll(selector));
   const fields=dialog=>query(dialog,'input,select,textarea').filter(node=>node.name||node.id);
   const snapshot=dialog=>JSON.stringify(fields(dialog).map(node=>[node.name||node.id,node.type==='checkbox'||node.type==='radio'?node.checked:node.value]));
@@ -15,27 +15,31 @@
     if(window.MaterialWorkflow?.canLeave&&!window.MaterialWorkflow.canLeave())return false;
     return query(document,'dialog').filter(dialog=>dialog.open&&dialog.classList.contains('ws-dialog')).every(allowed);
   }
+  function syncPanels(){
+    const top=panels.at(-1),page=document.querySelector('.page');
+    if(top&&page&&!blockedPage){blockedPage={node:page,inert:Boolean(page.inert)};page.inert=true;}
+    if(!top&&blockedPage){blockedPage.node.inert=blockedPage.inert;blockedPage=null;}
+    panels.forEach(entry=>{entry.dialog.inert=entry!==top;entry.dialog.dataset.wsActive=String(entry===top);});
+    document.body.classList.toggle('ws-panel-open',Boolean(top));
+    const bottom=document.querySelector('.layout header')?.getBoundingClientRect?.().bottom;
+    document.body.style.setProperty?.('--ws-header-bottom',Math.max(0,Number(bottom)||64)+'px');
+  }
+  function release(dialog){
+    const index=panels.findIndex(entry=>entry.dialog===dialog);if(index<0)return;
+    const wasTop=index===panels.length-1,[entry]=panels.splice(index,1);
+    dialog.inert=entry.inert;delete dialog.dataset.wsActive;syncPanels();
+    if(wasTop){const top=panels.at(-1)?.dialog,target=top?(top.contains(entry.focus)?entry.focus:top):entry.focus;if(document.body.contains(target))target.focus?.();}
+  }
   function close(dialog,{force=false}={}){
     if(!force&&!allowed(dialog))return false;
-    markClean(dialog);dialog.close();return true;
-  }
-  function context(dialog){
-    if(dialog.classList.contains('mw-compact')||dialog.classList.contains('mw-inline-form')){dialog.querySelector('.ws-context')?.remove();return;}
-    let bar=dialog.querySelector('.ws-context');
-    if(!bar){
-      bar=document.createElement('div');bar.className='ws-context';
-      bar.innerHTML='<span class="ws-context-brand">LabOS <span data-ws-version></span></span><span data-ws-user></span><button type="button" class="ws-logout" data-ws-logout>退出登录</button>';
-      dialog.insertBefore(bar,dialog.children[0]||null);
-      bar.querySelector('[data-ws-logout]').onclick=()=>document.querySelector('#logout')?.onclick();
-    }
-    bar.querySelector('[data-ws-version]').textContent=document.querySelector('#app-version')?.textContent||'版本不可用';
-    bar.querySelector('[data-ws-user]').textContent=document.querySelector('#session-user')?.textContent||'当前账号';
+    markClean(dialog);dialog.close();release(dialog);return true;
   }
   function show(dialog){
-    const first=!dialog.classList.contains('ws-dialog');
-    dialog.classList.add('ws-dialog');context(dialog);
-    if(first){
+    dialog.classList.add('ws-dialog');query(dialog,'.ws-context').forEach(node=>node.remove());
+    if(!prepared.has(dialog)){
+      prepared.add(dialog);
       dialog.addEventListener('cancel',event=>{if(!event.defaultPrevented){event.preventDefault();close(dialog);}});
+      dialog.addEventListener('close',()=>{if(!dialog.open)release(dialog);});
       const form=Array.from(dialog.children).find(node=>node.tagName.toLowerCase()==='form');
       const host=form||dialog;
       if(!host.querySelector('.mw-dialog-body,.ws-dialog-scroll')){
@@ -44,7 +48,13 @@
         if(children.length){host.insertBefore(body,children[0]);children.forEach(node=>body.appendChild(node));}
       }
     }
-    if(!dialog.open){markClean(dialog);dialog.showModal();}
+    if(!dialog.classList.contains('mw-inline-form')){
+      if(document.querySelector('.page')?.contains(dialog))document.body.append(dialog);
+      let entry=panels.find(item=>item.dialog===dialog);
+      if(entry)panels.splice(panels.indexOf(entry),1);else entry={dialog,focus:document.activeElement,inert:Boolean(dialog.inert)};
+      panels.push(entry);syncPanels();
+    }
+    if(!dialog.open){markClean(dialog);dialog.show();}
     enhance(dialog);fit(dialog);
   }
   function paint(state){
@@ -90,7 +100,12 @@
     });
     fit(root);
   }
-  window.addEventListener('resize',()=>{if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>fit());});
+  window.addEventListener('resize',()=>{if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{syncPanels();fit();});});
+  window.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||event.defaultPrevented||query(document,'dialog').some(dialog=>dialog.open&&dialog.matches?.(':modal')))return;
+    const top=panels.at(-1)?.dialog;if(!top)return;
+    event.preventDefault();top.dispatchEvent(new Event('cancel',{cancelable:true}));
+  });
   window.addEventListener('beforeunload',event=>{
     if(window.MaterialWorkflow?.hasPending?.()||query(document,'dialog').some(dialog=>dialog.open&&dialog.classList.contains('ws-dialog')&&(dirty(dialog)||dialog.dataset.wsBusy==='true'))){event.preventDefault();event.returnValue='';}
   });

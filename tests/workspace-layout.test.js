@@ -16,10 +16,10 @@ const browserModule = process.env.LABOS_TEST_BROWSER_MODULE;
 
 test('production workspace keeps identity, records, returns and draft inputs usable with real PostgreSQL', {
   skip: (!browserModule || !process.env.LABOS_TEST_DATABASE_URL) && 'Set LABOS_TEST_BROWSER_MODULE and LABOS_TEST_DATABASE_URL for real workspace checks',
-  timeout: 180000
+  timeout: 240000
 }, async t => {
   const database = await createTestDatabase(t);
-  const cache = path.join(root, 'artifacts/cache', version);
+  const cache = process.env.LABOS_TEST_CACHE_DIR || path.join(root, 'artifacts/cache', version);
   fs.mkdirSync(cache, { recursive: true });
   const directory = fs.mkdtempSync(path.join(cache, 'workspace-layout-'));
   const runtime = path.join(directory, 'runtime');
@@ -131,6 +131,19 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     } else await page.locator(`.mw-nav [data-page="${target}"]`).click();
     await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
   };
+  const openOrderHistory = async () => {
+    const target = page.locator(`#page [data-mw="request"][data-id="${order.id}"]`);
+    while (!(await target.count())) {
+      const next = page.locator('#page .mw-pagebar [data-mw="next"]');
+      check(!(await next.isDisabled()), 'the submitted request is reachable through real pagination');
+      const before = await page.locator('#page .mw-pagebar').textContent();
+      await next.click();
+      await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), before);
+    }
+    await target.click();
+    await page.locator('#page [data-mw="events"]').first().click();
+    await page.locator('#mw-view').waitFor({ state: 'visible' });
+  };
   const checkShell = async (label, clickedTabs = true) => {
     check((await page.locator('#app-version').textContent()).includes(version), label + ': backend application version is visible');
     check(await visibleInViewport(page.locator('#app-version')), label + ': version is in the viewport');
@@ -158,13 +171,39 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     const heading = await page.locator('#title').evaluate(node => getComputedStyle(node).fontSize);
     check(heading === '22px', label + ': page title uses the page font token at every breakpoint', heading);
   };
+  const checkPanel = async (selector, label, compact = false) => {
+    await checkShell(label);
+    const geometry = await page.locator(selector).evaluate(dialog => {
+      const b = dialog.getBoundingClientRect(), h = document.querySelector('.layout>main>header').getBoundingClientRect();
+      const side = document.querySelector('.layout>aside')?.getBoundingClientRect();
+      return { open: dialog.open, modal: dialog.matches(':modal'), active: dialog.dataset.wsActive,
+        left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width,
+        headerBottom: h.bottom, headerTop: h.top, sidebarRight: side?.right || 0,
+        backgroundInert: document.querySelector('.layout>main>.page').inert,
+        backgroundVisibility: getComputedStyle(document.querySelector('.layout>main>.page')).visibility,
+        accounts: document.querySelectorAll('#session-user').length, logouts: document.querySelectorAll('#logout').length,
+        versions: document.querySelectorAll('#app-version').length, copies: document.querySelectorAll('.ws-context').length };
+    });
+    check(geometry.open && !geometry.modal && geometry.active === 'true', label + ': the current child workspace is nonmodal and active', geometry);
+    check(geometry.accounts === 1 && geometry.logouts === 1 && geometry.versions === 1 && geometry.copies === 0,
+      label + ': only the global header supplies account, version and logout', geometry);
+    check(geometry.headerTop >= -1 && geometry.top >= geometry.headerBottom + 7 && geometry.bottom <= page.viewportSize().height + 1,
+      label + ': the child workspace stays below the stationary global header', geometry);
+    check(geometry.left >= 0 && geometry.right <= page.viewportSize().width - 7, label + ': the complete child workspace fits horizontally', geometry);
+    check(geometry.backgroundInert && geometry.backgroundVisibility === 'hidden', label + ': underlying business content cannot be used', geometry);
+    if (page.viewportSize().width >= 768) check(geometry.left >= geometry.sidebarRight + 8, label + ': the workspace stays to the right of the sidebar', geometry);
+    if (compact) {
+      const left = page.viewportSize().width >= 1280 ? 257 : page.viewportSize().width >= 768 ? 84 : 8;
+      const right = page.viewportSize().width < 768 ? 8 : 12;
+      check(geometry.width <= 761 && Math.abs((geometry.left + geometry.right) / 2 - (left + page.viewportSize().width - right) / 2) < 2,
+        label + ': the short form is centered within the content area', geometry);
+    }
+  };
   const checkCards = async (label, selector = '#page .table') => {
     if (page.viewportSize().width >= 768) {
       const layouts = await page.locator(selector).evaluateAll(containers => containers.map(container => {
         const table = container.querySelector('table');
-        const expected = table.querySelector('td.cell-act [data-mw="catalog-detail"]') ? 160
-          : table.querySelector('td.cell-act [data-mw="issue-detail"]') ? 144
-          : table.querySelector('td.cell-act [data-mw="events"]') && table.querySelector('td.cell-act [data-mw="request"]') ? 152 : null;
+        const expected = table.matches('.mw-issue-table') ? 144 : null;
         const name = table.querySelector('tbody td strong'), headings = [...table.querySelectorAll('th')];
         const controlled = container.matches('.mw-stock-table,.mw-catalog-table,.mw-request-table,.mw-issue-table') || table.matches('.mw-stock-table,.mw-catalog-table,.mw-request-table,.mw-issue-table') || Boolean(container.closest('.mw-order-panel'));
         let stable = true;
@@ -174,12 +213,15 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           stable = headings.every((th, index) => Math.abs(th.getBoundingClientRect().width - before[index]) < 1);
           name.textContent = original;
         }
-        return { controlled, stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width) };
+        const ratios = table.matches('.mw-catalog-table') ? [30,22,11,8,8,9,12] : table.matches('.mw-request-table') ? [32,9,9,18,12,20] : null;
+        return { controlled, stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width),
+          ratios, widths: headings.map(th => th.getBoundingClientRect().width), width: table.getBoundingClientRect().width };
       }));
       for (const layout of layouts) {
         if (layout.controlled) check(layout.layout === 'fixed', label + ': the semantic record table controls column widths', layout);
         if (layout.controlled) check(layout.stable, label + ': a thirty-character name does not move other columns', layout);
         if (layout.expected) check(Math.abs(layout.actual - layout.expected) < 1, label + ': per-table operation width wins the generic rule', layout);
+        if (layout.ratios) check(layout.widths.every((width,index) => Math.abs(width / layout.width * 100 - layout.ratios[index]) < 0.5), label + ': each column receives its explicit proportional width', layout);
       }
     }
     const result = await page.locator(selector).evaluateAll(containers => containers.map(container => {
@@ -394,7 +436,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     } finally {
       page.off('request', observeScannedInventory);
     }
-    for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+    for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 1920, height: 1080 }, { width: 1536, height: 864 }]) {
       await page.setViewportSize(size);
       await navigate('materials');
       await checkShell(`${size.width} materials`, false);
@@ -409,7 +451,32 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         }
         await checkShell(`${size.width} ${materialPage}`);
         await checkCards(`${size.width} ${materialPage}`);
-        if (['acceptance', 'inventory', 'issues'].includes(materialPage)) await screenshot(`${size.width}-${materialPage}`);
+        if (['catalog', 'requests', 'acceptance', 'inventory', 'issues'].includes(materialPage)) await screenshot(`${size.width}-${materialPage}`);
+        if (materialPage === 'requests') {
+          await openOrderHistory();
+          await checkPanel('#mw-view', `${size.width} acceptance history`);
+          await checkCards(`${size.width} acceptance history`, '#mw-view .table');
+          if (size.width < 768) {
+            const actions = page.locator('#mw-view td.cell-act button');
+            check(await actions.count() > 0, 'phone acceptance history retains its real record actions');
+            for (const button of await actions.all()) {
+              await button.scrollIntoViewIfNeeded();
+              check(await visibleInViewport(button), 'each phone acceptance action fits in the viewport after vertical scrolling');
+            }
+            const historyTitle = await page.locator('#mw-view-title').textContent();
+            await page.locator('#mw-view [data-mw="receipt-files"]').first().click();
+            await page.waitForFunction(title => document.querySelector('#mw-view-title')?.textContent !== title, historyTitle);
+            await checkPanel('#mw-view', 'phone history attachments');
+            await page.keyboard.press('Escape');
+            check(await page.locator('#mw-view-title').textContent() === historyTitle, 'phone attachment return restores the acceptance history');
+          }
+          await screenshot(`${size.width}-acceptance-history`);
+          await page.keyboard.press('Escape');
+          await page.locator('#mw-view').waitFor({ state: 'hidden' });
+          check(!(await page.locator('.layout>main>.page').evaluate(node => node.inert)), `${size.width}: leaving history restores business interactions`);
+          await page.locator('#page [data-mw="back"]').click();
+          await page.locator('#page .mw-request-table').waitFor();
+        }
         if (materialPage === 'inventory') {
           await checkStockColumns(`${size.width} stock columns`);
           await checkInlineIssue(`${size.width}-stock`, size.width === 1366);
@@ -477,7 +544,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           await page.locator('#mw-view [data-mw="batch-units"]').first().click();
           await page.locator('#mw-view').getByText('独立编号', { exact: true }).waitFor();
           check(await page.locator('#mw-view tbody tr').count() > 0, 'third-level real unit records are readable');
-          check(await visibleInViewport(page.locator('#mw-view [data-ws-logout]')), 'logout is reachable at the third level');
+          await checkPanel('#mw-view', 'third-level unit records');
           await page.locator('#mw-view [data-mw="close-view"]').first().click();
           check((await page.locator('#mw-view-title').textContent()) === batchTitle, 'third-level return restores the parent batch workspace');
           check(await page.locator('#mw-view .ws-pagination + .ws-pagination').count() === 0, 'restoring a snapshot does not duplicate derived pagination');
@@ -493,9 +560,16 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), before);
       }
       const catalogContext = { q: await page.locator('#mw-filters [name="q"]').inputValue(), pagination: await page.locator('#page .mw-pagebar').textContent() };
+      await page.locator('#page [data-mw="new-catalog"]').click();
+      await page.locator('#mw-dialog').waitFor({ state: 'visible' });
+      await checkPanel('#mw-dialog', `${size.width} new material`, true);
+      await screenshot(`${size.width}-new-material`);
+      await page.keyboard.press('Escape');
+      await page.locator('#mw-dialog').waitFor({ state: 'hidden' });
       await page.locator('#page [data-mw="catalog-edit"]').first().click();
       await page.locator('#mw-dialog').waitFor({ state: 'visible' });
-      check(await visibleInViewport(page.locator('#logout')), `${size.width}: the main logout label remains visible behind the short modal`);
+      await checkPanel('#mw-dialog', `${size.width} edit material`, true);
+      check(await visibleInViewport(page.locator('#logout')), `${size.width}: the main logout label remains visible above the short form`);
       check(await visibleInViewport(page.locator('#app-version')), `${size.width}: the main application version remains visible in a short form`);
       check(await page.locator('#mw-dialog .ws-context').count() === 0, `${size.width}: a short form does not duplicate the account bar`);
       const name = page.locator('#mw-fields [name="name"]');
@@ -503,10 +577,20 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await name.fill('未保存的合成名称');
       if (size.width === 1366) {
         page.once('dialog', dialog => dialog.dismiss());
-        // Compact catalog forms retain modal semantics, so the outside header is inert; invoke its shared handler to exercise its dirty guard.
-        await page.evaluate(() => document.querySelector('#logout').onclick());
-        check((await name.inputValue()) === '未保存的合成名称', 'refusing the shared logout handler preserves the current modal draft');
-        check(Boolean((await api('GET', '/api/auth/me')).data.user), 'refusing the shared logout handler preserves the real session');
+        await page.locator('#logout').click();
+        check((await name.inputValue()) === '未保存的合成名称', 'refusing a real global logout click preserves the current draft');
+        check(Boolean((await api('GET', '/api/auth/me')).data.user), 'refusing a real global logout click preserves the real session');
+        page.once('dialog', dialog => dialog.dismiss());
+        await page.keyboard.press('Escape');
+        check(await page.locator('#mw-dialog').isVisible() && await name.inputValue() === '未保存的合成名称', 'refusing Escape preserves the dirty external form');
+      }
+      if (size.width === 390) {
+        await page.locator('#menu-toggle').click();
+        page.once('dialog', dialog => dialog.dismiss());
+        await page.locator('.nav [data-nav="archives"]').click();
+        check(await page.locator('#mw-dialog').isVisible() && await name.inputValue() === '未保存的合成名称', 'refusing phone navigation preserves the external draft');
+        await page.keyboard.press('Escape');
+        check(!(await page.locator('body').evaluate(node => node.classList.contains('drawer-open'))) && await page.locator('#mw-dialog').isVisible(), 'Escape closes the phone menu without closing its child workspace');
       }
       page.once('dialog', dialog => dialog.dismiss());
       await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
@@ -575,7 +659,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await checkCards(`${size.width} asset lifecycle`, '#detail-body .table');
       await page.locator('#detail-body .table').scrollIntoViewIfNeeded();
       check(await page.locator('#detail-body .table').isVisible(), `${size.width}: lifecycle records remain reachable after the long asset details`);
-      check(await visibleInViewport(page.locator('#detail [data-ws-logout]')), `${size.width}: asset detail keeps logout reachable`);
+      await checkPanel('#detail', `${size.width} asset detail`);
       await screenshot(`${size.width}-asset-lifecycle`);
       await page.locator('#detail .x').click();
       for (const [module, attribute, values] of [
@@ -598,6 +682,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     await navigate('materials');
     await navigateMaterial('catalog');
     await page.locator('#page [data-mw="catalog-edit"]').first().click();
+    await checkPanel('#mw-dialog', 'low-height edit', true);
     await page.locator('#mw-save').scrollIntoViewIfNeeded();
     check(await page.locator('#mw-save').isVisible(), 'low-height edit save remains reachable');
     const finalField = page.locator('#mw-fields input,#mw-fields textarea,#mw-fields select').last();
@@ -608,9 +693,12 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     await navigateMaterial('inventory');
     await checkStockColumns('1366x480 stock columns');
     await checkInlineIssue('1366x480-stock');
+    await navigateMaterial('requests');
+    await openOrderHistory();
+    await checkPanel('#mw-view', 'low-height history before actual logout');
     await page.locator('#logout').click();
     await page.locator('#login').waitFor({ state: 'visible' });
-    check((await api('GET', '/api/auth/me')).data.user === null, 'visible logout invalidates the real server session');
+    check((await api('GET', '/api/auth/me')).data.user === null, 'a real global logout click from the full child workspace invalidates the server session');
     check(errors.length === 0, 'production scripts have no browser exceptions', errors);
     status = 'passed';
   } finally {

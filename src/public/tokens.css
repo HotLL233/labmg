@@ -58,11 +58,7 @@ td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw
   .empty,.mw-empty,.page .table td.mw-empty{padding:var(--sp-7) var(--sp-4)}
 }
 @media screen and (min-width:768px){
-  .page .table table:has(td.cell-act) th:last-child{width:96px}
-  /* 这些表的多项操作会被96px挤成纵列，按实际按钮最小宽度分别保留一行或两行。 */
-  .page .table table:has(td.cell-act [data-mw="catalog-detail"]) th:last-child{width:160px}
-  .page .table table:has(td.cell-act [data-mw="events"]):has(td.cell-act [data-mw="request"]) th:last-child{width:152px}
-  .page .table table:has(td.cell-act [data-mw="issue-detail"]) th:last-child{width:144px}
+  .page .table table:not(:where(.mw-stock-table,.mw-catalog-table,.mw-request-table,.mw-issue-table,.mw-request-items-table,.mw-opening-items-table)):has(td.cell-act) th:last-child{width:96px}
   .page .table td,.page .table th{overflow-wrap:anywhere;white-space:normal}
   .page .table td.num,.page .table th.num{white-space:nowrap}
   .page .table td.cell-act .mw-actions{flex-wrap:wrap}

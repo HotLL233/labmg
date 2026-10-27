@@ -272,3 +272,20 @@
   dialog.mw-issue-inline.ws-dialog .mw-grid{grid-template-columns:minmax(0,1fr)}
   dialog.mw-issue-inline.ws-dialog .mw-dialog-actions button{flex:1;min-height:44px}
 }
+
+/* 名称不再独占固定短列之外的全部余宽。 */
+@media screen and (min-width:768px){
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:first-child{width:32%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(2){width:9%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(3){width:9%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(4){width:18%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(5){width:12%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:last-child{width:20%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:first-child{width:30%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(2){width:22%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(3){width:11%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(4){width:8%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(5){width:8%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(6){width:9%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:last-child{width:12%}
+}
