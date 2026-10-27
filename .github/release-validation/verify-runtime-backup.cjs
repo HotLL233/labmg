@@ -1,0 +1,165 @@
+'use strict';
+// Runner-only real backup/restore gate. Never uses a production project or database.
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),https=require('node:https');
+const {execFile}=require('node:child_process'),{promisify}=require('node:util');
+const execute=promisify(execFile),root=path.resolve(__dirname,'../../..'),version='0.14.2';
+const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
+const checkNames=['frozen-powershell-script-and-compose-bytes','same-run-native-amd64-images','two-arrivals-three-retained-document-files','actual-backup-and-verify-with-running-services','logical-dump-excludes-live-pgdata','empty-isolated-target-and-atomic-pg18-restore','all-database-tables-identical-before-app-start','all-history-file-bytes-and-current-pointers','database-secret-owner-mode-and-ca-preserved','restored-accounts-roles-stock-unit-identities','restored-trusted-no-sni-https','marked-project-and-runtime-cleanup'];
+function assertNativeContainerImage(container,identity,service){
+ const descriptor=container.ImageManifestDescriptor,message=JSON.stringify({service,image:container.Image,selectedManifest:descriptor?.digest,platform:descriptor?.platform&&{os:descriptor.platform.os,architecture:descriptor.platform.architecture}});
+ if(descriptor){
+  assert.equal(descriptor.digest,identity.manifestDigest,message);
+  if(descriptor.platform){assert.equal(descriptor.platform.os,'linux',message);assert.equal(descriptor.platform.architecture,'amd64',message);}
+ }
+ // Docker's multi-platform store can expose the index as Image; its selected manifest must still be this run's native amd64 manifest.
+ assert.ok([identity.configDigest,identity.manifestDigest].includes(container.Image)||(container.Image===identity.indexDigest&&descriptor?.digest===identity.manifestDigest),message);
+}
+function assertRuntimeBackupEvidence(value,anonymous,manifest){
+ assert.equal(value.status,'passed');assert.equal(value.version,version);assert.equal(value.commit,anonymous.commit);
+ assert.equal(value.method,'frozen-powershell-docker-pgdump-empty-restore');assert.equal(value.platform,'linux/amd64');
+ assert.equal(value.indexDigest,anonymous.expectedIndexDigest);assert.equal(value.postgresIndexDigest,anonymous.postgres.indexDigest);assert.equal(value.httpsProxyIndexDigest,anonymous.httpsProxy.indexDigest);
+ assert.equal(value.engineHost,anonymous.engineHost);assert.equal(value.syntheticOnly,true);assert.equal(value.productionData,false);assert.equal(value.pullPolicy,'never');
+ assert.equal(value.sourceHttpsReady,true);
+ assert.equal(value.database.major,18);assert.ok(value.database.tables>=33);assert.equal(value.arrivals,2);assert.equal(value.documentVersions,3);assert.equal(value.attachments,3);assert.equal(value.units,5);
+ assert.equal(value.cleanup.passed,true);assert.equal(value.cleanup.remainingProjectContainers,0);assert.equal(value.cleanup.remainingHelpers,0);assert.equal(value.cleanup.privateFilesRemoved,true);
+ assert.deepEqual(value.checks.map(item=>item.name).sort(),[...checkNames].sort());assert.ok(value.checks.every(item=>item.passed===true));
+ for(const key of ['provider','os','architecture','runId','headSha','workflowSha'])assert.equal(value.verificationEnvironment[key],anonymous.verificationEnvironment[key]);
+ assert.equal(value.script.path,'scripts/backup-runtime.ps1');assert.match(value.script.sha256,/^[a-f0-9]{64}$/);assert.ok(value.script.size>0);
+ assert.match(value.backupManifestSha256,/^[a-f0-9]{64}$/);assert.match(value.databaseProjectionSha256,/^[a-f0-9]{64}$/);
+ if(manifest){const source=manifest.sources.find(row=>row.path===value.script.path);assert.ok(source);assert.equal(value.script.size,source.size);assert.equal(value.script.sha256,source.sha256);assert.equal(manifest.commit,value.commit);}
+}
+async function main(){
+ assert.equal(process.platform,'linux');assert.equal(process.arch,'x64');assert.equal(process.env.GITHUB_ACTIONS,'true');assert.equal(path.resolve(__dirname),path.join(root,'artifacts/cache',version));
+ const config=read(path.join(__dirname,'release-config.json'));assert.equal(config.version,version);assert.equal(config.status,'source-frozen');assert.match(config.commit,/^[a-f0-9]{40}$/);
+ const anonymous=read(path.join(__dirname,'ghcr-anonymous-verification.json'));assert.equal(anonymous.status,'passed');assert.equal(anonymous.commit,config.commit);assert.equal(anonymous.expectedIndexDigest,config.indexDigest);
+ for(const [key,expected]of Object.entries({provider:'GitHub Actions',os:process.platform,architecture:process.arch,runId:process.env.GITHUB_RUN_ID,headSha:process.env.GITHUB_SHA,workflowSha:process.env.GITHUB_WORKFLOW_SHA}))assert.equal(anonymous.verificationEnvironment[key],expected);
+ assert.equal(process.env.GITHUB_WORKFLOW_SHA,process.env.GITHUB_SHA);assert.match(anonymous.engineHost,/^unix:\/\//);
+ const manifest=read(path.join(root,'artifacts/releases',version,'manifest.json'));assert.equal(manifest.commit,config.commit);
+ const report={status:'running',version,commit:config.commit,method:'frozen-powershell-docker-pgdump-empty-restore',platform:'linux/amd64',indexDigest:config.indexDigest,postgresIndexDigest:anonymous.postgres.indexDigest,httpsProxyIndexDigest:anonymous.httpsProxy.indexDigest,engineHost:anonymous.engineHost,syntheticOnly:true,productionData:false,pullPolicy:'never',checks:[],verificationEnvironment:anonymous.verificationEnvironment,startedAtUtc:new Date().toISOString(),cleanup:{passed:false}};
+ const environment={...process.env,DOCKER_DEFAULT_PLATFORM:'linux/amd64',DOCKER_HOST:anonymous.engineHost};
+ for(const key of Object.keys(environment))if(/^(LABOS_|COMPOSE_)/.test(key))delete environment[key];
+ const run=async(program,args,timeout=120000)=>{try{return(await execute(program,args,{cwd:root,env:environment,encoding:'utf8',timeout,maxBuffer:16*1024*1024,windowsHide:true})).stdout.trim();}catch{throw Error(program+' operation failed during '+report.stage+'; no private command output was published.');}};
+ const docker=(args,timeout)=>run('docker',args,timeout),mark=name=>report.checks.push({name,passed:true});
+ const directory=fs.mkdtempSync(path.join(__dirname,'runtime-backup-gate-')),marker=crypto.randomBytes(12).toString('hex'),markerFile=path.join(directory,'.labos-backup-gate');fs.writeFileSync(markerFile,marker,{mode:0o600});
+ const image=`ghcr.io/hotll233/labmg:${version}@${config.indexDigest}`,helperIds=new Set(),projects=[],imageIds={},anonymousVolumes=new Set();
+ const safeDirectory=()=>{assert.equal(path.dirname(path.resolve(directory)),path.resolve(__dirname));assert.match(path.basename(directory),/^runtime-backup-gate-[A-Za-z0-9]+$/);assert.equal(fs.readFileSync(markerFile,'utf8'),marker);};
+ const inspect=async id=>{assert.match(id,/^[a-f0-9]{12,64}$/);return JSON.parse(await docker(['inspect',id]))[0];};
+ async function project(label){
+  safeDirectory();const base=path.join(directory,label);assert.equal(fs.existsSync(base),false);fs.mkdirSync(base);const name=`labos-backup-${label}-${marker}`;
+  const composeFile=path.join(base,'docker-compose.yml');fs.copyFileSync(path.join(directory,'frozen/deploy/docker-compose.yml'),composeFile);
+  fs.writeFileSync(path.join(base,'.env'),`LABOS_IMAGE=${image}\nLABOS_PORT=127.0.0.1:0\nLABOS_HTTPS_PORT=127.0.0.1:0\nLABOS_HTTPS_HOST=127.0.0.1\nLABOS_UID=12345\nLABOS_GID=23456\n`,{mode:0o600});
+  const compose=(args,timeout)=>docker(['compose','--project-directory',base,'--project-name',name,'--file',composeFile,...args],timeout);
+  const result={base,name,composeFile,compose,ids:{}};projects.push(result);
+  assert.equal(await docker(['ps','-aq','--filter',`label=com.docker.compose.project=${name}`]),'');
+  await compose(['create','--pull','never']);
+  const expectedBinds={'labos-init':{'/var/lib/labos':'runtime'},labos:{'/var/lib/labos':'runtime'},postgres:{'/var/lib/postgresql':'runtime/postgres','/run/labos-secrets':'runtime/secrets'},'labos-https':{'/var/lib/labos-https':'https','/etc/labos-https':'runtime/https-config'}};
+  for(const service of ['labos-init','labos','postgres','labos-https']){
+   const id=(await compose(['ps','--all','--quiet',service])).trim(),container=await inspect(id);
+   assert.equal(container.Config.Labels['com.docker.compose.project'],name);assert.equal(container.Config.Labels['com.docker.compose.service'],service);assert.equal(container.State.Running,false);result.ids[service]=container.Id;
+   assertNativeContainerImage(container,imageIds[service==='labos-init'?'labos':service],service);
+   const binds=container.Mounts.filter(mount=>mount.Type==='bind');assert.equal(binds.length,Object.keys(expectedBinds[service]).length);
+   for(const mount of binds){const relative=expectedBinds[service][mount.Destination];assert.ok(relative);assert.equal(path.resolve(mount.Source),path.join(base,relative));}
+   for(const mount of container.Mounts.filter(mount=>mount.Type!=='bind')){assert.equal(service,'labos-https');assert.equal(mount.Type,'volume');assert.ok(['/data','/config'].includes(mount.Destination));assert.match(mount.Name,/^[a-f0-9]{64}$/);anonymousVolumes.add(mount.Name);}
+  }
+  for(const leaf of ['runtime','https']){const target=path.join(base,leaf);if(!fs.existsSync(target))fs.mkdirSync(target);}
+  return result;
+ }
+ async function temporary(args){const id=(await docker(['create','--pull','never','--network','none','--user','0:0','--label',`labos.backup.gate=${marker}`,...args])).trim();assert.match(id,/^[a-f0-9]{12,64}$/);helperIds.add(id);return id;}
+ async function removeHelper(id){await docker(['rm',id]);helperIds.delete(id);}
+ async function mountedNode(project,service,code){return JSON.parse(await docker(['run','--rm','--pull','never','--network','none','--user','0:0','--label',`labos.backup.gate=${marker}`,'--volumes-from',project.ids[service]+':ro','--entrypoint','node',image,'-e',code]));}
+ const wait=async check=>{const end=Date.now()+90000;for(;;){try{if(await check())return;}catch{}if(Date.now()>end)throw Error('Timed out during '+report.stage);await new Promise(resolve=>setTimeout(resolve,500));}};
+ async function baseUrl(project,service,port){const address=(await project.compose(['port',service,String(port)])).trim();assert.match(address,/^127\.0\.0\.1:\d+$/);return 'http://'+address;}
+ let cookie='';
+ async function api(base,method,route,payload,expected=200,session=cookie){const response=await fetch(base+route,{method,headers:{...(session?{Cookie:session}:{}),...(payload===undefined?{}:{'Content-Type':'application/json'})},body:payload===undefined?undefined:JSON.stringify(payload),signal:AbortSignal.timeout(10000)});assert.equal(response.status,expected,method+' '+route+' status');return {data:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]};}
+ async function login(base,username,password){return(await api(base,'POST','/api/auth/login',{username,password},200,'')).cookie;}
+ const query=(project,sql)=>docker(['exec',project.ids.postgres,'psql','-U','labos','-d','labos','-Atqc',sql]);
+ const pgReady=project=>wait(async()=>{await docker(['exec',project.ids.postgres,'pg_isready','-h','127.0.0.1','-U','labos','-d','labos']);return true;});
+ async function trustedHttps(project,session,userId,caFile){
+  await wait(async()=>{await docker(['cp',project.ids['labos-https']+':/var/lib/labos-https/data/caddy/pki/authorities/local/root.crt',caFile]);return true;});
+  const ca=fs.readFileSync(caFile),address=(await project.compose(['port','labos-https','443'])).trim();assert.match(address,/^127\.0\.0\.1:\d+$/);
+  await wait(()=>new Promise((resolve,reject)=>{const request=https.get('https://'+address+'/api/auth/me',{ca,rejectUnauthorized:true,servername:'',headers:{Cookie:session},timeout:10000},response=>{let body='';response.on('data',chunk=>body+=chunk);response.on('end',()=>{try{assert.equal(response.statusCode,200);assert.equal(JSON.parse(body).user.id,userId);resolve(true);}catch(error){reject(error);}});});request.on('timeout',()=>request.destroy(Error('HTTPS timeout')));request.on('error',reject);}));
+ }
+ async function restoreArchive(target,service,archive,destination){const id=await temporary(['--volumes-from',target.ids[service],'--entrypoint','tar',image,'-xzf','/tmp/files.tar.gz','-C',destination]);try{await docker(['cp',archive,id+':/tmp/files.tar.gz']);await docker(['start','--attach',id]);}finally{await removeHelper(id);}}
+ let failure;
+ try{
+  report.stage='frozen-inputs';const zip=path.join(root,'artifacts/releases',version,`labos-${version}.zip`),zipBytes=fs.readFileSync(zip);assert.equal(zipBytes.length,manifest.size);assert.equal(sha(zipBytes),manifest.sha256);
+  const extract=String.raw`$ErrorActionPreference='Stop';Add-Type -AssemblyName System.IO.Compression.FileSystem;$zip=[IO.Compression.ZipFile]::OpenRead($env:LABOS_BACKUP_GATE_ZIP);try{foreach($name in @('scripts/backup-runtime.ps1','deploy/docker-compose.yml')){$matches=@($zip.Entries|Where-Object {$_.FullName -ceq $name});if($matches.Count -ne 1){throw 'Missing frozen input'};$target=[IO.Path]::Combine($env:LABOS_BACKUP_GATE_FROZEN,$name);[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))|Out-Null;[IO.Compression.ZipFileExtensions]::ExtractToFile($matches[0],$target,$false)}}finally{$zip.Dispose()}`;
+  environment.LABOS_BACKUP_GATE_ZIP=zip;environment.LABOS_BACKUP_GATE_FROZEN=path.join(directory,'frozen');await run('pwsh',['-NoProfile','-NonInteractive','-Command',extract]);delete environment.LABOS_BACKUP_GATE_ZIP;delete environment.LABOS_BACKUP_GATE_FROZEN;
+  for(const relative of ['scripts/backup-runtime.ps1','deploy/docker-compose.yml']){const bytes=fs.readFileSync(path.join(directory,'frozen',relative)),expected=manifest.sources.find(row=>row.path===relative);assert.ok(expected);assert.equal(bytes.length,expected.size);assert.equal(sha(bytes),expected.sha256);if(relative.startsWith('scripts/'))report.script={path:relative,size:bytes.length,sha256:sha(bytes)};}mark('frozen-powershell-script-and-compose-bytes');
+  report.stage='native-images';const app=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',image]))[0],appRemote=anonymous.registry.architectures.find(row=>row.architecture==='amd64');assert.equal(app.Architecture,'amd64');assert.ok([appRemote.configDigest,appRemote.manifestDigest].includes(app.Id));assert.equal(app.Config.Labels['org.opencontainers.image.revision'],config.commit);assert.equal(app.Config.Labels['org.opencontainers.image.version'],version);imageIds.labos={configDigest:appRemote.configDigest,manifestDigest:appRemote.manifestDigest,indexDigest:config.indexDigest};
+  for(const [tag,identity,service]of [['postgres:18-bookworm',anonymous.postgres,'postgres'],['caddy:2.11.7-alpine',anonymous.httpsProxy,'labos-https']]){const metadata=JSON.parse(await docker(['image','inspect','--platform','linux/amd64',tag]))[0],remote=identity.architectures.find(row=>row.architecture==='amd64');assert.equal(metadata.Architecture,'amd64');assert.ok([remote.configDigest,remote.manifestDigest].includes(metadata.Id));imageIds[service]={configDigest:remote.configDigest,manifestDigest:remote.manifestDigest,indexDigest:identity.indexDigest};}mark('same-run-native-amd64-images');
+  report.stage='synthetic-source';const source=await project('source');await source.compose(['up','--detach','--pull','never'],180000);const sourceBase=await baseUrl(source,'labos',3000);await wait(async()=>{return(await api(sourceBase,'GET','/api/auth/me',undefined,200,'')).data.setupRequired===true;});
+  const admin={username:'backup-admin',password:'Synthetic-'+crypto.randomBytes(16).toString('hex')},reader={username:'backup-reader',password:'Synthetic-'+crypto.randomBytes(16).toString('hex')};
+  await api(sourceBase,'POST','/api/auth/setup',{...admin,passwordConfirm:admin.password},201,'');cookie=await login(sourceBase,admin.username,admin.password);
+  const manager=(await api(sourceBase,'POST','/api/users',{username:'backup-manager',display_name:'合成备份管理员',roles:['ADMIN','MATERIAL'],password:admin.password},201)).data;cookie=await login(sourceBase,'backup-manager',admin.password);
+  await api(sourceBase,'POST','/api/users',{...reader,display_name:'合成只读人员',roles:['TESTER']},201);
+  const category=(await api(sourceBase,'POST','/api/materials/categories',{name:'合成备份分类'},201)).data,region=(await api(sourceBase,'POST','/api/materials/regions',{name:'合成备份区域'},201)).data;
+  const catalog=(await api(sourceBase,'POST','/api/materials/catalog',{name:'合成备份物资',spec:'500mL',unit:'瓶',categoryId:category.id,trackingMode:'unit'},201)).data;
+  let order=(await api(sourceBase,'POST','/api/materials/requests',{title:'合成Docker完整备份单'},201)).data;
+  order=(await api(sourceBase,'POST',`/api/materials/requests/${order.id}/items`,{requestVersion:order.version,catalogId:catalog.id,categoryId:category.id,regionId:region.id,warehouse:'MAIN',quantity:'5',manufacturer:'合成厂家'},201)).data;
+  order=(await api(sourceBase,'POST',`/api/materials/requests/${order.id}/submit`,{requestVersion:order.version})).data;
+  const receive=async quantity=>{const result=(await api(sourceBase,'POST',`/api/materials/requests/${order.id}/receipts/batch`,{version:order.version,requestIdempotencyKey:crypto.randomUUID(),items:[{itemId:order.items[0].id,itemVersion:order.items[0].version,quantity,amount:quantity,manufacturer:'合成厂家',location:'合成柜',locationVersion:order.items[0].acceptedQtyM?1:0}]},201)).data;order=result.request;return result;};
+  const first=await receive('2'),second=await receive('3'),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/atcAAAAASUVORK5CYII=','base64');
+  for(const [arrival,documentVersion,reason]of [[first.arrivalId,0,''],[second.arrivalId,0,''],[second.arrivalId,1,'合成补拍']])await api(sourceBase,'POST',`/api/materials/arrivals/${arrival}/documents`,{version:documentVersion,reason,requestIdempotencyKey:crypto.randomUUID(),files:[{name:'synthetic.png',mimeType:'image/png',content:png.toString('base64')}]},201);
+  await trustedHttps(source,cookie,manager.id,path.join(source.base,'root.crt'));report.sourceHttpsReady=true;
+  const original=(await api(sourceBase,'GET',`/api/materials/requests/${order.id}/snapshot?revision=1`)).data;
+  const sourceAttachments=JSON.parse(await query(source,'SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),\'[]\') FROM material_attachments t'));assert.equal(sourceAttachments.length,3);mark('two-arrivals-three-retained-document-files');
+  const {TABLES}=require(path.join(root,'src/schema'));assert.ok(TABLES.includes('material_arrivals'));const projectionSql='SELECT jsonb_build_object('+TABLES.map(table=>{assert.match(table,/^[a-z_]+$/);return `'${table}',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') FROM "${table}" t)`;}).join(',')+')';
+  const before=await query(source,projectionSql);report.databaseProjectionSha256=sha(before);report.database={major:18,tables:TABLES.length,serverVersionNum:await query(source,'SHOW server_version_num')};assert.match(report.database.serverVersionNum,/^18\d{4}$/);
+  report.stage='actual-backup-script';const backup=path.join(directory,'backup'),script=path.join(directory,'frozen/scripts/backup-runtime.ps1');
+  await run('pwsh',['-NoProfile','-NonInteractive','-File',script,'-Mode','Backup','-Destination',backup,'-ComposeFile',source.composeFile,'-ProjectName',source.name],180000);
+  await run('pwsh',['-NoProfile','-NonInteractive','-File',script,'-Mode','Verify','-Destination',backup],120000);
+  const backupManifest=read(path.join(backup,'manifest.json'));assert.equal(backupManifest.status,'complete');assert.equal(fs.existsSync(path.join(backup,'INCOMPLETE')),false);report.backupManifestSha256=sha(fs.readFileSync(path.join(backup,'manifest.json')));
+  for(const service of ['labos','labos-https'])assert.equal((await inspect(source.ids[service])).State.Running,true);assert.equal(sha(await query(source,projectionSql)),sha(before));mark('actual-backup-and-verify-with-running-services');
+  const listingContainer=await temporary(['--entrypoint','tar',image,'-tzf','/tmp/runtime.tar.gz']);try{await docker(['cp',path.join(backup,'runtime.tar.gz'),listingContainer+':/tmp/runtime.tar.gz']);const entries=(await docker(['start','--attach',listingContainer])).split(/\r?\n/);assert.ok(entries.includes('./secrets/postgres-password'));assert.ok(entries.every(name=>!/^\.?\/?postgres(?:\/|$)/.test(name)));}finally{await removeHelper(listingContainer);}mark('logical-dump-excludes-live-pgdata');
+  await docker(['stop',source.ids.labos,source.ids['labos-https']]);
+  const identityCode=String.raw`const fs=require('node:fs'),crypto=require('node:crypto');const file=p=>{const s=fs.statSync(p);return {size:s.size,uid:s.uid,gid:s.gid,mode:s.mode&0o777,sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')}};console.log(JSON.stringify({password:file('/var/lib/labos/secrets/postgres-password')}));`;
+  const caCode=String.raw`const fs=require('node:fs'),crypto=require('node:crypto');const file=p=>{const s=fs.statSync(p);return {size:s.size,uid:s.uid,gid:s.gid,mode:s.mode&0o777,sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')}};console.log(JSON.stringify({root:file('/var/lib/labos-https/data/caddy/pki/authorities/local/root.crt'),key:file('/var/lib/labos-https/data/caddy/pki/authorities/local/root.key')}));`;
+  const sourceSecret=await mountedNode(source,'labos',identityCode),sourceCa=await mountedNode(source,'labos-https',caCode);
+  report.stage='empty-target';const target=await project('restore');
+  for(const [service,mount]of [['labos','/var/lib/labos'],['labos-https','/var/lib/labos-https']]){const empty=await mountedNode(target,service,`const fs=require('node:fs');function count(p){return fs.readdirSync(p,{withFileTypes:true}).reduce((n,e)=>n+(e.isDirectory()?count(p+'/'+e.name):1),0)}console.log(JSON.stringify({files:count(${JSON.stringify(mount)})}));`);assert.equal(empty.files,0);}
+  await restoreArchive(target,'labos',path.join(backup,'runtime.tar.gz'),'/var/lib/labos');await restoreArchive(target,'labos-https',path.join(backup,'https.tar.gz'),'/var/lib/labos-https');
+  await target.compose(['up','--no-deps','--pull','never','labos-init']);await target.compose(['up','--detach','--no-deps','--pull','never','postgres']);await pgReady(target);
+  assert.equal(await query(target,"SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_toast'"),'0');
+  assert.match(await query(target,'SHOW server_version_num'),/^18\d{4}$/);await docker(['cp',path.join(backup,'database.dump'),target.ids.postgres+':/tmp/labos-restore.dump']);await docker(['exec',target.ids.postgres,'pg_restore','--exit-on-error','--single-transaction','--no-owner','--no-acl','-U','labos','-d','labos','/tmp/labos-restore.dump']);await docker(['exec',target.ids.postgres,'rm','-f','/tmp/labos-restore.dump']);mark('empty-isolated-target-and-atomic-pg18-restore');
+  assert.equal(sha(await query(target,projectionSql)),sha(before));mark('all-database-tables-identical-before-app-start');
+  for(const attachment of sourceAttachments){const metadata=await mountedNode(target,'labos',`const fs=require('node:fs'),crypto=require('node:crypto');const p='/var/lib/labos/uploads/materials/'+${JSON.stringify(attachment.stored_name)};const b=fs.readFileSync(p);console.log(JSON.stringify({size:b.length,sha256:crypto.createHash('sha256').update(b).digest('hex')}));`);assert.equal(metadata.sha256,attachment.sha256);assert.equal(metadata.size,attachment.size);}
+  const pointers=JSON.parse(await query(target,'SELECT jsonb_agg(document_version ORDER BY id) FROM material_arrivals'));assert.deepEqual(pointers,[1,2]);report.arrivals=2;report.documentVersions=Number(await query(target,'SELECT count(*) FROM material_arrival_document_versions'));report.attachments=sourceAttachments.length;report.units=Number(await query(target,'SELECT count(*) FROM material_stock_units'));mark('all-history-file-bytes-and-current-pointers');
+  assert.equal(sha(JSON.stringify(await mountedNode(target,'labos',identityCode))),sha(JSON.stringify(sourceSecret)));assert.equal(sha(JSON.stringify(await mountedNode(target,'labos-https',caCode))),sha(JSON.stringify(sourceCa)));mark('database-secret-owner-mode-and-ca-preserved');
+  report.stage='restored-application';await target.compose(['start','labos']);const targetBase=await baseUrl(target,'labos',3000);await wait(async()=>!(await api(targetBase,'GET','/api/auth/me',undefined,200,'')).data.setupRequired);cookie=await login(targetBase,'backup-manager',admin.password);
+  assert.equal(sha(JSON.stringify((await api(targetBase,'GET',`/api/materials/requests/${order.id}/snapshot?revision=1`)).data)),sha(JSON.stringify(original)));
+  assert.deepEqual((await api(targetBase,'GET',`/api/materials/arrivals/${second.arrivalId}/documents`)).data.versions.map(row=>row.version).sort(),[1,2]);
+  for(const attachment of sourceAttachments){const response=await fetch(targetBase+`/api/materials/attachments/${attachment.id}/download`,{headers:{Cookie:cookie},signal:AbortSignal.timeout(10000)});assert.equal(response.status,200);assert.equal(sha(Buffer.from(await response.arrayBuffer())),attachment.sha256);}
+  const ordinary=await login(targetBase,reader.username,reader.password);await api(targetBase,'GET',`/api/materials/arrivals/${second.arrivalId}/documents`,undefined,403,ordinary);const blocked=await fetch(targetBase+`/api/materials/attachments/${sourceAttachments[0].id}/download`,{headers:{Cookie:ordinary},signal:AbortSignal.timeout(10000)});assert.equal(blocked.status,403);mark('restored-accounts-roles-stock-unit-identities');
+  report.stage='restored-https';await target.compose(['start','labos-https']);await trustedHttps(target,cookie,manager.id,path.join(target.base,'root.crt'));mark('restored-trusted-no-sni-https');
+ }catch(error){failure=error;report.status='failed';report.failedStage=report.stage;report.failure=error.message;}
+ finally{
+  report.stage='cleanup';try{
+   safeDirectory();for(const project of projects){for(const id of(await docker(['ps','-aq','--filter',`label=com.docker.compose.project=${project.name}`])).split(/\s+/).filter(Boolean)){const container=await inspect(id);assert.equal(container.Config.Labels['com.docker.compose.project'],project.name);assert.ok(['labos-init','labos','postgres','labos-https'].includes(container.Config.Labels['com.docker.compose.service']));}await project.compose(['down','--remove-orphans','--volumes']);assert.equal(await docker(['ps','-aq','--filter',`label=com.docker.compose.project=${project.name}`]),'');}
+   for(const id of helperIds){const container=await inspect(id);assert.equal(container.Config.Labels['labos.backup.gate'],marker);await docker(['rm','--force',id]);}helperIds.clear();assert.equal(await docker(['ps','-aq','--filter',`label=labos.backup.gate=${marker}`]),'');
+   const remainingVolumes=new Set((await docker(['volume','ls','--quiet'])).split(/\s+/).filter(Boolean));assert.ok([...anonymousVolumes].every(name=>!remainingVolumes.has(name)));
+   // Only this newly marked cache child is writable in the cleanup container.
+   safeDirectory();await docker(['run','--rm','--pull','never','--network','none','--user','0:0','--mount',`type=bind,src=${directory},dst=/cleanup`,'--entrypoint','node',image,'-e',`const fs=require('node:fs'),assert=require('node:assert/strict');assert.equal(fs.readFileSync('/cleanup/.labos-backup-gate','utf8'),${JSON.stringify(marker)});for(const name of ['source','restore','backup','frozen','root.crt'])fs.rmSync('/cleanup/'+name,{recursive:true,force:true});`]);
+   assert.deepEqual(fs.readdirSync(directory),['.labos-backup-gate']);fs.unlinkSync(markerFile);fs.rmdirSync(directory);report.cleanup={passed:true,remainingProjectContainers:0,remainingHelpers:0,privateFilesRemoved:true};mark('marked-project-and-runtime-cleanup');
+  }catch(error){failure||=error;report.status='failed';report.cleanup={passed:false,error:error.message};}
+  if(!failure){try{report.status='passed';report.stage='complete';assertRuntimeBackupEvidence(report,anonymous,manifest);}catch(error){failure=error;report.status='failed';report.failure=error.message;}}report.completedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(__dirname,'runtime-backup-verification.json'),JSON.stringify(report,null,2)+'\n');
+ }
+ assert.ok(!failure,'Real runtime backup/restore gate failed; inspect the sanitized runtime-backup-verification.json.');console.log(JSON.stringify({status:report.status,checks:report.checks.length,tables:report.database.tables,arrivals:report.arrivals,documentVersions:report.documentVersions,attachments:report.attachments,units:report.units}));
+}
+if(require.main===module){
+ if(process.argv.includes('--self-check')){
+  const identity={configDigest:'sha256:'+'1'.repeat(64),manifestDigest:'sha256:'+'2'.repeat(64),indexDigest:'sha256:'+'3'.repeat(64)},descriptor={digest:identity.manifestDigest,platform:{os:'linux',architecture:'amd64'}};
+  for(const Image of [identity.configDigest,identity.manifestDigest])assertNativeContainerImage({Image},identity,'synthetic');
+  assertNativeContainerImage({Image:identity.indexDigest,ImageManifestDescriptor:descriptor},identity,'synthetic');
+  assertNativeContainerImage({Image:identity.indexDigest,ImageManifestDescriptor:{digest:identity.manifestDigest}},identity,'synthetic');
+  for(const container of [{Image:identity.indexDigest},{Image:'sha256:'+'4'.repeat(64),ImageManifestDescriptor:descriptor},{Image:identity.indexDigest,ImageManifestDescriptor:{...descriptor,digest:'sha256:'+'4'.repeat(64)}},{Image:identity.indexDigest,ImageManifestDescriptor:{...descriptor,platform:{os:'linux',architecture:'arm64'}}},{Image:identity.manifestDigest,ImageManifestDescriptor:{...descriptor,platform:{os:'windows',architecture:'amd64'}}}])assert.throws(()=>assertNativeContainerImage(container,identity,'synthetic'));
+  const anonymous={commit:'a'.repeat(40),expectedIndexDigest:'sha256:'+'b'.repeat(64),postgres:{indexDigest:'sha256:'+'c'.repeat(64)},httpsProxy:{indexDigest:'sha256:'+'d'.repeat(64)},engineHost:'unix:///var/run/docker.sock',verificationEnvironment:{provider:'GitHub Actions',os:'linux',architecture:'x64',runId:'1',headSha:'e'.repeat(40),workflowSha:'e'.repeat(40)}};
+  const value={status:'passed',version,commit:anonymous.commit,method:'frozen-powershell-docker-pgdump-empty-restore',platform:'linux/amd64',indexDigest:anonymous.expectedIndexDigest,postgresIndexDigest:anonymous.postgres.indexDigest,httpsProxyIndexDigest:anonymous.httpsProxy.indexDigest,engineHost:anonymous.engineHost,syntheticOnly:true,productionData:false,pullPolicy:'never',sourceHttpsReady:true,database:{major:18,tables:33},arrivals:2,documentVersions:3,attachments:3,units:5,cleanup:{passed:true,remainingProjectContainers:0,remainingHelpers:0,privateFilesRemoved:true},checks:checkNames.map(name=>({name,passed:true})),script:{path:'scripts/backup-runtime.ps1',size:123,sha256:'f'.repeat(64)},backupManifestSha256:'1'.repeat(64),databaseProjectionSha256:'2'.repeat(64),verificationEnvironment:anonymous.verificationEnvironment};
+  const manifest={commit:value.commit,sources:[value.script]};assertRuntimeBackupEvidence(value,anonymous,manifest);
+  for(const change of [{cleanup:{passed:false}},{sourceHttpsReady:false},{attachments:2},{script:{path:'other',size:123,sha256:'f'.repeat(64)}},{checks:value.checks.slice(1)},{verificationEnvironment:{...value.verificationEnvironment,runId:'2'}},{script:{...value.script,sha256:'0'.repeat(64)}}])assert.throws(()=>assertRuntimeBackupEvidence({...value,...change},anonymous,manifest));
+  console.log('Runtime backup evidence contract self-check passed. No Docker, PostgreSQL, credentials, production data or network used.');
+ }else if(process.argv.includes('--execute-after-image-gates'))main().catch(error=>{console.error(error.message);process.exitCode=1;});
+ else console.log('Prepared only. Use --self-check offline; actual execution requires frozen source, same-run image gates and a Linux Actions Docker engine.');
+}
+module.exports={assertRuntimeBackupEvidence,assertNativeContainerImage};

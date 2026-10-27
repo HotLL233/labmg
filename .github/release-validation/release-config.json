@@ -1,0 +1,11 @@
+{
+  "version": "0.14.2",
+  "commit": "4086f62670a5cdc1f9a90617929b5c11bfa0df48",
+  "indexDigest": "sha256:24d009726e941dc60a0d89d9a8500ca659728dc37e49fa5bbd31695c3caf5919",
+  "baseParent": "747852e2d85ba8922e8bcd03a2844302c0e863d9",
+  "featureBranch": "feature/v0.14.2-stock-inline-layout",
+  "status": "source-frozen",
+  "buildRunId": 40464079760,
+  "sourceTagObject": "b10dbf5ab0db40e9acdef2baae9935286b5ccfdd",
+  "sourceParent": "747852e2d85ba8922e8bcd03a2844302c0e863d9"
+}
