@@ -946,6 +946,8 @@ test('ordinary users request stock once, retry a lost response with the same bod
   assert.equal(app.context.MaterialWorkflow.hasPending(),false);
   assert.equal('amount' in sends[0], false); assert.ok(sends[0].requestIdempotencyKey.length >= 8);
   assert.equal(app.$('[data-mw=issue-stock]'), null); assert.equal(app.$('[data-mw=issue-reject]'), null);
+  assert.ok(app.$('#page [data-mw=stock-issue]'), 'a successful inline application stays in inventory');
+  await click('[data-page=issues]');
   assert.match(app.$('#page').textContent, /未记账/);
   await click('[data-mw=issue-cancel]'); fill({ reason: '不再需要' }); await submit();
   assert.match(app.$('#page').textContent, /已取消/); assert.equal(app.$('[data-mw=issue-cancel]'), null);
@@ -1391,6 +1393,58 @@ test('acceptance exposes storage location, guards the selected batch version and
 test('stock row application selects the displayed real batch before creating a request',async()=>{
   const {app,row,click}=await materialApp(false);app.state.materialLists['/stock/batches']=[{...row,batch:'批次甲',location:'柜 A'},{...row,batch:'批次乙',location:'柜 B'}];
   await click({dataset:{mw:'page',page:'inventory'}});const actions=app.document.querySelectorAll('[data-mw=stock-issue]');assert.equal(actions.length,2);await click(actions[1]);assert.equal(app.$('#mw-dialog').open,true);assert.match(app.$('#mw-intro').textContent,/批次乙/);assert.match(app.$('#mw-intro').textContent,/柜 B/);
+  assert.equal(app.$('#mw-dialog').parentNode,app.$('#mw-inline-form-slot'));
+  assert.equal(app.$('#mw-dialog').classList.contains('mw-issue-inline'),true);
+  assert.equal(app.$('#mw-view').open,false);
+  assert.equal(app.$('#mw-dialog .ws-context'),null);
+  assert.ok(app.$('#logout'),'the account and logout remain in the page header');
+  app.$('#mw-form [name=purpose]').value='保留当前领用输入';
+  app.context.confirm=()=>false;
+  await click('[data-mw=stock-detail]');
+  assert.equal(app.$('#mw-view').open,false,'declining to discard input also blocks background stock details');
+  await click('[data-page=requests]');
+  assert.equal(app.$('#mw-dialog').open,true);
+  assert.equal(app.$('#mw-form [name=purpose]').value,'保留当前领用输入');
+  await click('[data-mw=cancel]');
+  assert.equal(app.$('#mw-dialog').open,true,'cancel keeps the form when discard is declined');
+  app.context.confirm=()=>true;
+  await click('[data-mw=cancel]');
+  assert.equal(app.$('#mw-dialog').open,false);
+  assert.equal(app.$('#mw-dialog').parentNode,app.document.body,'restore the reusable form before any list refresh');
+});
+
+test('a slow stock lookup cannot replace a newer batch application or reopen after leaving inventory',async()=>{
+  const {app,row,click,fill}=await materialApp(false);
+  app.state.materialLists['/stock/batches']=[{...row,batch:'先点击'},{...row,batch:'后点击'}];
+  await click({dataset:{mw:'page',page:'inventory'}});
+  const pending=[];
+  app.state.materialResponse=({url})=>{
+    if(url.pathname==='/api/materials/stock/batches'&&url.searchParams.get('pageSize')==='2')return new Promise(resolve=>pending.push(()=>resolve({body:{items:[{...row,batch:url.searchParams.get('batch')}],total:1,page:1,pageSize:2}})));
+  };
+  const actions=app.document.querySelectorAll('[data-mw=stock-issue]');
+  const first=click(actions[0]);await new Promise(setImmediate);
+  const second=click(actions[1]);await new Promise(setImmediate);
+  pending[1]();await second;fill({quantity:'1',purpose:'后点击的输入'});
+  pending[0]();await first;
+  assert.match(app.$('#mw-intro').textContent,/后点击/);
+  assert.equal(app.$('#mw-form [name=purpose]').value,'后点击的输入');
+  app.context.confirm=()=>true;await click('[data-mw=cancel]');
+  const third=click(actions[0]);await new Promise(setImmediate);
+  await click('[data-page=requests]');pending[2]();await third;
+  assert.equal(app.$('#mw-dialog').open,false);
+  assert.equal(app.$('#mw-view').open,false);
+  assert.match(app.$('#page').textContent,/申报记录/);
+});
+
+test('compact material forms do not duplicate the account context of full record workspaces',async()=>{
+  const {app,click}=await materialApp();
+  await click('[data-page=catalog]');
+  await click('[data-mw=catalog-detail]');
+  assert.ok(app.$('#mw-view .ws-context'));
+  await click('[data-mw=close-view]');
+  await click('[data-mw=new-catalog]');
+  assert.equal(app.$('#mw-dialog .ws-context'),null);
+  assert.ok(app.$('#logout'));
 });
 
 test('opening documents save multiple lines, import and export Excel, confirm posting once and retain generated labels',async()=>{

@@ -1,5 +1,7 @@
 # LabOS 实验室综合管理系统
 
+发布候选：**0.14.2 库存列宽与页内领用修复**。主要物资表按字段分配宽度，领用直接在库存页内填写；短表单去重复账号栏。源码验证及真实浏览器已完成，完整回归的唯一超时项在原限制内单独复跑通过；镜像和公开交付仍待本轮发布验证，当前可部署的公开版本见下方。
+
 当前公开版本：**0.14.1／按单验收与到货清单（2026-10-26）**。[0.14.1 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.1)已公开为prerelease（Release423914394），提供双架构镜像、两份YML、完整离线包和源码。按[已批准方案](docs/MATERIAL_WORKFLOW_SIMPLIFICATION.md)实现申报／验收／库存三入口、行内金额与厂家核对、整批事务与幂等、固定修订原单二维码及每次到货独立清单；物资资料和配置从物资设置进入。
 
 冻结源码`f223e4c`／`v0.14.1`；正式构建40278890455的真实PostgreSQL18.6回归262/262、54JS通过。验证40281052371／运维提交`a41f7fdb8453d5204f17453471353a38d8a09a83`四项容器门禁及真实Docker完整备份／空库恢复12项通过，ARM64使用QEMU。本机`artifacts/releases/0.14.1/`完整12件489533376字节、11摘要、5份冻结原字节附件及双TAR三镜像／六config核验通过；两TAR经59／58段完整下载和整包SHA256核对。
@@ -53,7 +55,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.1/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.2/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -64,7 +66,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.1/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.2/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 

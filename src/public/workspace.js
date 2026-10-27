@@ -20,6 +20,7 @@
     markClean(dialog);dialog.close();return true;
   }
   function context(dialog){
+    if(dialog.classList.contains('mw-compact')||dialog.classList.contains('mw-inline-form')){dialog.querySelector('.ws-context')?.remove();return;}
     let bar=dialog.querySelector('.ws-context');
     if(!bar){
       bar=document.createElement('div');bar.className='ws-context';

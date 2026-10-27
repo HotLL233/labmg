@@ -70,14 +70,22 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '3', purpose: '合成布局核对' }, 201)).data;
   order = (await api('POST', `/api/materials/requests/${order.id}/items`, { requestVersion: order.version, catalogId: catalog[8].id,
     categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '2', purpose: '合成第二页记录核对' }, 201)).data;
+  for (const item of catalog.slice(1, 20).filter(item => item.id !== catalog[8].id)) order = (await api('POST', `/api/materials/requests/${order.id}/items`, {
+    requestVersion: order.version, catalogId: item.id, categoryId: category.id, regionId: region.id, warehouse: 'MAIN', quantity: '1'
+  }, 201)).data;
   order = (await api('POST', `/api/materials/requests/${order.id}/submit`, { requestVersion: order.version })).data;
   const firstReceipt = (await api('POST', '/api/materials/receipts', { requestId: order.id, itemId: order.items[0].id, requestVersion: order.version,
     version: order.items[0].version, requestIdempotencyKey: crypto.randomUUID(), quantity: '3', amount: '30',
     manufacturer: '合成厂家', batch: 'LAYOUT-BATCH', location: '合成实验室 / 试剂柜第2层', locationVersion: 0 }, 201)).data;
   order = firstReceipt.request;
-  await api('POST', '/api/materials/receipts', { requestId: order.id, itemId: order.items[1].id, requestVersion: order.version,
+  order = (await api('POST', '/api/materials/receipts', { requestId: order.id, itemId: order.items[1].id, requestVersion: order.version,
     version: order.items[1].version, requestIdempotencyKey: crypto.randomUUID(), quantity: '2', amount: '20',
-    manufacturer: '合成第二厂家', batch: 'LAYOUT-SECOND', location: '合成实验室 / 试剂柜第2层', locationVersion: 0 }, 201);
+    manufacturer: '合成第二厂家', batch: 'LAYOUT-SECOND', location: '合成实验室 / 试剂柜第2层', locationVersion: 0 }, 201)).data.request;
+  const stockNote = '库存长备注用于列宽检查。'.repeat(12);
+  order = (await api('POST', `/api/materials/requests/${order.id}/receipts/batch`, { version: order.version, requestIdempotencyKey: crypto.randomUUID(),
+    items: order.items.slice(2).map(item => ({ itemId: item.id, itemVersion: item.version, quantity: '1', amount: '10',
+      manufacturer: '合成其他厂家', note: stockNote, location: '合成实验室 / 试剂柜第2层', locationVersion: 0 }))
+  }, 201)).data.request;
   await api('POST', '/api/materials/issues', { catalogId: catalog[0].id, regionId: region.id, warehouse: 'MAIN', batch: 'LAYOUT-BATCH', expiryDate: '',
     quantity: '1', purpose: '合成待发放领用', requestIdempotencyKey: crypto.randomUUID() }, 201);
   await api('POST', '/api/materials/requests', { title: '可编辑的合成草稿' }, 201);
@@ -158,19 +166,20 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           : table.querySelector('td.cell-act [data-mw="issue-detail"]') ? 144
           : table.querySelector('td.cell-act [data-mw="events"]') && table.querySelector('td.cell-act [data-mw="request"]') ? 152 : null;
         const name = table.querySelector('tbody td strong'), headings = [...table.querySelectorAll('th')];
+        const controlled = container.matches('.mw-stock-table,.mw-catalog-table,.mw-request-table,.mw-issue-table') || table.matches('.mw-stock-table,.mw-catalog-table,.mw-request-table,.mw-issue-table') || Boolean(container.closest('.mw-order-panel'));
         let stable = true;
-        if (name && table.closest('.page')) {
+        if (name && controlled) {
           const original = name.textContent, before = headings.map(th => th.getBoundingClientRect().width);
           name.textContent = '长名称物资'.repeat(6);
           stable = headings.every((th, index) => Math.abs(th.getBoundingClientRect().width - before[index]) < 1);
           name.textContent = original;
         }
-        return { fixed: Boolean(table.closest('.page')), stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width) };
+        return { controlled, stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width) };
       }));
       for (const layout of layouts) {
-        if (layout.fixed) check(layout.layout === 'fixed', label + ': the real page table controls column widths', layout);
-        if (layout.fixed) check(layout.stable, label + ': a thirty-character name does not move other columns', layout);
-        if (layout.fixed && layout.expected) check(Math.abs(layout.actual - layout.expected) < 1, label + ': per-table operation width wins the generic rule', layout);
+        if (layout.controlled) check(layout.layout === 'fixed', label + ': the semantic record table controls column widths', layout);
+        if (layout.controlled) check(layout.stable, label + ': a thirty-character name does not move other columns', layout);
+        if (layout.expected) check(Math.abs(layout.actual - layout.expected) < 1, label + ': per-table operation width wins the generic rule', layout);
       }
     }
     const result = await page.locator(selector).evaluateAll(containers => containers.map(container => {
@@ -200,6 +209,153 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         label + ': real operation cells stay reachable at both horizontal scroll ends', operation);
     }
   };
+  const stockContext = () => page.evaluate(() => {
+    const table = document.querySelector('#page .mw-stock-table'), scroll = table?.closest('.table');
+    return { query: document.querySelector('#mw-filters [name="q"]')?.value,
+      region: document.querySelector('#mw-filters [name="regionId"]')?.value,
+      warehouse: document.querySelector('#mw-filters [name="warehouse"]')?.value,
+      pagination: document.querySelector('#page .mw-pagebar')?.textContent,
+      firstCode: document.querySelector('#page .mw-stock-table tbody small')?.textContent,
+      documentScroll: window.scrollY, tableScroll: scroll?.scrollTop || 0 };
+  });
+  const checkStockContext = async (before, label) => {
+    const after = await stockContext();
+    for (const key of ['query', 'region', 'warehouse', 'pagination', 'firstCode']) check(after[key] === before[key], `${label}: ${key} is preserved`, { before: before[key], after: after[key] });
+    for (const key of ['documentScroll', 'tableScroll']) check(Math.abs(after[key] - before[key]) <= 1, `${label}: ${key} is restored`, { before: before[key], after: after[key] });
+  };
+  const checkStockColumns = async label => {
+    check(await page.locator('#page .mw-stock-table').count() === 1, label + ': stock has an explicit semantic column policy');
+    if (page.viewportSize().width < 768) return;
+    const widths = await page.locator('#page .mw-stock-table').evaluate(node => [...(node.matches('table') ? node : node.querySelector('table')).querySelectorAll('thead th')].map(th => th.getBoundingClientRect().width));
+    check(widths.length === 7, label + ': the ledger retains seven columns', widths);
+    check(Math.abs(widths[0] - 116) < 1.5 && Math.abs(widths[2] - 96) < 1.5 && Math.abs(widths[4] - 68) < 1.5,
+      label + ': time, quantity and unit use bounded content widths', widths);
+    check(widths[1] >= widths[2] * 1.8 && widths[1] >= widths[4] * 2 && widths[3] > widths[2] && widths[6] >= 90,
+      label + ': material name, specification and notes receive the useful width', widths);
+  };
+  const checkInlineIssue = async (label, lostResponse = false) => {
+    await page.locator('#mw-filters [name="q"]').fill('布局物资');
+    await page.locator('#mw-filters [name="regionId"]').selectOption(String(region.id));
+    await page.locator('#mw-filters [name="warehouse"]').selectOption('MAIN');
+    const filtered = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/stock/batches' && new URL(response.url()).searchParams.get('q') === '布局物资');
+    await page.locator('#mw-filters [type="submit"]').click();
+    await filtered;
+    await page.locator('#page .mw-stock-table [data-mw="stock-issue"]').first().waitFor();
+    const next = page.locator('#page .mw-pagebar [data-mw="next"]');
+    check(!(await next.isDisabled()), label + ': seeded inventory has a genuine second server page');
+    const oldPage = await page.locator('#page .mw-pagebar').textContent();
+    await next.click();
+    await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), oldPage);
+    const noteRow = page.locator('#page .mw-stock-table tbody tr').filter({ hasText: stockNote }).first();
+    while (!(await noteRow.count())) {
+      check(!(await next.isDisabled()), label + ': the specific long-note stock fixture is reachable by server pagination');
+      const before = await page.locator('#page .mw-pagebar').textContent();
+      await next.click();
+      await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), before);
+    }
+    const note = await noteRow.locator('td').nth(6).evaluate(cell => {
+      const text = cell.querySelector('.mw-cell-text'), style = text && getComputedStyle(text);
+      return { full: cell.title, text: text?.textContent, clamp: style?.webkitLineClamp, height: text?.getBoundingClientRect().height, lineHeight: Number.parseFloat(style?.lineHeight) };
+    });
+    check(note.full === stockNote && note.text === stockNote && note.clamp === '2' && note.height <= note.lineHeight * 2 + 1,
+      label + ': inventory shows a two-line summary while retaining the complete note', note);
+    if (label === '1366-stock') {
+      await noteRow.locator('[data-mw="stock-detail"]').click();
+      await page.locator('#mw-view').waitFor({ state: 'visible' });
+      check((await page.locator('#mw-view-body').textContent()).includes(stockNote), label + ': inventory detail preserves the full long note');
+      await page.locator('#mw-view [data-mw="close-view"]').first().click();
+      await page.locator('#mw-view').waitFor({ state: 'hidden' });
+    }
+    if (label === '1366x480-stock') {
+      const row = noteRow;
+      await row.scrollIntoViewIfNeeded();
+      check(await visibleInViewport(row), label + ': a complete inventory row remains reachable at low height');
+      check(await visibleInViewport(row.locator('[data-mw="stock-issue"]')), label + ': low-height inventory retains its reachable issue action');
+    }
+    const source = await stockContext(), button = noteRow.locator('[data-mw="stock-issue"]');
+    const purpose = `合成页内领用 ${label}`;
+    await button.click();
+    await page.locator('#mw-inline-form-slot #mw-dialog').waitFor({ state: 'visible' });
+    const inline = await page.locator('#mw-dialog').evaluate(dialog => ({ open: dialog.open, modal: dialog.matches(':modal'),
+      inline: dialog.classList.contains('mw-inline-form') && dialog.classList.contains('mw-issue-inline'),
+      accountCopies: dialog.querySelectorAll('.ws-context').length,
+      visibleAccounts: [...document.querySelectorAll('#session-user,[data-ws-user]')].filter(node => node.getBoundingClientRect().width && node.getBoundingClientRect().height).length,
+      detailOpen: document.querySelector('#mw-view')?.open }));
+    check(inline.open && inline.inline && !inline.modal && !inline.detailOpen, label + ': issue application lives inside inventory without a modal or stale detail', inline);
+    check(inline.accountCopies === 0 && inline.visibleAccounts === 1, label + ': the inline form has exactly one visible account bar', inline);
+    const cancellationLoads = [], observeCancellation = request => {
+      const url = new URL(request.url());
+      if (request.method() === 'GET' && url.pathname === '/api/materials/stock/batches' && url.searchParams.get('q') === source.query) cancellationLoads.push(url.pathname);
+    };
+    page.on('request', observeCancellation);
+    await page.locator('#mw-fields [name="quantity"]').fill('1');
+    await page.locator('#mw-fields [name="purpose"]').fill(purpose);
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    check(await page.locator('#mw-inline-form-slot #mw-dialog').isVisible(), label + ': refusing cancellation retains the inline form');
+    check(await page.locator('#mw-fields [name="purpose"]').inputValue() === purpose, label + ': refusing cancellation retains the entered purpose');
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.locator('.mw-nav [data-page="requests"]').click();
+    check(await page.locator('#mw-inline-form-slot #mw-dialog').isVisible() && await page.locator('.mw-nav [data-page="inventory"]').getAttribute('aria-current') === 'page', label + ': refusing navigation retains inventory and the draft');
+    check(await page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; }), label + ': browser unload protects the unsaved inline input');
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    await page.locator('#mw-dialog').waitFor({ state: 'hidden' });
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    page.off('request', observeCancellation);
+    check(cancellationLoads.length === 0, label + ': cancelling does not reload the inventory list', cancellationLoads);
+    await checkStockContext(source, label + ' cancel');
+    await button.click();
+    await page.locator('#mw-inline-form-slot #mw-dialog').waitFor({ state: 'visible' });
+    await page.locator('#mw-fields [name="quantity"]').fill('1');
+    await page.locator('#mw-fields [name="purpose"]').fill(purpose);
+    await page.locator('#mw-save').scrollIntoViewIfNeeded();
+    check(await page.locator('#mw-save').isVisible(), label + ': submit remains reachable');
+    await screenshot(label.replace(/[^a-zA-Z0-9-]/g, '-') + '-stock-inline');
+    const issueRoute = '**/api/materials/issues';
+    let release, interceptedBody;
+    if (lostResponse) {
+      const held = new Promise(resolve => { release = resolve; });
+      let entered;
+      const intercepted = new Promise(resolve => { entered = resolve; });
+      await page.route(issueRoute, async route => {
+        if (route.request().method() !== 'POST') { await route.continue(); return; }
+        interceptedBody = route.request().postData(); entered(); await held;
+        const response = await route.fetch();
+        check(response.status() === 201, label + ': held request actually commits through the real API');
+        await route.abort('failed');
+      });
+      try {
+        await page.locator('#mw-save').click(); await intercepted;
+        check(await page.locator('#mw-save').isDisabled(), label + ': a pending request disables repeated submission');
+        await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+        await page.locator('.mw-nav [data-page="requests"]').click();
+        await page.locator('#logout').click();
+        check(await page.locator('#mw-inline-form-slot #mw-dialog').isVisible(), label + ': pending save blocks cancellation, navigation and logout');
+        check(Boolean((await api('GET', '/api/auth/me')).data.user), label + ': blocked busy logout keeps the actual session');
+      } finally { release(); }
+      await page.waitForFunction(() => document.querySelector('#mw-error')?.textContent.includes('结果待确认'));
+      await page.unroute(issueRoute);
+      check(await page.locator('#mw-fields [name="quantity"]').isDisabled() && await page.locator('#mw-fields [name="purpose"]').isDisabled(), label + ': lost committed response freezes the original retry body');
+      await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+      await page.locator('.mw-nav [data-page="requests"]').click();
+      check(await page.locator('#mw-inline-form-slot #mw-dialog').isVisible(), label + ': uncertain result blocks cancellation and navigation');
+    }
+    const saved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/issues' && response.request().method() === 'POST');
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/stock/batches' && new URL(response.url()).searchParams.get('q') === source.query);
+    await page.locator('#mw-save').click();
+    const response = await saved;
+    const expectedStatus = lostResponse ? 200 : 201;
+    check(response.status() === expectedStatus, label + ': submit uses the real issue API creation/replay contract', { expectedStatus, actualStatus: response.status() });
+    if (lostResponse) check(response.request().postData() === interceptedBody, label + ': retry sends exactly the original committed request');
+    await refreshed;
+    await page.locator('#mw-dialog').waitFor({ state: 'hidden' });
+    await page.locator('#page .mw-stock-table [data-mw="stock-issue"]').first().waitFor();
+    await checkStockContext(source, label + ' save');
+    check(await page.locator('.mw-nav [data-page="inventory"]').getAttribute('aria-current') === 'page', label + ': success stays on inventory');
+    const created = (await api('GET', '/api/materials/issues?q=' + encodeURIComponent(purpose))).data;
+    check(created.total === 1 && created.items[0].status === 'pending', label + ': one pending issue exists even after a lost-response retry', { total: created.total, status: created.items[0]?.status });
+  };
 
   let status = 'failed';
   try {
@@ -208,6 +364,36 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     const me = await api('GET', '/api/auth/me');
     check(me.data.appVersion === version, 'real session API supplies package application version');
     check(me.data.user.display_name === '合成物资管理员', 'the real session API preserves the seeded account display name');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await navigate('materials');
+    await navigateMaterial('catalog');
+    await page.waitForFunction(() => Number(document.querySelector('#page .mw-pagebar')?.textContent.match(/每页 (\d+) 条/)?.[1]) >= 5);
+    await navigateMaterial('settings');
+    await page.setViewportSize({ width: 1366, height: 650 });
+    const scannedPageSizes = [], observeScannedInventory = request => {
+      const url = new URL(request.url());
+      if (request.method() === 'GET' && url.pathname === '/api/materials/stock/batches' && url.searchParams.get('detail') === '1') scannedPageSizes.push(Number(url.searchParams.get('pageSize')));
+    };
+    page.on('request', observeScannedInventory);
+    // Use manual input in the real scan dialog; this checks the workflow without claiming camera hardware coverage.
+    try {
+      const resolved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/scan/resolve');
+      await page.locator('#page [data-mw="scan-issue"]').click();
+      await page.locator('.ms-manual [name="code"]').fill(firstReceipt.receipt.units[0].code);
+      await page.locator('.ms-manual [type="submit"]').click();
+      const resolution = await resolved;
+      check(resolution.status() === 200 && (await resolution.json()).kind === 'unit', 'manual entry in the real scan dialog resolves through the actual unit-code API');
+      await page.locator('#mw-view [data-mw="issue-create"]').first().click();
+      await page.locator('#mw-inline-form-slot #mw-dialog').waitFor({ state: 'visible' });
+      check(new Set(scannedPageSizes).size >= 2, 'scan from settings awaits a genuine automatic inventory page-size reload', scannedPageSizes);
+      check(await page.locator('#mw-fields [name="quantity"]').inputValue() === '1', 'a real unit-code result prefills one item in the inventory inline form');
+      check(await page.locator('.mw-nav [data-page="inventory"]').getAttribute('aria-current') === 'page' && !(await page.locator('#mw-view').isVisible()), 'scan batch selection closes its detail and reaches inventory');
+      await screenshot('1366-manual-unit-scan-inline');
+      await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+      await page.locator('#mw-dialog').waitFor({ state: 'hidden' });
+    } finally {
+      page.off('request', observeScannedInventory);
+    }
     for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size);
       await navigate('materials');
@@ -219,11 +405,15 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           await page.locator('#mw-filters [name="status"]').selectOption('done');
           await page.locator('#mw-filters [type="submit"]').click();
           await page.locator('#mw-order-workspace [data-wf-row]').first().waitFor();
-          check(await page.locator('#mw-order-workspace [data-wf-row]').count() === 2, `${size.width}: acceptance retains the complete real request detail`);
+          check(await page.locator('#mw-order-workspace [data-wf-row]').count() === 20, `${size.width}: acceptance retains the complete real request detail`);
         }
         await checkShell(`${size.width} ${materialPage}`);
         await checkCards(`${size.width} ${materialPage}`);
         if (['acceptance', 'inventory', 'issues'].includes(materialPage)) await screenshot(`${size.width}-${materialPage}`);
+        if (materialPage === 'inventory') {
+          await checkStockColumns(`${size.width} stock columns`);
+          await checkInlineIssue(`${size.width}-stock`, size.width === 1366);
+        }
         if (materialPage === 'inventory' && size.width === 390) {
           await page.emulateMedia({ media: 'print' });
           const printed = await page.locator('#page .table table').evaluate(table => ({
@@ -305,16 +495,18 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       const catalogContext = { q: await page.locator('#mw-filters [name="q"]').inputValue(), pagination: await page.locator('#page .mw-pagebar').textContent() };
       await page.locator('#page [data-mw="catalog-edit"]').first().click();
       await page.locator('#mw-dialog').waitFor({ state: 'visible' });
-      check(await visibleInViewport(page.locator('#mw-dialog [data-ws-logout]')), `${size.width}: logout remains reachable in a full workspace`);
-      check(await visibleInViewport(page.locator('#mw-dialog [data-ws-version]')), `${size.width}: application version remains visible in a full workspace`);
+      check(await visibleInViewport(page.locator('#logout')), `${size.width}: the main logout label remains visible behind the short modal`);
+      check(await visibleInViewport(page.locator('#app-version')), `${size.width}: the main application version remains visible in a short form`);
+      check(await page.locator('#mw-dialog .ws-context').count() === 0, `${size.width}: a short form does not duplicate the account bar`);
       const name = page.locator('#mw-fields [name="name"]');
       const original = await name.inputValue();
       await name.fill('未保存的合成名称');
       if (size.width === 1366) {
         page.once('dialog', dialog => dialog.dismiss());
-        await page.locator('#mw-dialog [data-ws-logout]').click();
-        check((await name.inputValue()) === '未保存的合成名称', 'refusing logout preserves the current draft');
-        check(Boolean((await api('GET', '/api/auth/me')).data.user), 'refusing logout preserves the real session');
+        // Compact catalog forms retain modal semantics, so the outside header is inert; invoke its shared handler to exercise its dirty guard.
+        await page.evaluate(() => document.querySelector('#logout').onclick());
+        check((await name.inputValue()) === '未保存的合成名称', 'refusing the shared logout handler preserves the current modal draft');
+        check(Boolean((await api('GET', '/api/auth/me')).data.user), 'refusing the shared logout handler preserves the real session');
       }
       page.once('dialog', dialog => dialog.dismiss());
       await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
@@ -413,6 +605,9 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     check(await finalField.isVisible(), 'low-height final form field remains reachable');
     await screenshot('1366x480-edit');
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
+    await navigateMaterial('inventory');
+    await checkStockColumns('1366x480 stock columns');
+    await checkInlineIssue('1366x480-stock');
     await page.locator('#logout').click();
     await page.locator('#login').waitFor({ state: 'visible' });
     check((await api('GET', '/api/auth/me')).data.user === null, 'visible logout invalidates the real server session');

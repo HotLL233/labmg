@@ -220,3 +220,55 @@
 
 @media screen{.mw-order-back{display:none}}
 @media screen and (max-width:767px){.mw-order-back{display:flex;align-items:center;min-height:44px;padding:var(--sp-2) var(--sp-3);font-size:var(--fs-label)}}
+
+/* 0.14.2：仅给明确的物资表分配列宽，不再依据列号或单元格内容猜测。 */
+@media screen and (min-width:768px){
+  :is(.mw,.mw-dialog) .mw-table>table:is(.mw-stock-table,.mw-request-table,.mw-issue-table,.mw-catalog-table){table-layout:fixed}
+  :is(.mw,.mw-dialog) .mw-table>table:is(.mw-request-items-table,.mw-opening-items-table){table-layout:auto}
+  :is(.mw,.mw-dialog) .mw-table>table:is(.mw-stock-table,.mw-request-table,.mw-issue-table,.mw-catalog-table,.mw-request-items-table,.mw-opening-items-table) :is(.mw-name,.mw-text,.stock-name,.stock-text){min-width:0;max-width:none}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:first-child{width:116px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:nth-child(2){width:23%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:nth-child(3){width:96px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:nth-child(4){width:18%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:nth-child(5){width:68px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-stock-table>thead>tr>th:nth-child(6){width:10%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(2){width:88px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(3){width:88px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(4){width:116px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:nth-child(5){width:104px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-table>thead>tr>th:last-child{width:176px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:first-child{width:116px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:nth-child(2){width:22%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:nth-child(3){width:10%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:nth-child(4){width:96px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:nth-child(6){width:12%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-issue-table>thead>tr>th:last-child{width:144px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(2){width:18%}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(3){width:80px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(4){width:80px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(5){width:68px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:nth-child(6){width:104px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-catalog-table>thead>tr>th:last-child{width:160px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-items-table>thead>tr>th:nth-child(4){width:88px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-items-table>thead>tr>th:nth-child(5){width:116px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-request-items-table>thead>tr>th:last-child{width:152px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-opening-items-table>thead>tr>th:nth-child(3){width:128px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-opening-items-table>thead>tr>th:nth-child(4){width:132px}
+  :is(.mw,.mw-dialog) .mw-table>table.mw-opening-items-table>thead>tr>th:last-child{width:96px}
+}
+@media screen{
+  dialog.mw-issue-inline.ws-dialog>form{flex:none;overflow:visible}
+  dialog.mw-issue-inline.ws-dialog .mw-dialog-body{max-height:none;overflow:visible}
+  dialog.mw-issue-inline.ws-dialog .mw-grid{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
+  dialog.mw-issue-inline.ws-dialog .mw-field.full{grid-column:auto}
+  dialog.mw-issue-inline.ws-dialog textarea{min-height:calc(3em + var(--sp-5));height:calc(3em + var(--sp-5));line-height:var(--lh-body);resize:vertical}
+  dialog.mw-issue-inline.ws-dialog .mw-error{max-height:none;overflow:visible}
+  .mw-issue-summary{padding:var(--sp-2) var(--sp-3);margin-bottom:var(--sp-3);background:var(--c-subtle);border:1px solid var(--c-line);border-radius:var(--r-sm);font-size:var(--fs-label);line-height:var(--lh-body);overflow-wrap:anywhere}
+  .mw-issue-summary>strong{font-size:var(--fs-body);font-weight:600}
+  .mw-issue-summary>span::before{content:' · '}
+  .mw-issue-summary>span:nth-child(3)::before{content:'';display:block}
+}
+@media screen and (max-width:767px){
+  dialog.mw-issue-inline.ws-dialog .mw-grid{grid-template-columns:minmax(0,1fr)}
+  dialog.mw-issue-inline.ws-dialog .mw-dialog-actions button{flex:1;min-height:44px}
+}
