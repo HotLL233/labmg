@@ -30,7 +30,7 @@ const V3_TABLES = V4_TABLES.filter(table => table !== 'material_stock_units');
 const V2_TABLES = V3_TABLES.filter(table => table !== 'material_barcodes');
 const V1_TABLES = V2_TABLES.filter(table => !['material_stock_locations', 'material_issues'].includes(table));
 
-function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, uploads, writeXlsx }) {
+function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, afterCommit, uploads, writeXlsx }) {
   const lab = createMaterialLab({ db, fail, hasPermission, log, validTimestamp });
   const defaultUnitRule = { template: 'LAB-{YYYY}{MM}{DD}-{SEQ}', padding: 6, version: 1, actorId: null, updatedAt: '', reason: '' };
   const numberKinds = { catalog: { label: '物资编码', prefix: 'MAT' }, request: { label: '申报单号', prefix: 'WZ' },
@@ -1940,9 +1940,17 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       if (method === 'GET') return reply((await requestView(orderId, user)));
       if (method === 'DELETE') {
         const staged = await transaction(async () => deleteDraftRequest(await request(orderId), input, user));
-        for (const file of staged) {
-          try { fs.unlinkSync(file); } catch { console.error('Deleted material draft attachment remains quarantined for cleanup'); }
-        }
+        // Nested transactions return before the HTTP request's outer COMMIT.
+        // Keep quarantined files available to afterRollback until that commit succeeds.
+        // Standalone callers without a commit hook retain quarantine rather than
+        // risking early deletion or throwing after their transaction committed.
+        if (staged.length && typeof afterCommit === 'function') afterCommit(res, () => {
+          for (const file of staged) {
+            try { fs.unlinkSync(file); } catch (error) {
+              if (error.code !== 'ENOENT') console.error('Deleted material draft attachment remains quarantined for cleanup');
+            }
+          }
+        });
         return reply({ deleted: true });
       }
       if (method === 'PATCH') {

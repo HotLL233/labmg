@@ -2149,6 +2149,16 @@ test('draft document deletion checks collaboration, business roles and versions 
   assert.equal((await f.get(own.id, ordinary)).attachments.length, 1);
   assert.ok(fs.existsSync(path.join(f.runtime, 'uploads/materials', stored.stored_name)));
   await f.db.exec('DROP TRIGGER fail_synthetic_draft_audit ON audit_logs; DROP FUNCTION fail_synthetic_draft_audit();');
+  // Unlike the immediate trigger above, this fails only at the outer HTTP COMMIT,
+  // after the material handler has returned and scheduled its file cleanup.
+  await f.db.exec(`CREATE FUNCTION fail_synthetic_draft_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic outer commit rollback'; END $$;
+    CREATE CONSTRAINT TRIGGER fail_synthetic_draft_commit AFTER INSERT ON audit_logs DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW WHEN(NEW.action='DELETE_DRAFT') EXECUTE FUNCTION fail_synthetic_draft_commit();`);
+  await f.request('DELETE', `/api/materials/requests/${own.id}`, ordinary, { requestVersion: own.version, reason: '验证外层提交失败' }, 500);
+  assert.equal((await f.get(own.id, ordinary)).attachments.length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(f.runtime, 'uploads/materials', stored.stored_name)), Buffer.from('synthetic attachment'));
+  assert.deepEqual(fs.readdirSync(path.join(f.runtime, 'uploads/materials')), [stored.stored_name]);
+  await f.db.exec('DROP TRIGGER fail_synthetic_draft_commit ON audit_logs; DROP FUNCTION fail_synthetic_draft_commit();');
   await f.request('DELETE', `/api/materials/requests/${own.id}`, ordinary, { requestVersion: own.version, reason: '删除本人误建草稿' });
   await f.request('GET', `/api/materials/requests/${own.id}`, ordinary, undefined, 404);
   assert.equal((await f.db.prepare('SELECT COUNT(*) AS n FROM material_attachments WHERE id=?').get(uploaded.attachment.id)).n, 0);

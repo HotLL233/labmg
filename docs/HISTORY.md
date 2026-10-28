@@ -1079,3 +1079,19 @@ Workspace外置下级页改用原生show，所有账号／版本／退出归主h
 最终本机verify原输出：verify · PASS · 2.7s（JS2.6s、UI0.1s），verify:strict · PASS · 2.8s（JS2.6s、UI0.1s、strict0.1s）；diff检查通过。VM80/80已包含在完整回归，无新依赖／迁移，源码仍沿用当前版本。修复未进入已发布0.14.2镜像或旧附件，未操作NAS／业务库，也未验实体手机和原生系统缩放。外部AGENTS、package verify维护和未跟踪草稿保持不混入本轮提交。专用PG最终核实remaining0，安全停机结果另补。
 
 收尾结果：已再次核对PG18.4／127.0.0.1:54954／精确data_directory／remaining0，只对专用实例fast停止；pg_ctl status=3、serverRunning=false、deletedPaths=[]，postgres/stop-report.json保留。没有删除缓存或操作其他实例。
+
+## 2026-10-27：草稿附件清理延后至外层提交（源码修复，未发布）
+
+只读监控确认vscodex界面收尾提交a34539a、最终验证及专用PG停机记录，受控文件超过10分钟稳定后交接并撤销监控。本轮仅处理此前P1：HTTP写API外层transaction尚未COMMIT，materials内层transaction已经返回并unlink隔离附件，导致后续回滚数据库恢复但文件丢失。沿用既有server.afterCommit，通过createMaterials注入，在真实提交后执行清理；保留改名隔离与afterRollback回原名，ENOENT幂等，其余清理失败只告警。未改UI、事务层、版本、依赖或迁移。
+
+新增material-draft-cleanup单测采用真实临时文件和受控外层事务，覆盖两附件提交前保留、模拟外层失败后逐字节恢复、提交后清理及重复清理；初版2/2通过。将同一测试以内存加载HEAD旧materials执行，2/2按预期失败，未回写旧源码。原PG删除回归新增延迟约束触发器，只在最外层COMMIT抛错，断言记录恢复、原路径字节一致且无隔离残留；未配置LABOS_TEST_DATABASE_URL，该PG用例及全量回归未执行。
+
+独立只读review指出未注入afterCommit的旧直接调用可能在提交后抛错；已增加类型检查，此模式安全保留隔离文件而非提前删除，并补无hook兼容测试，最终3/3通过。普通verify原输出为verify · PASS · 3.0s（JS2.8s、UI0.1s）；严格verify:strict · PASS · 2.9s（JS2.7s、UI0.1s、strict0.1s），diff --check通过。通过独立Node进程执行现有入口，不伪称npm启动。未启动服务或接业务库，不引用先前UI轮次全量通过作为本次结果。进程崩溃恢复、COMMIT结果不确定与库存详情读快照仍为未处理边界；外部未提交维护文件及草稿保持。
+
+## 2026-10-28：0.14.3 交付准备与真实回归
+
+用户要求按惯例完成Docker交付，并明确授权0.14.3新版本、必要远端源码／新标签、双架构镜像、GitHub预发布及本地完整包核验，不操作NAS／业务库。核对远端新标签未占用，同步package/lock与两份YML；发布workflow纳入附件清理单测。不改package脚本，不覆盖0.14.2或移动main／旧标签，外部维护及原型通过干净冻结tree排除。
+
+安全复用专用ui-shell PG18.4原cluster，127.0.0.1:54954精确目录验证后启动，未initdb或删除。真实HTTP最外层COMMIT失败专项1/1通过，原输出保存在0.14.3/draft-commit-regression.tap。完整npm test为278项／277通过／0失败取消／1本机Docker条件跳过，339.386秒；真实Edge工作区workspace-layout-frUPTK与手机mobile-layout-OgGtXd位于本版新缓存。计数摘要记录在local-regression-summary.json，DSH job pwsh-5e2bc3739560488f保留原控制台输出，摘要不冒充原TAP。普通verify PASS3.1s、strict PASS3.5s；独立源码review无阻断。回归完成后核对PG精确目录及remaining0，仅对该专用实例fast停止，未接日常库。
+
+新发布helpers仅在0.14.3缓存准备，离线33JS／3内嵌脚本及12资产／11摘要合同通过，未复用旧成功证据；构建与容器门禁、完整备份恢复、下载及公开核验须取得本轮真实结果后再记完成。

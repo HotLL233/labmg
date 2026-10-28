@@ -1,4 +1,4 @@
-# 在线版：自动拉取 LabOS 0.14.2（GHCR）、PostgreSQL 18 和 Caddy 镜像。
+# 在线版：自动拉取 LabOS 0.14.3（GHCR）、PostgreSQL 18 和 Caddy 镜像。
 # 自动识别群晖主局域网 IPv4，无需手填 IP；手机仍须信任本实例根证书。
 # 无需另放 .env 或 Caddyfile；已有 .env 的数据路径及 UID/GID 覆盖仍有效。
 # 首次安装使用全新 PostgreSQL 18；已有 PG18 更新保留 runtime/、https/，手机须信任根证书。
@@ -6,7 +6,7 @@ version: '3.8'
 
 services:
   labos-init:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.14.2}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.14.3}"
     user: "0:0"
     restart: "no"
     network_mode: host
@@ -46,7 +46,7 @@ services:
         max-file: "3"
 
   labos:
-    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.14.2}"
+    image: "${LABOS_IMAGE:-ghcr.io/hotll233/labmg:0.14.3}"
     user: "${LABOS_UID:-1000}:${LABOS_GID:-1000}"
     depends_on:
       labos-init:
