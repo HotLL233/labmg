@@ -23,7 +23,28 @@ env:
   SOURCE: https://github.com/HotLL233/labmg
 
 jobs:
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify frozen Windows ZIP packaging
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne '0d51684f6241aed4fe0c542cd613fb2eec513b27') { throw 'Frozen source mismatch' }
+          if ((git rev-parse 'refs/tags/v0.14.4^{commit}').Trim() -ne '0d51684f6241aed4fe0c542cd613fb2eec513b27') { throw 'Frozen tag mismatch' }
+          node --test tests/package.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   publish:
+    needs: package-windows
     if: github.repository == 'HotLL233/labmg'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -62,6 +83,7 @@ jobs:
           const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
           const taggedCommit = execFileSync('git', ['rev-parse', `${process.env.RELEASE_TAG}^{commit}`], { encoding: 'utf8' }).trim();
           assert.equal(commit, taggedCommit, 'Checkout must match the requested tag commit');
+          assert.equal(commit, '0d51684f6241aed4fe0c542cd613fb2eec513b27', 'Operations build must use the frozen business commit');
           if (process.env.GITHUB_EVENT_NAME === 'push') assert.equal(commit, process.env.GITHUB_SHA);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\n`);
           NODE
@@ -75,7 +97,24 @@ jobs:
       - uses: docker/setup-compose-action@v1
         with:
           version: v5.5.1
-      - run: npm test
+      - name: Run every Linux test file except the separately gated Windows ZIP test
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs'), assert = require('node:assert/strict');
+          const { spawnSync } = require('node:child_process');
+          const all = fs.readdirSync('tests').filter(name => name.endsWith('.test.js')).sort();
+          const windows = all.filter(name => name === 'package.test.js');
+          const linux = all.filter(name => name !== 'package.test.js');
+          assert.equal(all.length, 33);
+          assert.deepEqual(windows, ['package.test.js']);
+          assert.equal(new Set([...windows, ...linux]).size, all.length);
+          assert.equal(windows.length + linux.length, all.length);
+          assert.ok(linux.every(name => !windows.includes(name)));
+          console.log(JSON.stringify({ allFiles: all.length, windowsFiles: windows, linuxFiles: linux }));
+          const result = spawnSync(process.execPath, ['--test', ...linux.map(name => 'tests/' + name)], { stdio: 'inherit' });
+          if (result.error) throw result.error;
+          process.exit(result.status ?? 1);
+          NODE
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
