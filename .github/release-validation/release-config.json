@@ -1,0 +1,11 @@
+{
+  "version": "0.14.4",
+  "commit": "0d51684f6241aed4fe0c542cd613fb2eec513b27",
+  "indexDigest": "sha256:13ae4384cfc11c558315acf81df031229f981e30258a42436ebd265d42070261",
+  "baseParent": "01d9d9089ffa8145cad87a136c0b6afbc4a9a618",
+  "featureBranch": "feature/ui-shell-single-account",
+  "status": "source-frozen",
+  "buildRunId": 40644915862,
+  "sourceTagObject": "bc8a8c290dcd3bcd374ab19229fe4627c0f61058",
+  "sourceParent": "01d9d9089ffa8145cad87a136c0b6afbc4a9a618"
+}
