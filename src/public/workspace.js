@@ -64,7 +64,7 @@
     state.rows.forEach((row,index)=>{row.hidden=index<state.page*state.size||index>=(state.page+1)*state.size;});
     state.status.textContent=`共 ${state.rows.length} 条 · 第 ${state.page+1} / ${pages} 页 · 每页 ${state.size} 条`;
     state.prev.disabled=state.page===0;state.next.disabled=state.page+1===pages;
-    state.pager.hidden=state.rows.length===0;
+    state.pager.hidden=pages<=1;
   }
   function fit(root=document){
     query(root,'.ws-records').forEach(container=>{

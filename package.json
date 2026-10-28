@@ -1,12 +1,14 @@
 {
   "name": "labos",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "private": true,
   "description": "实验室综合管理系统 MVP",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js --dev",
     "check": "node scripts/check.js",
+    "verify": "node scripts/verify.js",
+    "verify:strict": "node scripts/verify.js --strict",
     "migrate": "node scripts/migrate.js",
     "test": "node --test tests/*.test.js",
     "package:zip": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\package.ps1",

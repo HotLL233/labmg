@@ -71,9 +71,9 @@
   .ws-dialog .table{overflow:visible;border:0;background:transparent}
   .ws-dialog .table table,.ws-dialog .table tbody{display:block;min-width:0;white-space:normal}
   .ws-dialog .table thead{display:none}
-  .ws-dialog .table tr{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;padding:12px;margin-bottom:10px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md)}
+  .ws-dialog .table tr{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;padding:12px;margin-bottom:10px;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md)}
   .ws-dialog .table td{display:block;padding:0;border:0;min-width:0;white-space:normal;overflow-wrap:anywhere}
-  .ws-dialog .table td[data-label]::before{content:attr(data-label);display:block;font-size:var(--fs-note);color:var(--c-text-2);margin-bottom:2px}
+  .ws-dialog .table td[data-label]::before{content:attr(data-label);display:block;font-size:var(--fs-note);color:var(--c-text-2);margin-bottom:4px}
   .ws-dialog .table td:first-child,.ws-dialog .table td.cell-act{grid-column:1/-1}
   .ws-dialog .table td.cell-act{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 }

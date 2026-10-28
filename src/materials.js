@@ -999,13 +999,14 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     const rows = (await mapRows(await all(query + searchSql + ' ORDER BY b.first_id' + (page ? ' LIMIT ? OFFSET ?' : ''),
       ...args, ...(page ? [page.pageSize, page.offset] : [])),async row => {
       const master = await catalog(row.catalog_id), category = await dictionary('material_categories', master.category_id, '分类');
+      const location = byBatch ? await stockLocation(row) : null;
       if (!Number.isSafeInteger(row.qty_m) || !Number.isSafeInteger(row.amount_cents)) error(400, '库存累计数值超出安全整数范围');
       return { id: byBatch ? JSON.stringify([row.catalog_id, row.warehouse, row.region_id, row.batch, row.expiry_date]) : `${row.catalog_id}:${row.warehouse}:${row.region_id}`, catalogId: row.catalog_id,
         code: master.code, name: master.name, spec: master.spec, unit: master.unit, active: Boolean(master.active), categoryId: master.category_id, categoryName: category.name,
         trackingMode: (await catalog(row.catalog_id)).tracking_mode, catalogRemark: (await catalog(row.catalog_id)).remark,
         regionId: row.region_id, regionName: row.region_name, warehouse: row.warehouse,
         ...(byBatch ? { batch: row.batch, expiryDate: row.expiry_date,
-          location: (await stockLocation(row))?.location || '', locationVersion: (await stockLocation(row))?.version || 0,
+          location: location?.location || '', locationVersion: location?.version || 0,
           qrPayload: STOCK_QR_PREFIX + JSON.stringify({ catalogId: row.catalog_id, catalogCode: master.code, regionId: row.region_id,
             warehouse: row.warehouse, batch: row.batch, expiryDate: row.expiry_date }) } : {}),
         qtyM: row.qty_m, amountCents: row.amount_cents, firstMovementAt: row.first_movement_at, lastMovementAt: row.last_movement_at };
@@ -1013,24 +1014,26 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     return page ? { items: rows, total, page: page.page, pageSize: page.pageSize } : rows;
   }
   async function stockDetails(url, paged = false) {
-    const batches = await stockRows(url, false, true), rows = [];
-    const totals = new Map((await all('SELECT catalog_id,SUM(qty_m) AS qty FROM material_stock_movements GROUP BY catalog_id')).map(row => [row.catalog_id, row.qty]));
-    for (const batch of batches) {
-      const identity = { catalog_id: batch.catalogId, region_id: batch.regionId, warehouse: batch.warehouse, batch: batch.batch, expiry_date: batch.expiryDate };
-      const groups = [...(await manufacturerBalances(identity)).values()];
-      if (safeSum(groups.map(group => group.qtyM)) !== batch.qtyM) error(400, '厂家明细与批次余额不一致');
-      const positive = groups.filter(group => group.qtyM > 0), visible = positive.length ? positive : groups;
-      let allocated = 0;
-      for (const [index, group] of visible.entries()) {
-        const { lots, ...view } = group;
-        const amount = index === visible.length - 1 ? batch.amountCents - allocated : batch.qtyM > 0 ?
-          Number(BigInt(batch.amountCents) * BigInt(group.qtyM) / BigInt(batch.qtyM)) : 0;
-        allocated = safeSum([allocated, amount]);
-        rows.push({ ...batch, ...view, id: JSON.stringify([...JSON.parse(batch.id), group.manufacturer]),
-          totalQtyM: safeSum([totals.get(batch.catalogId) || 0]), amountCents: amount, amountBasis: 'batch-average' });
+    return transaction(async () => {
+      const batches = await stockRows(url, false, true), rows = [];
+      const totals = new Map((await all('SELECT catalog_id,SUM(qty_m) AS qty FROM material_stock_movements GROUP BY catalog_id')).map(row => [row.catalog_id, row.qty]));
+      for (const batch of batches) {
+        const identity = { catalog_id: batch.catalogId, region_id: batch.regionId, warehouse: batch.warehouse, batch: batch.batch, expiry_date: batch.expiryDate };
+        const groups = [...(await manufacturerBalances(identity)).values()];
+        if (safeSum(groups.map(group => group.qtyM)) !== batch.qtyM) error(400, '厂家明细与批次余额不一致');
+        const positive = groups.filter(group => group.qtyM > 0), visible = positive.length ? positive : groups;
+        let allocated = 0;
+        for (const [index, group] of visible.entries()) {
+          const { lots, ...view } = group;
+          const amount = index === visible.length - 1 ? batch.amountCents - allocated : batch.qtyM > 0 ?
+            Number(BigInt(batch.amountCents) * BigInt(group.qtyM) / BigInt(batch.qtyM)) : 0;
+          allocated = safeSum([allocated, amount]);
+          rows.push({ ...batch, ...view, id: JSON.stringify([...JSON.parse(batch.id), group.manufacturer]),
+            totalQtyM: safeSum([totals.get(batch.catalogId) || 0]), amountCents: amount, amountBasis: 'batch-average' });
+        }
       }
-    }
-    return paged ? paginate(rows, url) : rows;
+      return paged ? paginate(rows, url) : rows;
+    });
   }
 
   async function insertReceipt(data, user) {
@@ -1371,7 +1374,10 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
       }));
       return result;
     } catch (failure) {
-      fs.rmSync(destination, { force: true });
+      if (!failure.transactionOutcomeUnknown) {
+        try { fs.rmSync(destination, { force: true }); }
+        catch { console.error('Cannot remove failed material attachment'); }
+      }
       throw failure;
     }
   }
@@ -2277,6 +2283,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
     try {
       await dispatch(req, res, url, user);
     } catch (failure) {
+      if (failure.transactionOutcomeUnknown) throw failure;
       if (failure.status) throw failure;
       if (failure.code === '23505') error(409, '唯一编号或来源重复，操作未保存');
       if (['23503', '23514', '23502'].includes(failure.code)) error(400, '业务数据违反完整性约束，操作未保存');
@@ -2732,7 +2739,7 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         return { restored: true, counts: Object.fromEntries(TABLES.map(table => [table, normalized[table].length])) };
       }));
     } catch (failure) {
-      for (const file of written) {
+      for (const file of failure.transactionOutcomeUnknown ? [] : written) {
         try { fs.unlinkSync(file); } catch (cleanupFailure) { if (cleanupFailure.code !== 'ENOENT') console.error('Cannot remove failed materials restore file'); }
       }
       throw failure;
@@ -2854,8 +2861,9 @@ function createMaterials({ db, body, send, fail, log, hasPermission, tokenUser, 
         row.snapshot.categoryName, warehouseName(row.warehouse), row.snapshot.regionName, row.batch, row.expiryDate, row.snapshot.location, row.location,
         row.qtyM / 1000, ...(amount ? [row.status === 'issued' ? row.amountCents / 100 : null] : []), row.purpose, row.creatorName, row.createdAt, row.processorName, row.processedAt, row.reason]))];
     } else if (url.searchParams.get('type') === 'stock') {
-      const rows = (await stockRows(url));
-      const batches = (await stockDetails(url));
+      const { rows, batches } = await transaction(async () => ({
+        rows: await stockRows(url), batches: await stockDetails(url)
+      }));
       if (rows.length > 5000 || batches.length > 5000) error(413, '一次最多导出5000条库存或批次，请缩小筛选范围');
       sheets = [
         sheet('库存', ['物资编码', '名称', '规格', '单位', '仓库', '归属区域', '数量', ...(amount ? ['库存总金额（元）'] : [])],

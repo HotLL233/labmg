@@ -1,6 +1,12 @@
 # LabOS 实验室综合管理系统
 
-当前交付：**0.14.3／全局账号栏与附件事务安全（2026-10-28）**。已公开[0.14.3预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.3)（Release426134770，prerelease=true／make_latest=false）。冻结源码5ece7430894c359b5a7f4916228d31657703c170，标签v0.14.3；后补文档不移动标签或重打包。正式构建40608440134：真实PG18.6环境269/269、55JS检查及双架构实际构建推送通过；index为sha256:95eed51acc4bbe14aaa0ad5d89dff2f338d76ee5abd83c4d77c357dcb4155a90。验证40609142003（ops954e1affe2324f05837ee5120b834e1dc3fdd435）四门禁及完整备份／空隔离PG18恢复12项通过，33表全部比较；PG6检查属于同一次在线执行，不额外计数。ARM64离线生命周期使用QEMU。
+当前候选：**0.14.4／事务与导出修复、第一批布局排版优化（2026-10-28）**。专用PG18.4与真实Edge下完整回归314项、313通过、0失败、1本机Docker条件跳过；五档布局、低高度、返回与退出保护、打印媒体已检查。双架构构建和容器发布门禁仍待执行，尚未公开，不将下方旧版结果当作本轮证据。最终公开状态见[版本说明](docs/CHANGELOG.md)。
+
+本版合并提交结果未知时的附件保留、验收库位版本保护、大附件校验、CSV公式前缀防护及库存一致读取；整理主次操作、手机字段排版、单页分页和关闭／返回入口。沿用0006/schema8，无新运行依赖或迁移；发布不自动升级NAS，升级仍须先完整备份并保留`runtime/`、`https/`及UID/GID。未知提交结果应先查询核实，不直接重复新建；进程崩溃自动对账、真实Excel／WPS、实体设备与长期负载仍有验证边界。
+
+## 0.14.3及更早交付记录
+
+上一交付：**0.14.3／全局账号栏与附件事务安全（2026-10-28）**。已公开[0.14.3预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.3)（Release426134770，prerelease=true／make_latest=false）。冻结源码5ece7430894c359b5a7f4916228d31657703c170，标签v0.14.3；后补文档不移动标签或重打包。正式构建40608440134：真实PG18.6环境269/269、55JS检查及双架构实际构建推送通过；index为sha256:95eed51acc4bbe14aaa0ad5d89dff2f338d76ee5abd83c4d77c357dcb4155a90。验证40609142003（ops954e1affe2324f05837ee5120b834e1dc3fdd435）四门禁及完整备份／空隔离PG18恢复12项通过，33表全部比较；PG6检查属于同一次在线执行，不额外计数。ARM64离线生命周期使用QEMU。
 
 本地artifacts/releases/0.14.3/完整12件489574558字节，11条SHA256SUMS、5份冻结原字节附件、151项源码及两份完整TAR各三镜像／共六config通过。amd64 TAR245763072字节，SHA256 6898ee357eb0bc8fb7c7c9ecfde8440212f88e96cca41770e243964eaa3e945a；arm64 TAR242496512字节，SHA256 c222545a1f375d2d352361d1641c2317df6ce0811f0970e241fb1e347973cb27。每包包含labos:0.14.3、postgres:18-bookworm、caddy:2.11.7-alpine。
 
@@ -65,7 +71,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.3/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.4/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -76,7 +82,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.2/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.4/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -100,16 +106,16 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。0.14.2已交付：在线应用镜像为 `ghcr.io/hotll233/labmg:0.14.2`，本地三镜像包使用 `labos:0.14.2`。从[0.14.2 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.2)下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.4`，本地三镜像包使用 `labos:0.14.4`；[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)公开后下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
-| 在线拉取 | [0.14.2 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.2/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
-| 本地导入 | [0.14.2 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.2/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
+| 在线拉取 | [0.14.4 docker-compose.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.4/docker-compose.yml) | 应用从 GHCR 拉取，PostgreSQL 和 Caddy 使用官方镜像 |
+| 本地导入 | [0.14.4 docker-compose.local.yml](https://github.com/HotLL233/labmg/releases/download/v0.14.4/docker-compose.local.yml) | 先导入本架构 TAR 内的三个镜像，所有服务禁止拉取 |
 
 本轮两份配置继续默认使用`LABOS_HTTPS_HOST=auto`：只有一次性`labos-init`使用宿主机网络，识别一个主局域网IPv4，写入`runtime/https-config/Caddyfile`，代理只读加载该配置。无合适地址或多网卡无法确定时明确失败；可在`labos-init`内手动指定实际IPv4或主机名，不带协议、端口或路径。空值、`CHANGE_ME`及`0.0.0.0`均按自动识别处理，手机仍须打开日志显示的实际HTTPS地址并信任根证书。旧0.9.2的手填IP步骤仅适用于旧配套文件。
 
-首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。0.14.2沿用0.14.1引入的0006到货关联迁移及schema8物资备份，本版没有新增迁移或备份格式，旧验收记录不猜到货轮次。升级前按[完整备份恢复](docs/BACKUP_RESTORE.md)备份数据库、附件及证书；schema8不能交不支持该格式的旧程序恢复，回退须恢复升级前完整副本，不能只更换旧镜像。本次不提供PostgreSQL主版本迁移。
+首次安装用独立目录，不指向 PG17／SQLite 旧库；已部署 PG18 的同项目更新保留原数据与证书目录，启动时自动执行未应用的加法SQL迁移，不重新初始化。0.14.4沿用0.14.1引入的0006到货关联迁移及schema8物资备份，本版没有新增迁移或备份格式，旧验收记录不猜到货轮次。升级前按[完整备份恢复](docs/BACKUP_RESTORE.md)备份数据库、附件及证书；schema8不能交不支持该格式的旧程序恢复，回退须恢复升级前完整副本，不能只更换旧镜像。本次不提供PostgreSQL主版本迁移。
 
 数据保存在 **YML 同目录的 `runtime/`**：`postgres/18/docker/` 是 PG18 数据，`uploads/` 是附件，`secrets/postgres-password` 是自动生成的数据库口令，`https-config/Caddyfile`是0.9.4初始化生成的代理配置。HTTPS证书继续保存在旁边的`https/data/`；群晖首次部署先创建`runtime/`与`https/`父目录。后续同一 PG18 项目更新时保留完整 `runtime/`、`https/`、项目和 UID/GID。备份及操作步骤见[群晖部署](docs/SYNOLOGY.md)。
 

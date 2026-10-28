@@ -51,7 +51,7 @@
   .page .table thead,.mw-dialog .table thead{display:none}
   .page .table tbody,.mw-dialog .table tbody{display:block}
   .page .table tr,.mw-dialog .table tr{
-    position:relative;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;
+    position:relative;display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;
     padding:12px 14px;margin-bottom:10px;
     background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md);
   }
@@ -60,8 +60,9 @@
     white-space:normal;overflow-wrap:anywhere;
   }
   .page .table td[data-label]::before,.mw-dialog .table td[data-label]::before{
-    content:attr(data-label);display:block;font-size:var(--fs-note);color:var(--c-text-2);margin-bottom:2px;
+    content:attr(data-label);display:block;font-size:var(--fs-note);color:var(--c-text-2);margin-bottom:4px;
   }
+  :is(.page,.mw-dialog,.ws-dialog) .table td.num{text-align:left;white-space:normal}
   .page .table td:first-child,.mw-dialog .table td:first-child{grid-column:1/-1;font-weight:600}
   .page .table tr:has(td[colspan]),.mw-dialog .table tr:has(td[colspan]){grid-template-columns:1fr;background:var(--c-subtle)}
   .page .table td.cell-act,.mw-dialog .table td.cell-act{

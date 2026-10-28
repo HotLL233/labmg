@@ -135,21 +135,35 @@ async function openDatabase({ connectionString = process.env.DATABASE_URL, initi
       if (context.getStore()?.db === db) return callback();
       const client = await pool.connect();
       const transaction = { db, client, rollback: [] };
+      let committing = false, rolledBack = false, releaseError;
       try {
         await client.query('BEGIN');
         // shortcut: one write lock serializes 10–30 operators; narrow locks after measured contention.
         await client.query('SELECT pg_advisory_xact_lock(1280262703,600)');
         const value = await context.run(transaction, callback);
+        committing = true;
         const committed = await client.query('COMMIT');
+        rolledBack = committed.command === 'ROLLBACK';
         if (committed.command !== 'COMMIT') throw new Error('数据库事务已回滚');
         return value;
       } catch (failure) {
-        try { await client.query('ROLLBACK'); } catch { /* Keep the original failure. */ }
-        for (const callback of transaction.rollback.reverse()) {
-          try { await callback(); } catch { console.error('无法清理已回滚事务的附件'); }
+        // A successful ROLLBACK after a lost COMMIT reply does not prove COMMIT failed.
+        if (committing && failure.severity === 'ERROR' && /^[0-9A-Z]{5}$/.test(failure.code || '') &&
+            !failure.code.startsWith('08') && failure.code !== '40003') rolledBack = true;
+        try {
+          const result = await client.query('ROLLBACK');
+          if (!committing) rolledBack = result.command === 'ROLLBACK';
+        } catch (error) { releaseError = error; }
+        if (!rolledBack) {
+          failure.transactionOutcomeUnknown = true;
+          releaseError ||= failure;
+        } else {
+          for (const callback of transaction.rollback.reverse()) {
+            try { await callback(); } catch { console.error('无法清理已回滚事务的附件'); }
+          }
         }
         throw failure;
-      } finally { client.release(); }
+      } finally { client.release(releaseError); }
     },
     afterRollback(callback) {
       const transaction = context.getStore();

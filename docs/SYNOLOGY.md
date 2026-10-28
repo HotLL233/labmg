@@ -1,5 +1,9 @@
 # 群晖 Docker 部署
 
+当前候选为**0.14.4（2026-10-28，验收与发布进行中）**；[本版Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)公开后使用其中同版本两份YML与本架构三镜像TAR，不混用旧版文件。在线应用为`ghcr.io/hotll233/labmg:0.14.4`，离线应用为`labos:0.14.4`。本轮发布不自动升级NAS；升级前按[完整备份恢复](BACKUP_RESTORE.md)保留原PG18数据库、附件、证书、`runtime/`、`https/`和UID/GID，继续0006/schema8，无新增迁移。实际发布与门禁结果以[版本说明](CHANGELOG.md)为准。
+
+## 0.14.3及更早交付历史快照
+
 当前交付：**0.14.3／全局账号栏与附件事务安全（2026-10-28）**。已公开[0.14.3预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.3)（Release426134770，prerelease=true／make_latest=false）。冻结源码5ece7430894c359b5a7f4916228d31657703c170，标签v0.14.3；后补文档不移动标签或重打包。正式构建40608440134：真实PG18.6环境269/269、55JS检查及双架构实际构建推送通过；index为sha256:95eed51acc4bbe14aaa0ad5d89dff2f338d76ee5abd83c4d77c357dcb4155a90。验证40609142003（ops954e1affe2324f05837ee5120b834e1dc3fdd435）四门禁及完整备份／空隔离PG18恢复12项通过，33表全部比较；PG6检查属于同一次在线执行，不额外计数。ARM64离线生命周期使用QEMU。
 
 本地artifacts/releases/0.14.3/完整12件489574558字节，11条SHA256SUMS、5份冻结原字节附件、151项源码及两份完整TAR各三镜像／共六config通过。amd64 TAR245763072字节，SHA256 6898ee357eb0bc8fb7c7c9ecfde8440212f88e96cca41770e243964eaa3e945a；arm64 TAR242496512字节，SHA256 c222545a1f375d2d352361d1641c2317df6ce0811f0970e241fb1e347973cb27。每包包含labos:0.14.3、postgres:18-bookworm、caddy:2.11.7-alpine。

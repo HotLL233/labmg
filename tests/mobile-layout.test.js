@@ -49,6 +49,9 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     category: '', owner: '合成人员', due_date: '2026-10-19', created_at: '2026-10-19', updated_at: '2026-10-19',
     status: '草稿', amount: 20, quantity: 2, data: { asset_stage: '建档', quality_section: '质量手册', is_current: '是', access_roles: 'ADMIN' } });
   const roles = [{ role: 'ADMIN', permissions: ['*'] }, { role: 'MATERIAL', permissions: ['materials.read'] }];
+  const capabilities = { createRequest: true, receive: true, createIssue: true, manageCategories: true, manageRegions: true,
+    manageCatalog: true, manageLocation: true, viewAmount: true, export: true, initialize: true, adjustStock: true, issueStock: true };
+  let recordCount = 1, catalogResponse;
   const material = { id: 1, catalogId: 1, name: '布局检查物资' + 'M'.repeat(80), code: 'SYNTHETIC-MATERIAL-1', spec: '500 mL', unit: '瓶',
     categoryId: 1, categoryName: '合成分类', regionId: 1, regionName: '合成区域', warehouse: 'MAIN', trackingMode: 'unit', qtyM: 1000, amountCents: 2000 };
   const materialLists = {
@@ -76,11 +79,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       '/api/users': [user], '/api/files': [{ id: 1, original_name: '长附件名' + 'Z'.repeat(80) + '.txt', size: 1 }],
       '/api/trash': [{ ...record('archives'), deleted_at: '2026-10-19' }],
       '/api/audit': [{ id: 1, created_at: '2026-10-19', display_name: '合成人员', action: 'VIEW', entity: 'records', detail: '合成日志' }],
-      '/api/materials/meta': { capabilities: { createRequest: true, receive: true, createIssue: true, manageCategories: true, manageRegions: true,
-        manageCatalog: true, manageLocation: true, viewAmount: true, export: true, initialize: true, adjustStock: true, issueStock: true }, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
+      '/api/materials/meta': { capabilities, warehouses: [{ code: 'MAIN', name: '默认仓库' }], openingClosed: false }
     };
     let body = results[url.pathname] ?? [];
-    if (url.pathname === '/api/records') body = [record(url.searchParams.get('module'))];
+    if (url.pathname === '/api/records') body = Array.from({ length: recordCount }, (_, i) => ({ ...record(url.searchParams.get('module')), id: i + 1 }));
     if (url.pathname.startsWith('/api/materials/') && url.pathname !== '/api/materials/meta') {
       const items = materialLists[url.pathname.slice('/api/materials/'.length)] || [];
       body = { items, total: items.length, page: 1, pageSize: Number(url.searchParams.get('pageSize')) || 50 };
@@ -89,6 +91,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
         progress: { pendingItems: 1 }, items: [{ ...materialLists.acceptance[0], qtyM: 1000, version: 1, manufacturer: '合成厂家甲' }] };
       if (url.pathname === '/api/materials/requests' && url.searchParams.get('status') === 'submitted') body = { ...body, items: [acceptanceRequest], total: 1 };
       if (url.pathname === '/api/materials/requests/101') body = acceptanceRequest;
+      if (url.pathname === '/api/materials/catalog' && catalogResponse) body = catalogResponse(url);
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -147,9 +150,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       const rows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('[colspan]') && getComputedStyle(row).display !== 'none');
       return { containerWidth: container.clientWidth, scrollWidth: container.scrollWidth, tableWidth: table.getBoundingClientRect().width,
         display: getComputedStyle(table).display, headerDisplay: getComputedStyle(table.querySelector('thead')).display,
-        rows: rows.map(row => ({ display: getComputedStyle(row).display, fields: [...row.children].map((cell, index) => ({
+        rows: rows.map(row => ({ display: getComputedStyle(row).display, gap: getComputedStyle(row).rowGap, fields: [...row.children].map((cell, index) => ({
           expected: headers[index] || (index === 0 ? headers[1] : ''), label: cell.getAttribute('data-label'),
-          before: getComputedStyle(cell, '::before').content, selection: cell.classList.contains('cell-select')
+          before: getComputedStyle(cell, '::before').content, labelGap: getComputedStyle(cell, '::before').marginBottom,
+          numeric: cell.classList.contains('num'), alignment: getComputedStyle(cell).textAlign, selection: cell.classList.contains('cell-select')
         })) })) };
     }));
     for (const table of tables) {
@@ -161,9 +165,12 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
         assert.ok(table.tableWidth <= table.containerWidth + 1, `${label}: card width stays within its container`);
         for (const row of table.rows) {
           assert.equal(row.display, 'grid', `${label}: one DOM row becomes one card`);
+          assert.equal(row.gap, '10px', `${label}: card fields retain the approved vertical gap`);
+          for (const field of row.fields) if (field.numeric) assert.equal(field.alignment, 'left', `${label}: numeric card values align with their labels`);
           for (const field of row.fields) if (!field.selection && field.expected) {
             assert.equal(field.label, field.expected, `${label}: field label comes from its header`);
             assert.equal(field.before, JSON.stringify(field.expected), `${label}: CSS displays the field label`);
+            assert.equal(field.labelGap, '4px', `${label}: labels retain the approved value spacing`);
           }
         }
       } else {
@@ -197,12 +204,12 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false, 'resizing out of drawer mode restores main interaction');
     await page.setViewportSize({ width: 390, height: 844 });
   };
-  for (const width of [390, 768, 1440]) {
+  for (const width of [390, 768, 900, 1366, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto(base); await page.locator('.nav button').last().waitFor({ state: 'attached' });
     await page.evaluate(() => setupDateFilters());
     if (width === 390) await checkDrawer();
-    if (width >= 768) assert.equal(await page.locator('.side').evaluate(node => node.getBoundingClientRect().width), width === 768 ? 72 : 245, `${width}px sidebar width`);
+    if (width >= 768) assert.equal(await page.locator('.side').evaluate(node => node.getBoundingClientRect().width), width < 1280 ? 72 : 245, `${width}px sidebar width`);
     for (const module of Object.keys(labels)) {
       const button = await navigate(module);
       await checkLayout(`${width}px ${module}`);
@@ -257,6 +264,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
         assert.match(await details.textContent(), /合成档案备注/);
         assert.match(await details.textContent(), /全部仓库.*区域.*3 瓶/);
         assert.equal(await details.locator('[data-mw="stock-issue"]').isVisible(), true, 'issue action remains reachable in batch details');
+        assert.equal(await details.locator('[data-mw="close-view"]').count(), 1, 'material details have one return action in their header');
         await checkLayout(`${width}px expanded stock detail`);
         await details.locator('[data-mw="close-view"]').first().click();
       }
@@ -265,10 +273,26 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     await navigateMaterial('catalog');
     await page.locator('#page [data-mw="catalog-edit"]').waitFor();
     await checkTables(`${width}px material catalog workspace`);
+    const heading = page.getByRole('heading', { name: '物资信息库', exact: true });
+    assert.equal(await heading.count(), 1, 'the visually suppressed duplicate title keeps its accessible heading');
+    assert.equal(await heading.evaluate(node => getComputedStyle(node).clipPath), 'inset(50%)', 'the duplicate catalog heading is visually suppressed');
+    const more = page.locator('#page .mw-panel-top .mw-more');
+    assert.deepEqual(await more.locator('button').allTextContents(), ['导入 Excel', '导入模板', '导出 Excel'], 'secondary catalog commands stay grouped');
+    assert.equal(await page.locator('#mw-filters [type="submit"]').getAttribute('class'), 'ghost', 'search retains an explicit secondary submit action');
+    assert.equal(await page.locator('#page .mw-pagebar').evaluate(node => node.hidden), true, 'a single server page retains its marker without showing controls');
+    assert.equal(await page.locator('#page .ws-pagination').count(), 0, 'hidden server pagination never adds client pagination');
+    await more.locator('summary').click();
+    await checkLayout(`${width}px open catalog menu`);
+    if (width === 390) assert.ok((await more.locator('summary').boundingBox()).height >= 44, 'the phone more menu retains a 44px touch target');
+    await page.screenshot({ path: path.join(screenshots, `${width}-catalog-menu.png`) });
+    await more.locator('summary').click();
     assert.ok(await page.locator('#page .table').evaluate(node => node.scrollWidth <= node.clientWidth + 1 || innerWidth >= 768), 'catalog card layout stays inside its workspace');
     assert.match(await page.locator('#page tbody td strong').first().textContent(), /布局检查物资/);
     await page.locator('#page [data-mw="catalog-edit"]').click();
     await page.locator('#mw-dialog').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#mw-dialog .mw-dialog-head [data-mw="cancel"]').textContent(), '关闭', 'the form header says close rather than return');
+    assert.equal(await page.locator('#mw-dialog .mw-dialog-actions [data-mw="cancel"]').textContent(), '取消', 'the original footer cancel action remains');
+    assert.equal(await page.locator('#mw-save').textContent(), '保存', 'the original form save action remains');
     assert.equal(await page.locator('#mw-fields [name="unit"]').getAttribute('readonly'), '', 'referenced catalog keeps its stock unit');
     assert.equal(await page.locator('#mw-laboratory-fields').isVisible(), true, 'chemical-category editing exposes laboratory fields');
     await page.locator('#mw-save').scrollIntoViewIfNeeded();
@@ -319,6 +343,8 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     await page.evaluate(() => editor.close());
     await page.evaluate(() => show(1));
     await page.locator('#detail').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#detail .modal-head .x').count(), 1, 'generic detail retains its single header return');
+    assert.equal(await page.locator('#detail footer .x').count(), 0, 'generic detail does not repeat the return action in its footer');
     assert.ok(await page.locator('#detail').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'detail and long attachment names wrap');
     await page.evaluate(() => detail.close());
     await page.evaluate(() => showAuth({ setupRequired: true }));
@@ -333,6 +359,39 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.equal(await page.locator('.layout>main').evaluate(node => node.getBoundingClientRect().left), expected, `${width}px main offset matches the sidebar`);
     await checkLayout(`${width}px breakpoint`);
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  recordCount = 3;
+  await navigate('finance');
+  const sharedPager = page.locator('#page .ws-pagination'), originalPager = await sharedPager.elementHandle();
+  assert.equal(await sharedPager.evaluate(node => node.hidden), true, 'shared pagination hides when every record fits');
+  await page.setViewportSize({ width: 1440, height: 360 });
+  await page.waitForFunction(() => document.querySelector('#page .ws-pagination')?.hidden === false);
+  assert.equal(await sharedPager.evaluate((node, original) => node === original, originalPager), true, 'resizing restores the same pagination DOM');
+  await sharedPager.locator('[data-ws-page="next"]').click();
+  assert.match(await sharedPager.textContent(), /第 2 \/ /, 'restored pagination still advances the original rows');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForFunction(() => document.querySelector('#page .ws-pagination')?.hidden === true);
+  assert.equal(await page.locator('#page tbody tr:not([hidden])').count(), 3, 'growing the viewport restores every original record');
+  for (const [manageCatalog, exportAllowed, expected] of [[true, false, ['导入 Excel']], [false, true, ['导入模板', '导出 Excel']], [false, false, []]]) {
+    capabilities.manageCatalog = manageCatalog; capabilities.export = exportAllowed;
+    await navigate('materials'); await navigateMaterial('catalog');
+    assert.deepEqual(await page.locator('#page .mw-panel-top .mw-more button').allTextContents(), expected, 'catalog menu preserves each capability combination');
+    assert.equal(await page.locator('#page .mw-panel-top .mw-more').count(), expected.length ? 1 : 0, 'no capability combination creates an empty more menu');
+    assert.equal(await page.locator('#page [data-mw="new-catalog"]').count(), manageCatalog ? 1 : 0, 'new catalog visibility retains its original capability');
+  }
+  capabilities.manageCatalog = true; capabilities.export = true;
+  let reduced = false;
+  catalogResponse = url => ({ items: reduced ? [] : materialLists.catalog, total: reduced ? 0 : 100,
+    page: Number(url.searchParams.get('page')) || 1, pageSize: Number(url.searchParams.get('pageSize')) || 10 });
+  await navigate('materials'); await navigateMaterial('catalog');
+  assert.equal(await page.locator('#page .mw-pagebar').evaluate(node => node.hidden), false, 'multiple server pages expose navigation');
+  reduced = true;
+  await page.locator('#page [data-mw="next"]').click();
+  await page.waitForFunction(() => document.querySelector('#page .mw-pagebar')?.textContent.includes('第 2 / 1 页'));
+  assert.equal(await page.locator('#page .mw-pagebar').evaluate(node => node.hidden), false, 'an emptied later server page retains navigation');
+  assert.equal(await page.locator('#page [data-mw="previous"]').isEnabled(), true, 'the emptied later page retains its return route');
+  await page.locator('#page [data-mw="previous"]').click();
+  await page.waitForFunction(() => document.querySelector('#page .mw-pagebar')?.hidden === true);
   await page.setViewportSize({ width: 390, height: 844 });
   await navigate('finance');
   await page.emulateMedia({ media: 'print' });

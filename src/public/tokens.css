@@ -66,3 +66,7 @@ td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw
 @media print{
   .page .table td:has(> strong){line-height:1.35}
 }
+@media screen{
+  .page .ops>button.primary{background:var(--c-primary-500);color:var(--c-surface);padding:10px 15px}
+  .page .ops>button.primary:hover{filter:brightness(.96)}
+}

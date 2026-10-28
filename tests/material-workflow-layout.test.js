@@ -27,7 +27,7 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
   await api('POST','/api/users',{username:'workflow-material',display_name:'合成验收员',roles:['ADMIN','MATERIAL'],password:'synthetic-material-password'},201);
   cookie=(await api('POST','/api/auth/login',{username:'workflow-material',password:'synthetic-material-password'})).cookie;
   const category=(await api('POST','/api/materials/categories',{name:'合成类别'},201)).data,region=(await api('POST','/api/materials/regions',{name:'合成区域'},201)).data;
-  const masters=[];for(let i=0;i<2;i++)masters.push((await api('POST','/api/materials/catalog',{name:'核对物资'+(i+1),spec:'500 mL',unit:'瓶',categoryId:category.id,trackingMode:'unit'},201)).data);
+  const masters=[];for(let i=0;i<2;i++)masters.push((await api('POST','/api/materials/catalog',{name:'核对物资'+(i+1)+(i===1?'长名称错误核对ABCDEFGHIJ'.repeat(6):''),spec:'500 mL',unit:'瓶',categoryId:category.id,trackingMode:'unit'},201)).data);
   let order=(await api('POST','/api/materials/requests',{title:'分批到货合成申报单',description:'本测试仅使用隔离合成数据'},201)).data;
   for(let i=0;i<2;i++)order=(await api('POST',`/api/materials/requests/${order.id}/items`,{requestVersion:order.version,catalogId:masters[i].id,categoryId:category.id,regionId:region.id,warehouse:'MAIN',quantity:'3',manufacturer:'合成厂家'+(i+1),purpose:'合成验收核对'},201)).data;
   order=(await api('POST',`/api/materials/requests/${order.id}/submit`,{requestVersion:order.version})).data;
@@ -62,6 +62,19 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
     await page.locator('#mw-order-errors').waitFor();check((await page.locator('#mw-order-errors').textContent()).includes('核对物资2'),'missing amount identifies the exact material row');
     check((await api('GET','/api/materials/receipts')).data.total===0,'validation failure does not create any receipt');
     check((await input(ids[0],'amount').inputValue())==='20','failed validation retains other row input');
+    for(const size of [{width:1366,height:650},{width:1093,height:614},{width:1366,height:480},{width:390,height:844}]){
+      await page.setViewportSize(size);
+      const error=page.locator('#mw-order-errors');await error.scrollIntoViewIfNeeded();
+      check(await error.isVisible(),`${size.width}x${size.height}: the long validation error remains readable`);
+      await input(ids[1],'amount').scrollIntoViewIfNeeded();
+      await input(ids[1],'amount').click({trial:true});
+      check(await isVisibleInViewport(input(ids[1],'amount')),`${size.width}x${size.height}: the invalid row remains editable after scrolling`);
+      await button('wf-receive-selected').scrollIntoViewIfNeeded();
+      await button('wf-receive-selected').click({trial:true});
+      check(await isVisibleInViewport(button('wf-receive-selected')),`${size.width}x${size.height}: long errors do not hide the batch action`);
+      await capture(`${size.width}x${size.height}-validation-error`);
+    }
+    await page.setViewportSize({width:1366,height:768});
     await input(ids[1],'amount').fill('10');
     let lose=true;await page.route('**/receipts/batch',async route=>{if(lose){lose=false;await route.fetch({url:base+new URL(route.request().url()).pathname,headers:{...route.request().headers(),host:new URL(browserBase).host}});await route.abort('failed');}else await route.continue();});
     await button('wf-receive-selected').click();await button('wf-retry').waitFor();
@@ -99,7 +112,7 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
     check((await api('GET',`/api/materials/arrivals/${secondArrival}/documents`)).data.version===1,'second arrival starts its own document version sequence');
     await capture('desktop-arrival-documents');
     await receiveMode().click();
-    for(const size of [{width:1366,height:768},{width:1440,height:900},{width:900,height:650},{width:768,height:1024},{width:390,height:844},{width:1366,height:480}]){
+    for(const size of [{width:1366,height:768},{width:1440,height:900},{width:900,height:650},{width:768,height:1024},{width:390,height:844},{width:1366,height:650},{width:1093,height:614},{width:1366,height:480}]){
       await page.setViewportSize(size);await geometry(`${size.width}x${size.height}`,size.height>=768);
       if(size.width<768){await button('wf-receive-all').scrollIntoViewIfNeeded();check(await button('wf-receive-all').isVisible(),'mobile batch action is reachable through necessary vertical scrolling');}
       await capture(`${size.width}x${size.height}-acceptance`);await docsMode().click();await button('wf-doc-open').first().click();await geometry(`${size.width}x${size.height} documents`);await capture(`${size.width}x${size.height}-documents`);await receiveMode().click();

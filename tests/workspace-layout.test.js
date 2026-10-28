@@ -198,6 +198,14 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       check(geometry.width <= 761 && Math.abs((geometry.left + geometry.right) / 2 - (left + page.viewportSize().width - right) / 2) < 2,
         label + ': the short form is centered within the content area', geometry);
     }
+    if (selector === '#mw-view') check(await page.locator('#mw-view [data-mw="close-view"]').count() === 1,
+      label + ': material detail keeps exactly one return action');
+    if (selector === '#mw-dialog') {
+      check(await page.locator('#mw-dialog .mw-dialog-head [data-mw="cancel"]').textContent() === '关闭',
+        label + ': the form header uses the close label');
+      check(await page.locator('#mw-dialog .mw-dialog-actions [data-mw="cancel"]').textContent() === '取消' &&
+        await page.locator('#mw-save').textContent() === '保存', label + ': form cancel and save remain intact');
+    }
   };
   const checkCards = async (label, selector = '#page .table') => {
     if (page.viewportSize().width >= 768) {
@@ -495,11 +503,29 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         }
         if (size.width >= 1280) {
           const pager = page.locator('#page .mw-pagebar,#page .ws-pagination').last();
-          if (await pager.count()) check(await visibleInViewport(pager), `${size.width} ${materialPage}: record pagination is on the first screen`);
+          if (await pager.count()) {
+            const state = await pager.evaluate(node => ({ hidden: node.hidden, derived: node.classList.contains('ws-pagination'),
+              current: Number(node.textContent.match(/第 (\d+) \/ /)?.[1]), pages: Number(node.textContent.match(/\/ (\d+) 页/)?.[1]) }));
+            check(state.hidden === (state.current <= 1 && state.pages <= 1), `${size.width} ${materialPage}: navigation visibility follows its real page count`, state);
+            if (!state.hidden) check(await visibleInViewport(pager), `${size.width} ${materialPage}: record pagination is on the first screen`);
+          }
         }
       }
       await navigateMaterial('catalog');
       await page.locator('#page [data-mw="catalog-edit"]').first().waitFor();
+      const grouped = page.locator('#page .mw-panel-top .mw-more');
+      check(JSON.stringify(await grouped.locator('button').allTextContents()) === JSON.stringify(['导入 Excel', '导入模板', '导出 Excel']),
+        `${size.width}: the real catalog groups secondary commands without changing their capability`);
+      check(await page.locator('#mw-filters [type="submit"]').getAttribute('class') === 'ghost', `${size.width}: catalog query remains an explicit secondary submit`);
+      const duplicateTitle = await page.getByRole('heading', { name: '物资信息库', exact: true }).evaluate(node => ({
+        accessibleName: node.getAttribute('aria-label'), clip: getComputedStyle(node).clipPath, width: node.getBoundingClientRect().width }));
+      check(duplicateTitle.accessibleName === '物资信息库' && duplicateTitle.clip === 'inset(50%)' && duplicateTitle.width === 1,
+        `${size.width}: hiding the duplicate title preserves its accessible meaning`, duplicateTitle);
+      await grouped.locator('summary').click();
+      check(await grouped.locator('[data-mw="catalog-export"]').isVisible(), `${size.width}: grouped export remains operable`);
+      if (size.width === 390) check((await grouped.locator('summary').boundingBox()).height >= 44, 'the real phone catalog menu retains a 44px touch target');
+      await screenshot(`${size.width}-catalog-menu`);
+      await grouped.locator('summary').click();
       const firstName = page.locator('#page .table tbody tr').first().locator('td').first();
       check((await firstName.locator('strong').textContent()).includes('布局物资'), `${size.width}: material name is the primary field`);
       check((await firstName.locator('small').first().textContent()).includes('LAYOUT-'), `${size.width}: material code is secondary`);
@@ -660,6 +686,8 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await page.locator('#detail-body .table').scrollIntoViewIfNeeded();
       check(await page.locator('#detail-body .table').isVisible(), `${size.width}: lifecycle records remain reachable after the long asset details`);
       await checkPanel('#detail', `${size.width} asset detail`);
+      check(await page.locator('#detail .modal-head .x').count() === 1 && await page.locator('#detail footer .x').count() === 0,
+        `${size.width}: generic details keep only their header return`);
       await screenshot(`${size.width}-asset-lifecycle`);
       await page.locator('#detail .x').click();
       for (const [module, attribute, values] of [

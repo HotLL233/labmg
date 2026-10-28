@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
+const { cell } = require('../src/public/csv');
 
 function fixture() {
   const status = { hidden: true, textContent: '', setAttribute() {}, focus() {}, scrollIntoView() {} };
@@ -104,4 +105,35 @@ test('account CSV limits reject oversized or excessive data without making a req
   await app.import('登录账号,角色\n' + Array.from({ length: 201 }, (_, index) => `u${index},ADMIN`).join('\n'));
   assert.match(app.status.textContent, /200 条/);
   assert.equal(app.state.requests.length, 0);
+});
+
+test('protected account CSV exports roundtrip formula-like names and literal apostrophes', () => {
+  const app = fixture();
+  const accounts = [
+    ['=account', '+Name'],
+    ['+account', '-Name'],
+    ['-account', '@Name'],
+    ['@account', '=Name'],
+    ['\uFF1Daccount', '\uFF0BName'],
+    ["'=literal", "'=Literal name"],
+    ['comma,"quoted"', 'Name, "quoted"\nsecond line']
+  ];
+  const csv = '\uFEFF' + [['登录账号', '人员姓名', '角色'], ...accounts.map(row => [...row, '系统管理员'])]
+    .map(row => row.map(cell).join(',')).join('\r\n');
+  assert.deepEqual(app.rows(csv).map(({ username, display_name, role }) => [username, display_name, role]),
+    accounts.map(row => [...row, 'ADMIN']));
+  assert.ok(csv.includes('"\t=account"'));
+  assert.ok(csv.includes('"\'=literal"'));
+  assert.ok(app.rows(csv).every(row => !Object.hasOwn(row, 'password')));
+});
+
+test('account import trims protective whitespace but leaves formula-like password bytes untouched', () => {
+  const app = fixture();
+  const password = '  \t=secret,"literal"  ';
+  const csv = ['登录账号,人员姓名,角色,密码',
+    [cell('=account'), cell(' \t+Name'), cell('系统管理员'), `"${password.replaceAll('"', '""')}"`].join(',')].join('\r\n');
+  const [row] = app.rows(csv);
+  assert.equal(row.username, '=account');
+  assert.equal(row.display_name, '+Name');
+  assert.equal(row.password, password);
 });

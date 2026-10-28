@@ -401,7 +401,7 @@ test('setup contention refreshes state into normal login without authenticating 
 
 test('actual script order keeps shared state and correct CRUD payloads across business modules', async () => {
   const app = await browser();
-  assert.deepEqual(scripts, ['workspace.js', 'app.js', 'material-scan.js', 'material-labels.js', 'material-original.js', 'material-acceptance.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
+  assert.deepEqual(scripts, ['workspace.js', 'csv.js', 'app.js', 'material-scan.js', 'material-labels.js', 'material-original.js', 'material-acceptance.js', 'material.js', 'permission.js', 'archive.js', 'audit.js', 'datahub.js', 'asset.js', 'contract.js', 'quality.js']);
   for (const module of ['archives', 'assets', 'quality', 'contracts', 'finance', 'templates', 'people']) {
     await app.run(`go('${module}')`);
     const id = app.records.find(row => row.module === module).id;
@@ -535,6 +535,37 @@ test('workspace pages the original rows by available height and leaves server pa
   app.context.innerWidth=390;app.run("Workspace.fit(document.querySelector('#page'))");
   assert.equal(container.style.maxHeight,'none');
   assert.equal(rows.filter(row=>!row.hidden).length,8);
+});
+
+test('workspace hides single-page navigation and restores it when fewer rows fit', async () => {
+  const app=await browser();
+  app.$('#page').innerHTML='<div class="table"><table><thead><tr><th>名称</th></tr></thead><tbody>'+Array.from({length:5},(_,i)=>`<tr><td>记录${i}</td></tr>`).join('')+'</tbody></table></div>';
+  const container=app.$('#page .table'),rows=container.querySelectorAll('tbody tr');
+  container.getBoundingClientRect=()=>({top:200});
+  container.querySelector('thead').getBoundingClientRect=()=>({height:36});
+  rows.forEach(row=>{row.getBoundingClientRect=()=>({height:44});});
+  app.context.innerHeight=768;app.context.innerWidth=1366;
+  app.context.getComputedStyle=()=>({display:app.context.innerWidth<768?'block':'table'});
+  app.run("Workspace.enhance(document.querySelector('#page'))");
+  const pager=app.$('.ws-pagination');
+  assert.equal(pager.hidden,true);
+  assert.equal(rows.filter(row=>!row.hidden).length,5);
+  app.context.innerHeight=480;app.run("Workspace.fit(document.querySelector('#page'))");
+  assert.equal(pager.hidden,false);
+  app.$('[data-ws-page=next]').onclick();
+  assert.equal(rows.filter(row=>!row.hidden).length,1);
+  app.context.innerWidth=390;app.run("Workspace.fit(document.querySelector('#page'))");
+  assert.equal(pager.hidden,true);
+  assert.equal(container.dataset.wsPage,'0');
+  assert.equal(rows.filter(row=>!row.hidden).length,5);
+});
+
+test('generic record workspaces keep one return action and preserve form cancel and save', async () => {
+  const app=await browser();
+  assert.deepEqual(app.$('#detail').querySelectorAll('button').map(node=>node.textContent),['← 返回列表','打印']);
+  assert.equal(app.$('#editor .x').textContent,'关闭');
+  assert.ok(app.$('#editor footer').querySelectorAll('button').some(node=>node.textContent==='取消'));
+  assert.ok(app.$('#editor footer').querySelectorAll('button').some(node=>node.textContent==='保存'));
 });
 
 test('delayed attachment responses cannot reopen a closed detail or overwrite a newer record', async () => {
@@ -1152,6 +1183,35 @@ test('internal batch scans narrow acceptance by warehouse and region and only pr
   assert.equal(app.$('#mw-dialog').open, false); assert.match(app.$('#mw-status').textContent, /无待验数量/);
 });
 
+test('acceptance batch scans invalidate position only when the preset batch identity changes',async()=>{
+  for(const changedField of ['batch','expiryDate',null]){
+    const {app,row,item,request,click}=await materialApp();request.status='submitted';item.manufacturer='申报厂家';
+    let scanned={...row,batch:'LOT-A',expiryDate:'2028-05-06'},positionVersion=3,reads=0,receipt;
+    materialScanner(app,async()=>stockQr(scanned));
+    app.state.materialResponse=({url,method,body})=>{
+      if(url.pathname.endsWith('/scan/resolve'))return {body:{kind:'stock',catalog:{...row,id:row.catalogId},batch:scanned}};
+      if(url.pathname==='/api/materials/acceptance')return {body:{items:[{...item,requestNo:request.no}],total:1,page:1,pageSize:50}};
+      if(url.pathname==='/api/materials/stock/batches'){
+        reads++;assert.equal(url.searchParams.get('batch'),scanned.batch);assert.equal(url.searchParams.get('expiryDate'),scanned.expiryDate);
+        return {body:{items:[{...scanned,location:'原位置',locationVersion:positionVersion}],total:1,page:1,pageSize:200}};
+      }
+      if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){
+        receipt=body.items[0];
+        return receipt.locationVersion===positionVersion?{body:{request,arrivalId:73,receipts:[]}}:{body:{error:'位置版本已变化'},status:409};
+      }
+    };
+    await click('[data-mw=scan-receive]');await click('[data-mw=scan-receive-item]');await click('[data-mw=wf-position]');
+    if(changedField)scanned={...scanned,[changedField]:changedField==='batch'?'LOT-B':'2029-06-07'};
+    positionVersion=changedField?7:4;
+    await click('[data-mw=scan-receive]');await click('[data-mw=scan-receive-item]');
+    await fillAcceptance(app,{quantity:'1',amount:'2',location:'核对后位置'});await click('[data-mw=wf-receive-one]');
+    assert.equal(receipt.batch,scanned.batch);assert.equal(receipt.expiryDate,scanned.expiryDate);
+    assert.equal(receipt.locationVersion,changedField?7:3,changedField||'same-batch scans must retain the version read before a concurrent change');
+    assert.equal(reads,changedField?2:1);
+    if(!changedField)assert.ok(app.$('[data-mw=wf-reload]'));
+  }
+});
+
 test('ordinary packaging scans choose a full stock batch and still submit an application without money or direct issuance', async () => {
   const { app, row, click, fill, submit } = await materialApp(false);
   const other = { ...row, regionId: 9, regionName: '另一区域', warehouse: 'SPARE', batch: 'L-2', expiryDate: '2029-01-01' };
@@ -1434,14 +1494,45 @@ test('system QR labels reuse scoped rows and cancel after navigation without Bar
 
 test('acceptance exposes storage location, guards the selected batch version and preserves input after a conflict',async()=>{
   const {app,row,item,request,click}=await materialApp();request.status='submitted';item.manufacturer='申报厂家';row.location='试剂柜 A';row.locationVersion=3;let receipt,writes=0;
-  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){writes++;if(writes===1)return {body:{error:'位置版本已变化'},status:409};receipt=body.items[0];return {body:{request,arrivalId:71,receipts:[]}};}};
+  app.state.materialResponse=({url,method,body})=>{if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){writes++;receipt=body.items[0];if(receipt.locationVersion!==(receipt.batch===row.batch&&receipt.expiryDate===row.expiryDate?row.locationVersion:0))return {body:{error:'位置版本已变化'},status:409};return {body:{request,arrivalId:71,receipts:[]}};}};
   await click({dataset:{mw:'page',page:'acceptance'}});await click('[data-mw=wf-position]');
-  assert.equal(acceptanceField(app,'location').value,'试剂柜 A');await fillAcceptance(app,{quantity:'1',amount:'2.50',location:'试剂柜 B'});await click('[data-mw=wf-receive-one]');
+  assert.equal(acceptanceField(app,'location').value,'试剂柜 A');await fillAcceptance(app,{quantity:'1',amount:'2.50',location:'试剂柜 B'});
+  row.location='他人更新的柜';row.locationVersion=4;await click('[data-mw=wf-receive-one]');
+  assert.equal(receipt.locationVersion,3,'submission must retain the position version actually read before the concurrent change');
   assert.equal(acceptanceField(app,'location').value,'试剂柜 B');assert.ok(app.$('[data-mw=wf-reload]'));
-  row.location='他人更新的柜';row.locationVersion=4;await click('[data-mw=wf-reload]');await click('[data-mw=wf-receive-one]');
+  await click('[data-mw=wf-reload]');await click('[data-mw=wf-receive-one]');
+  assert.equal(receipt.locationVersion,3,'reloading the order alone must not silently replace the position version');
+  assert.equal(acceptanceField(app,'location').value,'试剂柜 B');
+  await click('[data-mw=wf-position]');await click('[data-mw=wf-receive-one]');
   assert.equal(receipt.location,'试剂柜 B');assert.equal(receipt.locationVersion,4);assert.equal(receipt.batch,'');assert.equal(receipt.expiryDate,'');
-  await fillAcceptance(app,{quantity:'1',amount:'2',batch:'新到货批次',location:'柜 C'});await click('[data-mw=wf-receive-one]');assert.equal(writes,3);
+  await fillAcceptance(app,{quantity:'1',amount:'2',batch:'新到货批次',location:'柜 C'});await click('[data-mw=wf-receive-one]');assert.equal(writes,4);
   assert.equal(receipt.batch,'新到货批次');assert.equal(receipt.locationVersion,0,'quick acceptance reads the new batch version automatically');
+});
+
+test('order acceptance does not replace another same-batch row read version with a newer shared lookup',async()=>{
+  const {app,row,item,request,click}=await materialApp();request.status='submitted';item.manufacturer='申报厂家';
+  request.items.push({...item,id:12});row.location='原位置';row.locationVersion=3;
+  let receipts,reads=0;
+  app.state.materialResponse=({url,method,body})=>{
+    if(url.pathname==='/api/materials/stock/batches')reads++;
+    if(url.pathname==='/api/materials/requests/101/receipts/batch'&&method==='POST'){
+      receipts=body.items;
+      if(receipts.some(entry=>entry.locationVersion!==row.locationVersion))return {body:{error:'位置版本已变化'},status:409};
+      assert.equal(new Set(receipts.map(entry=>entry.location)).size,1);
+      return {body:{request,arrivalId:72,receipts:[]}};
+    }
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});
+  await click({dataset:{mw:'wf-position',item:'12'}});
+  await fillAcceptance(app,{quantity:'1',amount:'2',location:'核对位置'},11);
+  await fillAcceptance(app,{quantity:'1',amount:'2',location:'核对位置'},12);
+  row.location='并发位置';row.locationVersion=4;await click('[data-mw=wf-receive-selected]');
+  assert.deepEqual(receipts.map(entry=>entry.locationVersion),[4,3]);
+  assert.equal(acceptanceField(app,'location',12).value,'核对位置');assert.ok(app.$('[data-mw=wf-reload]'));
+  await click('[data-mw=wf-reload]');await click({dataset:{mw:'wf-position',item:'12'}});
+  const readsAfterReload=reads;await click('[data-mw=wf-receive-selected]');
+  assert.deepEqual(receipts.map(entry=>entry.locationVersion),[4,4]);
+  assert.equal(reads,readsAfterReload,'already read positions are reused without refreshing their versions on submit');
 });
 
 test('stock row application selects the displayed real batch before creating a request',async()=>{
@@ -1501,6 +1592,56 @@ test('material details and compact forms keep the single account header outside 
   assert.equal(app.$('#mw-dialog .ws-context'),null);
   assert.ok(app.$('#logout'));
   assert.equal(app.$('#mw-dialog').modal,false);
+});
+
+test('catalog groups secondary actions without losing permissions or submit-based filtering',async()=>{
+  const {app,click}=await materialApp();
+  await click('[data-page=catalog]');
+  const heading=app.$('.mw-panel-top h3');
+  assert.equal(heading.classList.contains('ws-repeated-heading'),true);
+  assert.equal(heading.getAttribute('aria-label'),'物资信息库');
+  assert.deepEqual(app.$('.mw-panel-top').querySelectorAll('button').filter(node=>node.classList.contains('primary')).map(node=>node.dataset.mw),['new-catalog']);
+  assert.deepEqual(app.$('.mw-panel-top details').querySelectorAll('button').map(node=>node.dataset.mw),['catalog-import','catalog-template','catalog-export']);
+  assert.equal(app.$('#mw-filters button').classList.contains('ghost'),true);
+  app.$('#mw-catalog-management-query').value='测试筛选';
+  await app.$('#mw-filters').listeners.submit({target:app.$('#mw-filters'),preventDefault(){}});
+  assert.equal(app.requests.filter(row=>row.url.pathname==='/api/materials/catalog').at(-1).url.searchParams.get('q'),'测试筛选');
+  await click('[data-mw=catalog-detail]');
+  assert.equal(app.$('#mw-view').querySelectorAll('[data-mw=close-view]').length,1);
+  await click('[data-mw=close-view]');
+  await click('[data-mw=new-catalog]');
+  assert.equal(app.$('#mw-dialog .mw-dialog-head button').textContent,'关闭');
+
+  for(const [manageCatalog,canExport,expected] of [[false,false,[]],[false,true,['catalog-template','catalog-export']],[true,false,['catalog-import']]]){
+    const view=await materialApp();
+    Object.assign(view.app.state.materialCapabilities,{manageCatalog,export:canExport});
+    await view.app.run("go('materials')");
+    await view.click('[data-page=catalog]');
+    const menu=view.app.$('.mw-panel-top details');
+    assert.deepEqual(menu?menu.querySelectorAll('button').map(node=>node.dataset.mw):[],expected);
+    assert.equal(Boolean(view.app.$('[data-mw=new-catalog]')),manageCatalog);
+    assert.equal(Boolean(menu),expected.length>0);
+  }
+});
+
+test('material server pagers hide on one page but retain a way back from an emptied later page',async()=>{
+  const {app,click}=await materialApp();
+  let total=9;
+  app.state.materialResponse=({url,method})=>{
+    if(url.pathname!=='/api/materials/catalog'||method!=='GET')return;
+    const page=Number(url.searchParams.get('page')||1),pageSize=Number(url.searchParams.get('pageSize')||8);
+    return {body:{items:[],total,page,pageSize}};
+  };
+  await click('[data-page=catalog]');
+  assert.equal(app.$('#page .mw-pagebar').hidden,false);
+  await click('[data-mw=next]');
+  total=1;await click({dataset:{mw:'refresh'}});
+  assert.equal(app.$('#page .mw-pagebar').hidden,false,'later pages must keep their previous-page action');
+  await click('[data-mw=previous]');
+  assert.equal(app.$('#page .mw-pagebar').hidden,true);
+  total=0;await click({dataset:{mw:'refresh'}});
+  assert.equal(app.$('#page .mw-pagebar').hidden,true);
+  assert.equal(app.$('#page').querySelectorAll('.ws-pagination').length,0,'the hidden server pager must not create client pagination');
 });
 
 test('opening documents save multiple lines, import and export Excel, confirm posting once and retain generated labels',async()=>{
