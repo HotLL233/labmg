@@ -1,8 +1,14 @@
 # 开发与版本管理
 
-## 当前交付候选：0.14.3（2026-10-28）
+## 当前交付：0.14.3（2026-10-28，已公开预发布）
 
-用户明确授权新补丁版本及远端源码／新标签、双架构镜像、GitHub预发布与本地Docker包核验，不操作NAS／业务库。包含已提交a34539a界面修正与附件提交后清理；不移动main、旧标签或冻结旧产物，不混入外部维护草稿。已核实v0.14.3远端未占用并同步package／lock及两份YML；专用PG18.4仅127.0.0.1:54954，精确旧测试目录安全复用而非重建。真实HTTP延迟约束COMMIT失败专项1/1通过，完整回归278项／277通过／0失败取消／1本机Docker条件跳过（339.386秒）；构建及容器发布结果待取得真实证据后补。
+已公开[0.14.3预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.3)（Release426134770，prerelease=true／make_latest=false）。冻结源码5ece7430894c359b5a7f4916228d31657703c170，标签v0.14.3；后补文档不移动标签或重打包。正式构建40608440134：真实PG18.6环境269/269、55JS检查及双架构实际构建推送通过；index为sha256:95eed51acc4bbe14aaa0ad5d89dff2f338d76ee5abd83c4d77c357dcb4155a90。验证40609142003（ops954e1affe2324f05837ee5120b834e1dc3fdd435）四门禁及完整备份／空隔离PG18恢复12项通过，33表全部比较；PG6检查属于同一次在线执行，不额外计数。ARM64离线生命周期使用QEMU。
+
+本地artifacts/releases/0.14.3/完整12件489574558字节，11条SHA256SUMS、5份冻结原字节附件、151项源码及两份完整TAR各三镜像／共六config通过。amd64 TAR245763072字节，SHA256 6898ee357eb0bc8fb7c7c9ecfde8440212f88e96cca41770e243964eaa3e945a；arm64 TAR242496512字节，SHA256 c222545a1f375d2d352361d1641c2317df6ce0811f0970e241fb1e347973cb27。每包包含labos:0.14.3、postgres:18-bookworm、caddy:2.11.7-alpine。
+
+官方匿名API核对12资产／标签／正文通过，10件非TAR经官方资产API匿名完整下载通过；本机两TAR为认证下载并整包摘要校验，不冒充匿名全量TAR验证。浏览器Release UI未验。本机Docker引擎未启用，容器验证来自同轮GitHub runner；未操作NAS／日常库，未验物理ARM64、实体手机、USB打印、长时并发、生产／SQLite迁移。保持0006/schema8，无新依赖／迁移／备份格式；升级先完整备份并保留runtime/、https/及UID/GID。进程崩溃恢复、COMMIT结果不确定与库存详情一致读快照仍未解决。
+
+本机专用PG18.4真实COMMIT失败专项1/1、完整回归278项／277通过／0失败取消／1Docker条件跳过已完成，专用测试cluster核对remaining0后停止。普通及严格verify通过，外部维护文件与原型草稿保留未提交且未进入冻结包。下方候选与未发布叙述保留为历史阶段，由本条完成记录取代。发布helper的github-release.json固定localArchiveDownloads=false仅描述其runner证据路径，不能覆盖本轮local-delivery-verification.json／local-image-archive-verification.json实包证据。
 
 ## 当前开发：全局账号栏与下级工作区纠正（未发布）
 

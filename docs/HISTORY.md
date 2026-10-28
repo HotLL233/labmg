@@ -1095,3 +1095,17 @@ Workspace外置下级页改用原生show，所有账号／版本／退出归主h
 安全复用专用ui-shell PG18.4原cluster，127.0.0.1:54954精确目录验证后启动，未initdb或删除。真实HTTP最外层COMMIT失败专项1/1通过，原输出保存在0.14.3/draft-commit-regression.tap。完整npm test为278项／277通过／0失败取消／1本机Docker条件跳过，339.386秒；真实Edge工作区workspace-layout-frUPTK与手机mobile-layout-OgGtXd位于本版新缓存。计数摘要记录在local-regression-summary.json，DSH job pwsh-5e2bc3739560488f保留原控制台输出，摘要不冒充原TAP。普通verify PASS3.1s、strict PASS3.5s；独立源码review无阻断。回归完成后核对PG精确目录及remaining0，仅对该专用实例fast停止，未接日常库。
 
 新发布helpers仅在0.14.3缓存准备，离线33JS／3内嵌脚本及12资产／11摘要合同通过，未复用旧成功证据；构建与容器门禁、完整备份恢复、下载及公开核验须取得本轮真实结果后再记完成。
+
+## 2026-10-28：0.14.3 双架构Docker完整交付与公开预发布
+
+已公开[0.14.3预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.3)（Release426134770，prerelease=true／make_latest=false）。冻结源码5ece7430894c359b5a7f4916228d31657703c170，标签v0.14.3；后补文档不移动标签或重打包。正式构建40608440134：真实PG18.6环境269/269、55JS检查及双架构实际构建推送通过；index为sha256:95eed51acc4bbe14aaa0ad5d89dff2f338d76ee5abd83c4d77c357dcb4155a90。验证40609142003（ops954e1affe2324f05837ee5120b834e1dc3fdd435）四门禁及完整备份／空隔离PG18恢复12项通过，33表全部比较；PG6检查属于同一次在线执行，不额外计数。ARM64离线生命周期使用QEMU。
+
+本地artifacts/releases/0.14.3/完整12件489574558字节，11条SHA256SUMS、5份冻结原字节附件、151项源码及两份完整TAR各三镜像／共六config通过。amd64 TAR245763072字节，SHA256 6898ee357eb0bc8fb7c7c9ecfde8440212f88e96cca41770e243964eaa3e945a；arm64 TAR242496512字节，SHA256 c222545a1f375d2d352361d1641c2317df6ce0811f0970e241fb1e347973cb27。每包包含labos:0.14.3、postgres:18-bookworm、caddy:2.11.7-alpine。
+
+官方匿名API核对12资产／标签／正文通过，10件非TAR经官方资产API匿名完整下载通过；本机两TAR为认证下载并整包摘要校验，不冒充匿名全量TAR验证。浏览器Release UI未验。本机Docker引擎未启用，容器验证来自同轮GitHub runner；未操作NAS／日常库，未验物理ARM64、实体手机、USB打印、长时并发、生产／SQLite迁移。保持0006/schema8，无新依赖／迁移／备份格式；升级先完整备份并保留runtime/、https/及UID/GID。进程崩溃恢复、COMMIT结果不确定与库存详情一致读快照仍未解决。
+
+远端37个受保护ref（main及36旧标签）独立核对未变。采用干净detached worktree生成包，151源码清单及五附件原字节由独立审查核验，外部package verify脚本与AGENTS／文档／原型未进入包。初次Git fetch网络失败后连接诊断可达，精确重试正常非force原子快进同步develop、feature及新tag。标签push构建与dispatch重复运行均成功，但dispatch复用已有镜像而跳过build，watcher据实拒绝；切换push原run40608440134并保存原日志及SHA1b42b778177fa527bfc5d6ae9ae3c26bee92a763d8ace6d5e60b73198c6e9b7c，不把跳过当实际构建。
+
+证据ZIP和诊断ZIP按官方摘要核对，独立复核原TAP、HTTPS及完整备份恢复。首次导入缺参数记录保留import-arguments-failed.json，再按实际run／ZIP导入；首次TAR下载缺local-image-download-inputs绑定而拒绝，随后仅由已核验官方remoteAssets及run生成真实绑定，完整下载成功。验证器无参数会拒绝，最终以--verify／-Verify核验通过，未改验证条件或冒充早期失败成功。公开匿名验证github-release-verification.json passed；官方Release UI未验。发布器报告固定localArchiveDownloads=false是其保留的runner路径边界，本次本地实包另以local-delivery-verification.json和local-image-archive-verification.json记录，不改写原发布证据。
+
+本轮没有部署NAS／接触业务库；后补文档为单独提交，已冻结5ece743／v0.14.3及12附件保持不变。
