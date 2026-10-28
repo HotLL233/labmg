@@ -8,7 +8,25 @@
 
 暂无新增条目。
 
-## 0.14.4（2026-10-28，候选，验收与发布进行中）
+## 0.14.4（2026-10-28，已公开预发布）
+
+### 最终交付记录（发布后补，不变更冻结标签／附件）
+
+已公开[0.14.4预发布](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)（Release426337979，UTC07:00:19／北京时间15:00:19，prerelease=true／make_latest=false）。冻结源码0d51684f6241aed4fe0c542cd613fb2eec513b27，注解标签v0.14.4对象bc8a8c290dcd3bcd374ab19229fe4627c0f61058。干净worktree使用未修改的打包脚本生成源码ZIP，159项源码与1个生成启动器核对通过；ZIP1187731字节，SHA256 1d46cc10a8afd0511f2b6123b4d0004b23db0c4e566ed6b848ab192096126d24。
+
+本机PG18.4及真实Edge完整回归314项／313通过／0失败取消／1Docker条件跳过，三个浏览器专项全部执行，原spec日志及94份测试后源码摘要保留，专用60218已核实remaining0并安全停止。最终构建40644915862／运维提交f928914027e21fe6d08d6a7bdb90a5839dc5219d成功：Windows原package测试1/1，Linux在真实PG18.6下执行其余32份测试，313项／309通过／0失败取消／4条件跳过。两平台均绑定冻结tag，完整划分33份测试无遗漏；本机浏览器及后续Docker门禁分别补证，不拼成单轮314/314。
+
+首轮构建40643720417失败：既有scripts/package.ps1:37的Get-Item未加-Force，在Linux访问隐藏.github目录失败，原日志与failure元数据保留。仅新增运维workflow按原生平台分工，构建依赖Windows打包专项及Linux其余测试成功；不修改原打包脚本、测试、冻结源码或标签，不称Linux打包已修复。双架构实际构建推送index为sha256:13ae4384cfc11c558315acf81df031229f981e30258a42436ebd265d42070261。
+
+验证40645846332（ops7abc4f8569f1b5a7ebb66aa09d2007832364e16c）四门禁及完整备份／全新空隔离PG18恢复通过。在线amd64及离线amd64／arm64三份原TAP各1/1、无失败取消跳过，PG6检查绑定同一在线TAP，不另计第四次生命周期；真实Caddy可信CA空SNI及自动／旧通配／手动覆盖HTTPS8项通过。完整恢复12项、33张表、2到货、3资料版本、3附件、5逐件码一致，秘密文件和CA保留且合成资源清理通过；ARM64使用QEMU。同run官方诊断ZIP摘要及原日志另经独立复核。
+
+本地artifacts/releases/0.14.4/完整12件489616842字节，11条SHA256SUMS、五份冻结原字节部署附件、两份完整TAR与六份Linux config检查通过。amd64 TAR245764096字节，SHA256 f7536939c1f090d3f0b957ad644094c90c173b40e2210be185edb8c1081f0d3e；arm64 TAR242492928字节，SHA256 d1451f4b4a7f31a9a3500e7cf8595cd743839208e5301c5e8bd28d240425fc9b。每包包含labos:0.14.4、postgres:18-bookworm、caddy:2.11.7-alpine，真实本地YML生命周期使用--pull never；本机只做完整字节与结构核对，容器运行来自同轮GitHub runner。
+
+公开后认证官方API核对公开预发布状态、12资产／摘要、标签目标与正文通过；10个非TAR官方公开直链匿名完整下载1359818字节通过。匿名API首次GET返回403，明确限流额度0，原github-release-verification-first-attempt.json及失败路径保留；不将认证元数据或公开直链结果写成匿名API通过。最终组合证据final-release-verification.json为passed-with-anonymous-api-rate-limit；两TAR本机为认证下载，不称匿名全量TAR或浏览器Release UI验收。发布前后38个旧引用、33个旧Release、370个旧附件元数据一致，main与旧标签对象保持。
+
+后补文档保留候选及失败历史，不重打冻结包或移动标签。保持0006/schema8，无新依赖、迁移或备份格式；升级先完整备份并保留runtime/、https/及UID/GID，回退还原升级前副本。本轮未升级NAS或使用日常库，实体手机、物理ARM64、原生打印／USB、其他浏览器、原生125%缩放、Excel／WPS、长时负载及SQLite／PG17迁移未验。只完成本批UI条目，未实现状态反馈、日期标签、其他独立分页或崩溃后自动对账。
+
+### 冻结前候选记录（原样保留，待发布描述由上方结果取代）
 
 本版合并下列源码修复和第一批UI布局排版；用户已授权真实验收后公开预发布。同步package／lock与在线／本地YML，继续0006/schema8，无新增运行依赖、迁移或备份格式。发布门禁改为严格verify与全量npm test，不再遗漏新增专项回归。当前尚未完成冻结、构建或公开发布，本轮真实验证结果后补，不复用0.14.3成功计数。
 

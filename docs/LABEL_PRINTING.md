@@ -1,6 +1,8 @@
 # 系统打印与二维码标签
 
-当前候选为**0.14.4（2026-10-28，验收与发布进行中）**；[本版Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)公开后使用同版本交付。布局修改限屏幕覆盖，不改变纸型、标签毫米坐标、0°／90°旋转、原校准值或系统打印方式。浏览器打印媒体与A4 PDF检查不等于原生打印窗口、USB送料或任意模板实体试打。最终验证见[版本说明](CHANGELOG.md)，下文保留旧版历史范围。
+当前交付为**0.14.4（2026-10-28，已公开预发布）**；从[本版Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)使用同版本交付。布局修改限屏幕覆盖，不改变纸型、标签毫米坐标、0°／90°旋转、原校准值或系统打印方式。本轮真实Edge打印媒体与长名A4横向PDF已检查，不等于原生打印窗口、USB送料或任意模板实体试打。最终验证及匿名API限流边界见[版本说明](CHANGELOG.md)，冻结附件保留候选快照。
+
+## 0.11.0及更早打印历史快照
 
 本指南当前源码面向 **0.11.0（验证版，2026-10-22）**。本轮完成 T1–T4 双端界面、验收信息区块、库存七列及厂家／备注Excel配套。[0.11.0 Release](https://github.com/HotLL233/labmg/releases/tag/v0.11.0)已公开，完整交付位于 `artifacts/releases/0.11.0/`，两份配置见[在线 YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.yml)和[本地 YML](https://github.com/HotLL233/labmg/releases/download/v0.11.0/docker-compose.local.yml)。真实PG18.6回归、四项发布门禁、本机12件与公开后10个非TAR附件匿名下载核验通过，结果见[版本说明](CHANGELOG.md)；附件指南保留冻结快照，以下为后补入口。标签仍只含二维码和基础信息，保留系统打印窗口、实体纸尺寸、0°／90°内容旋转及原校准值；本轮结果不替代原生窗口、USB或任意模板实物验收。
 

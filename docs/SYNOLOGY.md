@@ -1,6 +1,6 @@
 # 群晖 Docker 部署
 
-当前候选为**0.14.4（2026-10-28，验收与发布进行中）**；[本版Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)公开后使用其中同版本两份YML与本架构三镜像TAR，不混用旧版文件。在线应用为`ghcr.io/hotll233/labmg:0.14.4`，离线应用为`labos:0.14.4`。本轮发布不自动升级NAS；升级前按[完整备份恢复](BACKUP_RESTORE.md)保留原PG18数据库、附件、证书、`runtime/`、`https/`和UID/GID，继续0006/schema8，无新增迁移。实际发布与门禁结果以[版本说明](CHANGELOG.md)为准。
+当前交付为**0.14.4（2026-10-28，已公开预发布）**；从[本版Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)使用同版本两份YML与本架构三镜像TAR，不混用旧版文件。在线应用为`ghcr.io/hotll233/labmg:0.14.4`，离线应用为`labos:0.14.4`。本轮发布不自动升级NAS；升级前按[完整备份恢复](BACKUP_RESTORE.md)保留原PG18数据库、附件、证书、`runtime/`、`https/`和UID/GID，继续0006/schema8，无新增迁移。四门禁、完整恢复、本地12件及公开下载证据与匿名API限流边界见[版本说明](CHANGELOG.md)；冻结附件中的候选说明保留，不重打包。
 
 ## 0.14.3及更早交付历史快照
 

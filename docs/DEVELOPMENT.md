@@ -1,6 +1,14 @@
 # 开发与版本管理
 
-## 当前候选：0.14.4（2026-10-28，验收与发布进行中）
+## 当前交付：0.14.4（2026-10-28，已公开预发布）
+
+[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)（426337979）已公开，prerelease=true／make_latest=false；业务冻结0d51684f6241aed4fe0c542cd613fb2eec513b27及新tag不变。当前完整交付位于artifacts/releases/0.14.4/，恰12件489616842字节，11摘要、五份冻结附件、两份完整TAR各三镜像及六Linux config核对通过。后补文档不重打包，继续0006/schema8，无新依赖或迁移。
+
+本机PG18.4＋真实Edge完整回归314项／313通过／0失败取消／1Docker条件跳过，94份测试后源码摘要一致，专用60218已安全停止。正式构建40644915862用opsf928914027e21fe6d08d6a7bdb90a5839dc5219d分平台完整执行33份测试：Windows原package1/1；Linux真实PG18.6下其余32份为313项／309通过／0失败取消／4条件跳过。原失败40643720417及Linux隐藏.github打包兼容问题保留，未改原打包脚本、测试或冻结源码，不称该缺陷已修复。
+
+验证40645846332／ops7abc4f8569f1b5a7ebb66aa09d2007832364e16c四门禁及完整备份／全新空PG18恢复通过，三原TAP各1/1，PG6检查来自同一在线执行，恢复12项／33表一致；ARM64为QEMU。发布后认证元数据／12资产核对与10个非TAR公开直链匿名完整下载通过，匿名API因403限流未完成，原失败单列；详见CHANGELOG及本版cache/final-release-verification.json。38旧引用、33旧Release、370旧资产前后元数据一致。升级先完整备份并保留runtime/、https/与UID/GID，本轮未升级NAS；实体设备、原生缩放、Excel／WPS及长时负载边界不变。
+
+## 0.14.4候选与源码验收历史（状态由上方最终交付取代）
 
 用户授权完成源码验收并发布，沿用`feature/ui-shell-single-account`；package、lock和在线／本地YML同步0.14.4，旧标签与main不移动。不新增运行依赖、迁移或备份格式，继续0006/schema8。发布工作流改为严格verify与全量npm test，避免显式名单漏掉本轮CSV、事务结果、附件和库存一致性回归；浏览器与Docker的条件跳过必须由实际专项门禁补证。
 

@@ -1,6 +1,6 @@
 # LabOS 实验室综合管理系统
 
-当前候选：**0.14.4／事务与导出修复、第一批布局排版优化（2026-10-28）**。专用PG18.4与真实Edge下完整回归314项、313通过、0失败、1本机Docker条件跳过；五档布局、低高度、返回与退出保护、打印媒体已检查。双架构构建和容器发布门禁仍待执行，尚未公开，不将下方旧版结果当作本轮证据。最终公开状态见[版本说明](docs/CHANGELOG.md)。
+当前交付：**0.14.4／事务与导出修复、第一批布局排版优化（2026-10-28，已公开预发布）**。已公开[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)。专用PG18.4与真实Edge下完整回归314项、313通过、0失败、1本机Docker条件跳过；双架构构建、四项容器门禁及完整备份／空PG18恢复通过。本地12件、11摘要与六份Linux镜像config已核对，10个非TAR公开直链匿名完整下载通过；匿名API因403限流未完成，认证元数据核验另列，不冒称该路径通过。完整证据与设备边界见[版本说明](docs/CHANGELOG.md)。
 
 本版合并提交结果未知时的附件保留、验收库位版本保护、大附件校验、CSV公式前缀防护及库存一致读取；整理主次操作、手机字段排版、单页分页和关闭／返回入口。沿用0006/schema8，无新运行依赖或迁移；发布不自动升级NAS，升级仍须先完整备份并保留`runtime/`、`https/`及UID/GID。未知提交结果应先查询核实，不直接重复新建；进程崩溃自动对账、真实Excel／WPS、实体设备与长期负载仍有验证边界。
 
@@ -106,7 +106,7 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.4`，本地三镜像包使用 `labos:0.14.4`；[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)公开后下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.4`，本地三镜像包使用 `labos:0.14.4`；[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)已公开，请下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |
