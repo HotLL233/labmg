@@ -1,5 +1,7 @@
 # 开发与版本管理
 
+> 2026-10-30当前已公开交付0.14.9：[Release428821174](https://github.com/HotLL233/labmg/releases/tag/v0.14.9)，冻结b57a73032ded3caf9d9401706897d0a176850a20。构建41029744353真实PG18.6为343项／338通过／0失败取消／5条件跳过，双架构镜像及源码打包成功；验证41030397629四门禁、HTTPS8项及完整恢复12项／33表通过，三容器TAP各1/1。四浏览器采用0.14.8同前端源码的本机实际证据，不冒称Linux跳过已执行。完整12件489903331字节、11摘要、五冻结附件、182源／183ZIP条目及双TAR六config本机核验通过；匿名API和10非TAR附件1614051字节公开下载通过。首次大artifact超时保留，实际两TAR以重新核验旧blob及官方Range补齐并通过整包SHA；不是匿名全量TAR下载。后补记录不移动标签／重打包，保留main及旧资产，记录提交后快进同步develop。本轮未升级NAS，ARM64仅QEMU，设备／原生缩放未验；升级先完整备份并保留runtime/、https/和UID/GID。下方候选及旧“当前交付”保留历史，实际状态以本条和CHANGELOG为准。
+
 > 2026-10-30当前候选0.14.9：0.14.8的官方run41027559390在npm test出现343／337通过／1失败／5条件跳过，唯一失败是package.test匹配完整提示末句，而Linux PowerShell把ANSI及换行／诊断前缀插入“new package version”；实际脚本正确拒绝改源复用，镜像及package job均未执行，Release不存在。测试改为匹配稳定的“Release source differs or cache is damaged”前缀，仍断言非零退出、旧ZIP与manifest不变。UI／业务源码相对冻结0.14.8不变，保留下方本机验收及独立浏览器证据，不称为本机重新全跑；新版本须在云端再跑完整回归和部署门禁。package／lock／YML／README同步0.14.9，旧标签／资产不改，NAS不升级。
 
 > 2026-10-30候选本机验收完成：0.14.8综合UI V2最终37文件串行343项／342通过／0失败取消／1本机Docker条件跳过，四份Edge实际执行，102份受控摘要一致；原命令及边界见UI_CONSOLIDATED_PLAN第10节。本地新合成预览由npm run dev运行localhost:3002（数据库labos_ui_v2_preview、专用PG55516及ui-v2-20261030/preview-runtime），旧3001和NAS保留；同hostname端口共享Cookie，请使用独立／无痕窗口，凭据仅在private配置。先运行pwsh7下`./artifacts/cache/ui-v2-20261030/stop-preview.ps1`再运行同目录`stop-postgres.ps1`可按身份停止本轮服务；本轮保留预览，未执行停止链，不删除数据。云端先测试／镜像，再创建7件私有草稿，经四门禁及完整恢复补为12件仍保持draft，最后独立核对才显式公开；本条不表示云端已运行或NAS已升级。
