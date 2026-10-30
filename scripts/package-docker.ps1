@@ -1,6 +1,6 @@
 param([string[]]$Architectures = @('amd64', 'arm64'))
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+if (-not ('System.IO.Compression.ZipFile' -as [type])) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
 $Architectures = @($Architectures | ForEach-Object { $_ -split ',' } | Select-Object -Unique)
 if (!$Architectures.Count -or @($Architectures | Where-Object { $_ -notin @('amd64', 'arm64') }).Count) {
     throw 'Architectures must be amd64, arm64, or both.'

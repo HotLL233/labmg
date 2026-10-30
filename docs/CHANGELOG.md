@@ -8,6 +8,7 @@
 
 ## 未发布
 
+- 2026-10-30 本地物资参考页评审：在[布局方案第12节](UI_LAYOUT_BALANCE_PLAN.md#12-ui-refined-material参考页评审2026-10-30仅分析)记录八档浏览器观察、低高度提交条／手机整区横滚／768日期串列及原型交互边界；建议借桌面视觉层级，保留V1全宽验收及手机重排。仅分析，未改原参考、正式UI、版本或NAS，问题未修复，后续仍先HTML确认。
 - 2026-10-30 iLabPlus设计调研：在[布局方案第11节](UI_LAYOUT_BALANCE_PLAN.md#11-ilabplus布局借鉴评审2026-10-30仅分析)记录用户指定站点的公开手册与界面依据、V1对照、可借鉴点和下一步优先级；明确历史截图不等于当前登录后台，手机与真实业务未验。仅分析和维护文档，未改正式UI、既有HTML、版本或NAS，新增布局仍需HTML参考及用户确认。
 - 2026-10-30 NAS隔离测试交付：为UI V1生成唯一测试构建`ui-v1-test-20261030-a9d1effd1700`，源码ZIP、amd64单应用TAR和专用Compose已核验；应用版本仍0.14.4，无新业务版本、迁移、依赖、标签或公开Release。NAS新建独立项目及3101／8544、PG18.6、数据目录与CA，正式站和原6个容器未重启或改配置；全新合成数据浏览器38项／11图、最终客户端59项及测试应用重启后数据／附件持久化通过。详见MEMORY顶部及测试包README_TEST／DEPLOYMENT；不是生产升级或通用三镜像发行包，同IP会话建议无痕窗口测试，实体设备、原生缩放和长期负载未验。
 - 2026-10-29 优化方案V1：在[布局方案第0节](UI_LAYOUT_BALANCE_PLAN.md#0-优化方案v1本次评审稿)明确七类页面布局、列宽起始值、字号间距、响应式规则、三批实施范围及验收标准。仅交付待确认方案，不改正式UI或施工卡；既有HTML未变，旧原型检查不扩展为本轮V1验收。普通verify与独立UI审计通过，未跑正式业务回归或部署。
@@ -16,7 +17,11 @@
 - 2026-10-28 NAS部署维护记录：经用户另行授权，172.28.10.200原labos项目由0.14.3原地升级0.14.4，仅更新应用／初始化镜像，保留原PG18.6、代理、runtime／https、UID/GID、端口和CA；未动labflow，不新增业务版本或修改冻结标签／资产。发布阶段“未升级NAS”保留为历史边界，以本条及MEMORY当前状态补充。
 - 新备份/volume1/docker/labos-backups/pre-0.14.4-20261028-retry1：停PG完整归档247149944字节、停写逻辑dump147309字节；无网络tmpfs独立PG恢复及升级前后33表行数／规范化内容摘要一致。原服务健康，独立局域网HTTP及严格原CA无SNI HTTPS共56请求、单一1280×720登录页加载通过。首次演练及客户端辅助检查失败已保留、更正后重跑；附件实际0文件，未验应用账号、完整业务、附件下载、物理归档恢复及实体设备，备份非异地副本。详见MEMORY／HISTORY及artifacts/cache/0.14.4/nas-*.json。
 
-## 0.14.6（2026-10-30，远端打包）
+## 0.14.7（2026-10-30，远端打包）
+
+> 0.14.6 的远端运行仍失败（run 41003973808）：`package` job 在打包步骤 **1 秒**内失败，`publish` job 的 `npm test` 跑 114 秒后失败。runner 镜像确认自带 PowerShell 7.6.9，故不是命令缺失，而是脚本在 PS7／Linux 上启动即抛错——`Add-Type -AssemblyName System.IO.Compression.FileSystem` 是 Windows PowerShell 5.1 的写法，PS7 已内置该类型、按程序集名加载反而失败。本版改为先探测 `System.IO.Compression.ZipFile` 类型，缺失时才 `Add-Type`（`scripts/package.ps1` 与 `scripts/package-docker.ps1` 各一处），两份脚本均通过 PowerShell 解析器检查（0 语法错误）。同时给工作流加了失败自诊断：`npm test` 输出 tee 到日志并把失败断言写入 job summary；打包步骤把 `pwsh` 是否存在、版本与脚本输出一并写入 summary——后续再失败可在不登录的情况下读到真实原因。功能内容与 0.14.6 相同，未新增接口、迁移、依赖或备份格式。
+
+## 0.14.6（2026-10-30，远端打包失败，由 0.14.7 取代）
 
 > 0.14.5 标签的首次远端构建失败（run 40998007945，总时长 1 分 55 秒）：`package` job 卡在「Build frozen source package and both image archives」，`publish` job 卡在「Run npm test」，两者同源。根因是 `scripts/package.ps1` 用 `Join-Path $root 'config\label-templates'` 与字面量 `'config\.env.example'`——反斜杠在 POSIX 上是普通文件名字符，`Get-ChildItem -LiteralPath` 找不到即抛错，而脚本开头设了 `$ErrorActionPreference='Stop'`，于是以 1 退出；`tests/package.test.js` 调用同一脚本，Linux 上的 `npm test` 随之失败。本版把两处改为 `Join-Path` 分段拼接，Windows 行为不变（已验证解析到 2 个标签模板与 `config/.env.example`）。失败发生在任何镜像或资产产出之前，按「不移动冻结标签」惯例升版本重发，`v0.14.5` 保留为失败尝试记录。功能内容与 0.14.5 相同，未新增接口、迁移、依赖或备份格式。
 

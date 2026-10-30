@@ -1,6 +1,6 @@
 # 开发与版本管理
 
-> 2026-10-30 0.14.5候选：`package.json`／`package-lock.json`、两份部署YML与README版本引用已同步0.14.6，CHANGELOG归入本版，源码ZIP经未修改的`scripts/package.ps1`产出。**未产出双架构镜像TAR与GitHub Release**（本机Docker引擎未运行、无`gh` CLI／令牌），未打标签、未推送、未动NAS。完整`npm test`与浏览器专项未跑（无`LABOS_TEST_DATABASE_URL`与PG口令），本轮门禁仅为普通verify与无需数据库的静态测试；下方“当前交付0.14.4”仍指最新公开版本。
+> 2026-10-30 0.14.5候选：`package.json`／`package-lock.json`、两份部署YML与README版本引用已同步0.14.7，CHANGELOG归入本版，源码ZIP经未修改的`scripts/package.ps1`产出。**未产出双架构镜像TAR与GitHub Release**（本机Docker引擎未运行、无`gh` CLI／令牌），未打标签、未推送、未动NAS。完整`npm test`与浏览器专项未跑（无`LABOS_TEST_DATABASE_URL`与PG口令），本轮门禁仅为普通verify与无需数据库的静态测试；下方“当前交付0.14.4”仍指最新公开版本。
 
 > 2026-10-30 NAS独立测试已交付：用户授权打包并在NAS测试，新增`labos-ui-v1-test-20261030`项目，3101／8544端口、独立runtime／https／PG及测试CA，正式labos 0.14.4与labflow不动。本轮应用版本保持0.14.4，唯一测试标签`labos:ui-v1-test-20261030-a9d1effd1700`，未公开发布。交付目录`artifacts/packages/ui-v1-test-20261030-a9d1effd1700/`的README_TEST与DEPLOYMENT记录范围和停止命令；旧版本包、标签和registry未改。NAS38浏览器检查／11图、最终59客户端检查及测试应用重启持久化通过；本地代码摘要仍与前轮完整320项一致，不能冒称本轮又跑了320项。测试数据全合成，同IP不同端口共享Cookie风险须用无痕窗口／独立浏览器配置规避，未改正式认证合同或设备信任。
 

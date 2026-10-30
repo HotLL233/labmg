@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+# Windows PowerShell 5.1 需要显式加载该程序集；PowerShell 7（含 Linux runner）已内置同名类型，
+# 直接 Add-Type -AssemblyName 反而会因程序集名不存在而抛错，故先探测类型。
+if (-not ('System.IO.Compression.ZipFile' -as [type])) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
 function Get-Sha256($file) {
     $stream = [System.IO.File]::OpenRead($file)
     $hasher = [System.Security.Cryptography.SHA256]::Create()

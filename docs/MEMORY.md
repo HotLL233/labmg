@@ -1,6 +1,16 @@
 # 项目记忆
 
-## 当前状态：0.14.6 远端打包（2026-10-30）
+## 参考页评审补充：ui-refined-material（2026-10-30，仅分析）
+
+用户提供本机static-html参考要求分析，结果补入[布局方案第12节](UI_LAYOUT_BALANCE_PLAN.md#12-ui-refined-material参考页评审2026-10-30仅分析)。只读Edge八档×申报／验收共16图，另补1张手机横滚图、0脚本异常；证据在artifacts/cache/refined-material-review-20261030。实际点击／滚轮确认：1366×480提交条在533px以下且普通滚轮无法滚到；390验收内容区326宽却614滚动宽，整个工作区横滑；≤1000隐藏选单无切单替代；768日期串列；展开行收起不能重开；库存页签无行为、统计为静态。不能把无脚本错误或整页无横向溢出当成布局通过。
+
+建议只借桌面下划线页签、主次动作与名称层级，保留V1按需选单／全宽验收及手机同DOM重排。参考大白面板仍有约570px空白，11px表头／标签与28px手机动作不符合现行范围。厂家／位置收起须有常驻摘要，不按原型混入新的申报业务状态。原始参考与正式UI不改，下一版HTML仍待确认；本轮未改变下方0.14.6打包、NAS或真实业务状态。
+
+本轮普通verify退出0：PASS3.4s，JS3.3s／UI0.1s；文档diff检查退出0，仅行尾提示。未设专用测试库，不跑完整测试；项目静态通过不抵销参考页已复现的问题。
+
+## 当前状态：0.14.7 远端打包（2026-10-30）
+
+0.14.6 的远端运行同样失败（run 41003973808）：打包步骤 **1 秒**内退出、`npm test` 114 秒失败。关键线索有两处：步骤级 `data-conclusion`／`data-started-at` 显示打包步骤只用了 1 秒（不是构建慢，是启动即崩）；GitHub 的 ubuntu-24.04 runner 镜像文档确认自带 PowerShell **7.6.9**（不是命令缺失）。因此判定为脚本在 PS7／Linux 上启动抛错，头号嫌疑是 `Add-Type -AssemblyName System.IO.Compression.FileSystem`——5.1 的写法，PS7 已内置该类型。0.14.7 改为先探测 `System.IO.Compression.ZipFile` 类型再决定是否 `Add-Type`，两份脚本均通过 PowerShell 解析器检查（0 语法错误）。
 
 用户确认「A，需包含本次优化」后按 A 推进，随后批准改用远端打包。0.14.5（本机源码候选，未发布）因首次远端构建失败被 0.14.6 取代：run 40998007945 两个 job 同时失败，`package` 卡在「Build frozen source package and both image archives」、`publish` 卡在「Run npm test」，同源于 `scripts/package.ps1` 的 `'config\label-templates'` 与 `'config\.env.example'`——反斜杠在 POSIX 上是普通文件名字符，`Get-ChildItem -LiteralPath` 找不到即抛错，脚本以 1 退出。已改为 `Join-Path` 分段拼接（提交 `90a09c5`），Windows 行为不变。
 
