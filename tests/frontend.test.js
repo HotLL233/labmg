@@ -663,7 +663,7 @@ test('asset detail caller rejects stale responses after either attachment reques
   assert.doesNotMatch(app.$('#detail-body').textContent,/生命周期记录/);
 });
 
-test('attachment uploads guard the active record and clear only the successfully uploaded file input', async () => {
+test('attachment uploads guard the active record, clear confirmed files and retain uncertain uploads without repeating writes', async () => {
   const app=await browser();await app.run("go('templates')");
   const record=app.records.find(row=>row.module==='templates');record.data.fields=['待填写'];await app.run('load()');
   await app.run('show('+record.id+')');
@@ -690,14 +690,19 @@ test('attachment uploads guard the active record and clear only the successfully
   assert.match(app.$('#toast').textContent,/读取文件失败/);
   assert.equal(app.$('#file-error').hidden,false);
   assert.match(app.$('#file-error').textContent,/读取文件失败/);
-  const originalFetch=app.context.fetch;let lost=true;
-  app.context.fetch=(route,options)=>{if(route==='/api/files'&&options?.method==='POST'&&lost)throw Error('合成连接中断');return originalFetch(route,options);};
+  assert.equal(input.disabled,false,'a local file-read failure still permits selecting the file again');
+  const originalFetch=app.context.fetch;let lost=true,uploads=0;
+  app.context.fetch=(route,options)=>{if(route==='/api/files'&&options?.method==='POST'){uploads++;if(lost)throw Error('合成连接中断');}return originalFetch(route,options);};
   input.onchange({target:input});await reader.onload();
   assert.equal(input.value,'synthetic.txt');assert.equal(app.$('#file-error').hidden,false);
-  assert.match(app.$('#file-error').textContent,/上传失败.*合成连接中断/);
-  lost=false;input.onchange({target:input});await reader.onload();
-  assert.equal(input.value,'');assert.equal(app.$('#file-error').hidden,true);
-  assert.equal(app.run('Workspace.close(detail)'),false, 'retry also preserves unrelated template inputs');
+  assert.match(app.$('#file-error').textContent,/上传结果待确认.*文件可能已保存.*勿再次上传/);
+  assert.equal(app.context.detail.dataset.wsUncertain,'true');
+  assert.equal(input.disabled,true);
+  lost=false;input.onchange({target:input});
+  assert.equal(uploads,1,'restoring the connection must not repeat a non-idempotent attachment POST');
+  assert.equal(input.value,'synthetic.txt');
+  assert.equal(app.run('Workspace.close(detail)'),false, 'an uncertain upload keeps the workspace and other template inputs');
+  assert.equal(app.$('[name=tpl_待填写]').value,'尚未打印的填写内容');
 });
 
 test('materials uses its authenticated workflow API and blocks the generic record editor for every logged-in role', async () => {
@@ -2050,6 +2055,117 @@ test('inventory has seven labeled columns and moves global totals and legacy act
   const batchLookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/batches').at(-1);
   assert.equal(batchLookup.url.searchParams.has('detail'), false); assert.equal(batchLookup.url.searchParams.has('manufacturer'), false);
   assert.equal(batchLookup.url.searchParams.get('catalogId'), '5'); assert.equal(batchLookup.url.searchParams.get('regionId'), '2');
+});
+
+test('material module tools and page actions stay visibly distinct without losing permitted entries', async () => {
+  const { app, click } = await materialApp();
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  const moduleTools = app.$('.mw-module-tools'), pageTools = app.$('.mw-page-tools');
+  assert.equal(moduleTools.querySelector('summary').getAttribute('aria-label'), '物资工具');
+  assert.equal(moduleTools.querySelector('.mw-tool-label').textContent, '物资工具');
+  assert.equal(pageTools.querySelector('summary').getAttribute('aria-label'), '本页操作');
+  assert.equal(pageTools.querySelector('.mw-tool-label').textContent, '本页操作');
+  for (const action of ['scan-receive', 'scan-issue', 'help']) assert.ok(moduleTools.querySelector('[data-mw=' + action + ']'));
+  assert.ok(moduleTools.querySelector('[data-page=issues]'));
+  assert.ok(pageTools.querySelector('[data-mw=export]'));
+  assert.ok(pageTools.querySelector('[data-mw=adjustment]'));
+  await click('[data-page=catalog]');
+  assert.equal(app.$('.mw-page-tools summary').getAttribute('aria-label'), '物资库操作');
+  assert.ok(app.$('.mw-page-tools [data-mw=catalog-import]'));
+  const ordinary = await materialApp(false);
+  assert.equal(ordinary.app.$('.mw-module-tools [data-mw=scan-receive]'), null);
+  assert.ok(ordinary.app.$('.mw-module-tools [data-mw=scan-issue]'));
+  assert.ok(ordinary.app.$('.mw-module-tools [data-mw=help]'));
+});
+
+test('long stock notes and issue purposes expose escaped full text and a separate print value', async () => {
+  const { app, row, click } = await materialApp();
+  const full = '<img src=x onerror=alert(1)> 合成长备注 '.repeat(8);
+  row.note = full;
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  const note = app.$('.stock-note');
+  assert.equal(note.querySelector('summary').getAttribute('aria-label'), '完整备注');
+  assert.equal(note.querySelector('.mw-text-full').textContent, full);
+  assert.equal(note.querySelector('.mw-text-print').textContent, full);
+  assert.equal(note.querySelector('img'), null);
+  assert.equal(note.getAttribute('data-label'), '备注');
+  assert.equal(note.parentNode.children.length, 7);
+  app.state.materialLists['/issues'] = [
+    { id: 91, no: 'LY-91', snapshot: row, creatorName: '合成申请人', qtyM: 1000, purpose: full, status: 'pending' },
+    { id: 92, no: 'LY-92', snapshot: row, creatorName: '合成申请人', qtyM: 1000, purpose: '短用途', status: 'pending' }
+  ];
+  await click({ dataset: { mw: 'page', page: 'issues' } });
+  const rows = app.$('.mw-issue-table tbody').children;
+  assert.equal(rows[0].children[4].querySelector('summary').getAttribute('aria-label'), '完整用途');
+  assert.equal(rows[0].children[4].querySelector('.mw-text-full').textContent, full);
+  assert.equal(rows[0].children[4].querySelector('.mw-text-print').textContent, full);
+  assert.equal(rows[0].querySelector('img'), null);
+  assert.equal(rows[1].children[4].textContent, '短用途');
+  assert.equal(rows[1].children[4].querySelector('details'), null);
+});
+
+test('stock peer tabs preserve identity and range without accumulating return levels, while unit records still return to batches', async () => {
+  const { app, row, click, fill, submit } = await materialApp();
+  Object.assign(row, { batch: '批次甲', expiryDate: '2027-01-31', trackingMode: 'unit', totalQtyM: 19000 });
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  app.$('#mw-filters [name=q]').value = '保留查询';
+  await app.$('#mw-filters').listeners.submit({ target: app.$('#mw-filters'), preventDefault() {} });
+  await click('[data-mw=stock-detail]');
+  assert.match(app.$('.mw-stock-context').textContent, /合成物资.*MAT-5.*默认仓库.*合成区域.*批次甲/);
+  assert.equal(app.$('.mw-detail-tabs [aria-current=page]').dataset.mw, 'stock-summary');
+  await click(app.$('#mw-view [data-mw=batches]'));
+  assert.equal(app.$('.mw-detail-tabs [aria-current=page]').dataset.mw, 'batches');
+  assert.match(app.$('.mw-stock-context').textContent, /全部批次/);
+  await click('[data-mw=batch-units]');
+  assert.equal(app.$('#mw-view-title').textContent, '独立单件二维码');
+  await click('[data-mw=close-view]');
+  assert.equal(app.$('#mw-view-title').textContent, '库存批次余额');
+  assert.equal(app.$('.mw-detail-tabs [aria-current=page]').dataset.mw, 'batches');
+  app.state.materialResponse = ({ url, method, body }) => {
+    if (url.pathname === '/api/materials/stock/location' && method === 'PUT') {
+      row.location = body.location;
+      return { body: { location: body.location, locationVersion: 2 } };
+    }
+  };
+  await click('[data-mw=location]');
+  fill({ location: '核对后位置', reason: '合成位置核对' }); await submit();
+  assert.equal(app.$('#mw-dialog').open, false);
+  assert.equal(app.$('.mw-detail-tabs [aria-current=page]').dataset.mw, 'batches');
+  assert.match(app.$('.mw-stock-context').textContent, /MAT-5.*全部批次/);
+  await click(app.$('#mw-view [data-mw=movements]'));
+  const lookup = app.requests.filter(entry => entry.url.pathname === '/api/materials/stock/movements').at(-1).url;
+  assert.equal(lookup.searchParams.get('catalogId'), '5');
+  assert.equal(lookup.searchParams.get('regionId'), '2');
+  assert.equal(lookup.searchParams.get('warehouse'), 'MAIN');
+  assert.equal(lookup.searchParams.get('batch'), '批次甲');
+  assert.equal(lookup.searchParams.get('expiryDate'), '2027-01-31');
+  assert.match(app.$('.mw-stock-context').textContent, /MAT-5.*批次甲.*2027-01-31/);
+  await click('[data-mw=stock-summary]');
+  assert.match(app.$('#mw-view-body').textContent, /该物资合计（全部仓库／区域）19 件/);
+  assert.match(app.$('#mw-view-body').textContent, /存放位置核对后位置/);
+  await click('[data-mw=close-view]');
+  assert.equal(app.$('#mw-view').open, false);
+  assert.equal(app.$('#mw-filters [name=q]').value, '保留查询');
+});
+
+test('a slow stock peer lookup cannot replace a newer tab or reopen a closed detail workspace', async () => {
+  const { app, click } = await materialApp();
+  await click({ dataset: { mw: 'page', page: 'inventory' } });
+  await click('[data-mw=stock-detail]');
+  let release;
+  app.state.materialResponse = ({ url }) => {
+    if (url.pathname === '/api/materials/stock/movements') return new Promise(resolve => { release = () => resolve({ body: { items: [], total: 0, page: 1, pageSize: 50 } }); });
+  };
+  const pending = click(app.$('#mw-view [data-mw=movements]'));
+  await new Promise(setImmediate);
+  await click('[data-mw=stock-summary]');
+  release(); await pending;
+  assert.match(app.$('#mw-view-title').textContent, /库存详情/);
+  const closing = click(app.$('#mw-view [data-mw=movements]'));
+  await new Promise(setImmediate);
+  await click('[data-mw=close-view]');
+  release(); await closing;
+  assert.equal(app.$('#mw-view').open, false);
 });
 
 test('adjustments and opening drafts send manufacturer and batch notes through their existing versioned writes', async () => {

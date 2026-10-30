@@ -19,11 +19,19 @@
   }
   let frame,blockedPage;
   const query=(root,selector)=>Array.from((root||document).querySelectorAll(selector));
+  const statusTones=new Map(Object.entries({
+    neutral:['草稿','未开始','未启用','停用','已停用','待完善','未设置','draft','inactive','disabled'],
+    progress:['待验收','待审批','审批中','已提交','待处理','进行中','待发放','pending','submitted'],
+    done:['已完成','完成','已验收','已入库','已发放','合格','有效','正常','启用中','已结算','done','completed','active'],
+    warn:['部分验收','资料待补','待补资料','部分结算','临期','即将到期','结果待确认','限制使用','预警'],
+    danger:['不合格','已驳回','驳回','隔离','过期','报废','已作废','已取消','failed','cancelled']
+  }).flatMap(([tone,values])=>values.map(value=>[value,tone])));
   const fields=dialog=>query(dialog,'input,select,textarea').filter(node=>node.name||node.id);
   const snapshot=dialog=>JSON.stringify(fields(dialog).map(node=>[node.name||node.id,node.type==='checkbox'||node.type==='radio'?node.checked:node.value]));
   const dirty=dialog=>clean.has(dialog)&&clean.get(dialog)!==snapshot(dialog);
   const markClean=dialog=>clean.set(dialog,snapshot(dialog));
   function allowed(dialog){
+    if(dialog.dataset.wsUncertain==='true'){if(typeof toast==='function')toast('本次提交结果待确认，请保留输入并核对记录，勿重复保存。');return false;}
     if(dialog.dataset.wsBusy==='true'){if(typeof toast==='function')toast('正在保存，请等待本次操作完成。');return false;}
     return !dirty(dialog)||window.confirm('当前输入尚未保存，确定放弃并返回吗？');
   }
@@ -101,6 +109,7 @@
     });
   }
   function enhance(root=document){
+    query(root,'.pill').forEach(node=>{node.dataset.tone=statusTones.get(node.textContent.trim().toLowerCase())||'neutral';});
     query(root,'.table').forEach(container=>{
       if(container.dataset.wsSkip==='true'||container.nextElementSibling?.classList.contains('mw-pagebar')||tables.has(container)||!container.getBoundingClientRect)return;
       const table=container.querySelector('table'),body=table?.querySelector('tbody');
@@ -130,7 +139,7 @@
     event.preventDefault();top.dispatchEvent(new Event('cancel',{cancelable:true}));
   });
   window.addEventListener('beforeunload',event=>{
-    if(window.MaterialWorkflow?.hasPending?.()||query(document,'dialog').some(dialog=>dialog.open&&dialog.classList.contains('ws-dialog')&&(dirty(dialog)||dialog.dataset.wsBusy==='true'))){event.preventDefault();event.returnValue='';}
+    if(window.MaterialWorkflow?.hasPending?.()||query(document,'dialog').some(dialog=>dialog.open&&dialog.classList.contains('ws-dialog')&&(dirty(dialog)||dialog.dataset.wsBusy==='true'||dialog.dataset.wsUncertain==='true'))){event.preventDefault();event.returnValue='';}
   });
   window.Workspace={enhance,fit,guardLeave,show,close,markClean,icon};
 })();

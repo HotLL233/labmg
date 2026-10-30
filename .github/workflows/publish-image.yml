@@ -9,6 +9,22 @@ on:
         description: Existing version tag to publish
         required: true
         type: string
+      validation_only:
+        description: Validate an existing private draft without building or publishing it
+        type: boolean
+        default: false
+      frozen_commit:
+        description: Frozen business source commit matching the tag
+        type: string
+      draft_release_id:
+        description: Private draft containing the seven frozen source and deployment assets
+        type: string
+      index_digest:
+        description: Official multi-platform index digest from the successful build log
+        type: string
+      build_run_id:
+        description: Successful source build run that created the image and draft
+        type: string
 
 permissions:
   contents: read
@@ -24,7 +40,7 @@ env:
 
 jobs:
   publish:
-    if: github.repository == 'HotLL233/labmg'
+    if: github.repository == 'HotLL233/labmg' && !inputs.validation_only
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -106,6 +122,7 @@ jobs:
           node <<'NODE'
           const assert = require('node:assert/strict');
           const fs = require('node:fs');
+          const crypto = require('node:crypto');
           (async () => {
             const { IMAGE, SOURCE, VERSION, REVISION, GITHUB_ACTOR, GH_TOKEN } = process.env;
             const repository = IMAGE.slice('ghcr.io/'.length);
@@ -125,7 +142,10 @@ jobs:
               return;
             }
             assert.ok(response.ok, `Registry lookup failed: ${response.status}`);
-            const index = await response.json();
+            const indexBytes = Buffer.from(await response.arrayBuffer());
+            const indexDigest = `sha256:${crypto.createHash('sha256').update(indexBytes).digest('hex')}`;
+            assert.equal(response.headers.get('docker-content-digest'), indexDigest);
+            const index = JSON.parse(indexBytes);
             for (const architecture of ['amd64', 'arm64']) {
               const descriptor = index.manifests?.find(item => item.platform?.os === 'linux' && item.platform.architecture === architecture);
               assert.ok(descriptor, `Existing version lacks linux/${architecture}; use a new version`);
@@ -141,12 +161,13 @@ jobs:
               assert.equal(config.config.Labels['org.opencontainers.image.revision'], REVISION, 'Existing tag points to different source; use a new version');
               assert.equal(config.config.Labels['org.opencontainers.image.source'], SOURCE);
             }
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'exists=true\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `exists=true\nindex_digest=${indexDigest}\n`);
             console.log(`Reused verified ${IMAGE}:${VERSION}`);
           })().catch(error => { console.error(error.message); process.exitCode = 1; });
           NODE
 
       - name: Build and push both architectures
+        id: build
         if: steps.existing.outputs.exists == 'false'
         uses: docker/build-push-action@v6
         with:
@@ -159,8 +180,22 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             VCS_REF=${{ steps.version.outputs.commit }}
 
+      - name: Record official image index
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REVISION: ${{ steps.version.outputs.commit }}
+          INDEX_DIGEST: ${{ steps.build.outputs.digest || steps.existing.outputs.index_digest }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { VERSION, REVISION, INDEX_DIGEST } = process.env;
+          assert.match(INDEX_DIGEST, /^sha256:[a-f0-9]{64}$/);
+          console.log(`LABOS_PUBLISHED_INDEX version=${VERSION} commit=${REVISION} digest=${INDEX_DIGEST}`);
+          NODE
+
   package:
-    if: github.repository == 'HotLL233/labmg'
+    needs: publish
+    if: github.repository == 'HotLL233/labmg' && !inputs.validation_only
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -190,15 +225,24 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncommit=${commit}\n`);
           NODE
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build frozen source package and both image archives
+      - name: Build frozen source package and deployment inputs
         run: |
           set -o pipefail
           { command -v pwsh || echo 'pwsh NOT FOUND on PATH'; } 2>&1 | tee "$RUNNER_TEMP/package.log"
           pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>&1 | tee -a "$RUNNER_TEMP/package.log"
-          pwsh -NoProfile -File ./scripts/package-docker.ps1 2>&1 | tee -a "$RUNNER_TEMP/package.log"
+          pwsh -NoProfile -File ./scripts/package.ps1 2>&1 | tee -a "$RUNNER_TEMP/package.log"
+          node <<'NODE'
+          const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto'), assert = require('node:assert/strict');
+          const { version } = require('./package.json'), release = `artifacts/releases/${version}`;
+          const manifest = JSON.parse(fs.readFileSync(`${release}/manifest.json`, 'utf8').replace(/^\uFEFF/, ''));
+          for (const [source, name] of [['deploy/docker-compose.yml','docker-compose.yml'],['deploy/docker-compose.local.yml','docker-compose.local.yml'],['docs/SYNOLOGY.md','SYNOLOGY.md'],['docs/SCANNING_HTTPS.md','SCANNING_HTTPS.md'],['docs/LABEL_PRINTING.md','LABEL_PRINTING.md']]) {
+            const expected = manifest.sources.find(item => item.path === source), bytes = fs.readFileSync(source);
+            assert.ok(expected); assert.equal(bytes.length, expected.size);
+            assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), expected.sha256);
+            fs.copyFileSync(source, path.join(release, name), fs.constants.COPYFILE_EXCL);
+          }
+          assert.equal(fs.readdirSync(release).length, 7);
+          NODE
 
       - name: Report packaging failure
         if: failure()
@@ -209,24 +253,192 @@ jobs:
             echo '::error::package.log is empty'
           fi
 
-      - name: Write checksums
-        run: |
-          cd "artifacts/releases/${{ steps.version.outputs.version }}"
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Publish prerelease with packaged assets
+      - name: Create draft prerelease with packaged assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
+          REVISION: ${{ steps.version.outputs.commit }}
         run: |
           set -euo pipefail
           ASSETS="artifacts/releases/$VERSION"
           ls -l "$ASSETS"
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$ASSETS"/* --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$RELEASE_TAG" "$ASSETS"/* --repo "$GITHUB_REPOSITORY" \
-              --prerelease --latest=false --generate-notes
-          fi
+          node <<'NODE'
+          (async () => {
+            const { GITHUB_REPOSITORY, RELEASE_TAG, GH_TOKEN } = process.env;
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`, {
+              headers: { Authorization: `Bearer ${GH_TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'labmg-release-publisher' }
+            });
+            if (response.status === 404) return;
+            if (!response.ok) throw new Error(`Release lookup failed: ${response.status}`);
+            throw new Error('Release already exists; preserve its assets and use a new version.');
+          })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          NODE
+          gh release create "$RELEASE_TAG" "$ASSETS"/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --target "$REVISION" --draft --prerelease --latest=false --generate-notes
+
+  verify_deployment:
+    if: github.repository == 'HotLL233/labmg' && github.event_name == 'workflow_dispatch' && inputs.validation_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: read
+      actions: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: project
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      FROZEN_COMMIT: ${{ inputs.frozen_commit }}
+      DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+      INDEX_DIGEST: ${{ inputs.index_digest }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out validation helpers
+        uses: actions/checkout@v4
+        with:
+          path: ops
+          persist-credentials: false
+
+      - name: Check out frozen business tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: project
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: project/package-lock.json
+
+      - name: Prepare authenticated frozen draft inputs
+        run: node ../ops/.github/release-validation/prepare-validation.cjs
+
+      - name: Install frozen dependencies
+        run: npm ci --omit=dev --ignore-scripts --no-audit
+
+      - name: Verify frozen HTTPS discovery and runtime initializer logic
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node --test --test-reporter=tap tests/https-config.test.js tests/runtime-init.test.js 2>&1 | tee "artifacts/cache/$VERSION/https-config-runtime-tests.log"
+
+      - name: Set up Docker with multi-platform image storage
+        uses: docker/setup-docker-action@v4
+        with:
+          version: latest
+          set-host: true
+          daemon-config: |
+            {"features":{"containerd-snapshotter":true}}
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-compose-action@v1
+        with:
+          version: v5.5.1
+
+      - name: Record isolated runner capabilities
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          docker version > "artifacts/cache/$VERSION/runner-docker-version.log"
+          docker info > "artifacts/cache/$VERSION/runner-docker-info.log"
+          node <<'NODE'
+          const fs = require('node:fs'), assert = require('node:assert/strict'), {execFileSync} = require('node:child_process');
+          const {version} = require('./package.json'), run = (program, args) => execFileSync(program, args, {encoding:'utf8'}).trim();
+          assert.match(process.env.DOCKER_HOST || '', /^unix:\/\//);
+          const apis = {};
+          for (const side of ['Client','Server']) {
+            const value = run('docker',['version','--format','{{.'+side+'.APIVersion}}']), parts = value.split('.').map(Number);
+            assert.ok(parts[0] > 1 || parts[0] === 1 && parts[1] >= 49, 'Docker API 1.49+ required'); apis[side.toLowerCase()] = value;
+          }
+          const driverStatus = JSON.parse(run('docker',['info','--format','{{json .DriverStatus}}']));
+          assert.ok(driverStatus.some(row => row.includes('io.containerd.snapshotter.v1')));
+          const composeVersion = run('docker',['compose','version','--short']); assert.equal(composeVersion.replace(/^v/,''),'5.5.1');
+          const powershellMajor = run('pwsh',['-NoProfile','-NonInteractive','-Command','$PSVersionTable.PSVersion.Major']); assert.equal(powershellMajor,'7');
+          fs.writeFileSync(`artifacts/cache/${version}/runner-environment.json`, JSON.stringify({provider:'GitHub Actions',runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,runnerOs:process.env.RUNNER_OS,runnerArch:process.env.RUNNER_ARCH,node:process.version,platform:process.platform,architecture:process.arch,dockerHost:process.env.DOCKER_HOST,dockerApi:apis,driverStatus,composeVersion,powershellMajor,arm64:'QEMU emulation',physicalNas:false,productionData:false},null,2)+'\n');
+          NODE
+
+      - name: Verify deployment files against frozen source ZIP
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/export-ghcr-offline.cjs" --prepare-deployment-only 2>&1 | tee "artifacts/cache/$VERSION/prepare-deployment.log"
+
+      - name: Gate 1 - anonymous official image and Compose lifecycle
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/verify-ghcr-anonymous.cjs" --execute-after-public-confirmed --index-digest="$INDEX_DIGEST" 2>&1 | tee "artifacts/cache/$VERSION/remote-anonymous.log"
+
+      - name: Gate 2 - captured fresh PostgreSQL persistence evidence
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/verify-postgresql.cjs" --verify-captured-compose-evidence 2>&1 | tee "artifacts/cache/$VERSION/remote-postgresql.log"
+
+      - name: Record separate anonymous HTTP evidence
+        run: node ../ops/.github/release-validation/capture-http-evidence.cjs
+
+      - name: Gate 3 - official offline TAR export and both container tests
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/export-ghcr-offline.cjs" --validate 2>&1 | tee "artifacts/cache/$VERSION/remote-offline.log"
+
+      - name: Gate 4 - real Caddy adapter and trusted HTTPS lifecycle
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/verify-https.cjs" --execute-after-image-gates 2>&1 | tee "artifacts/cache/$VERSION/remote-https.log"
+
+      - name: Verify full runtime backup and empty PostgreSQL restore
+        run: |
+          set -o pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/verify-runtime-backup.cjs" --execute-after-image-gates 2>&1 | tee "artifacts/cache/$VERSION/runtime-backup-restore.log"
+
+      - name: Upload only verified missing assets and retain the draft
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node "artifacts/cache/$VERSION/remote-validation/upload-draft-assets.cjs" --execute-after-gates
+
+      - name: Upload verified twelve assets and gate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-${{ inputs.tag }}-release-validation
+          path: |
+            project/artifacts/releases/
+            project/artifacts/cache/*/ghcr-anonymous-verification.json
+            project/artifacts/cache/*/ghcr-offline-export.json
+            project/artifacts/cache/*/postgresql-verification.json
+            project/artifacts/cache/*/http-anonymous-verification.json
+            project/artifacts/cache/*/https-verification.json
+            project/artifacts/cache/*/runtime-backup-verification.json
+            project/artifacts/cache/*/runner-environment.json
+            project/artifacts/cache/*/official-inputs.json
+            project/artifacts/cache/*/published-index.json
+            project/artifacts/cache/*/validation-inputs.json
+            project/artifacts/cache/*/draft-upload-report.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostic reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: labos-${{ inputs.tag }}-validation-reports
+          path: |
+            project/artifacts/cache/*/*.json
+            project/artifacts/cache/*/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -2,12 +2,18 @@ const M={dashboard:['工作台','▦','实验室数据总览'],archives:['资料
 const C={archives:{cat:'资料类别',extra:[['version','版本号'],['keywords','关键词']]},templates:{cat:'模板类别',extra:[['section','模板分区','select',[['equipment_use','设备使用记录'],['sample_receipt','样品接收记录'],['reagent_inout','试剂出入库'],['calibration','检定校准'],['maintenance','维护保养']]],['fields','表单字段（逗号分隔）']]},finance:{cat:'费用科目',extra:[['direction','收支方向','select',['收入','支出','预算']],['account','经费账户']]},assets:{cat:'资产类别',extra:[['model','规格型号'],['location','存放地点']]},materials:{cat:'物资类别',extra:[['unit','计量单位'],['warning','预警库存','number'],['location','存放位置'],['batch','批号']]},quality:{cat:'文件类别',extra:[['quality_section','体系文件板块','select',['质量手册','程序文件','作业指导书','表单','法定标准']],['version','版本号'],['is_current','当前显示版本','select',['是','否']],['approver','批准人']]},contracts:{cat:'档案类别',extra:[['client_name','委托单位名称'],['contract_no','合同编号'],['contract_type','合同类型','select',['委托检测合同','技术服务合同','采购合同','框架合同','其他']],['project_name','关联项目'],['contract_amount','合同金额（元）','number'],['start_date','合同开始日期','date'],['end_date','合同结束日期','date'],['settlement_status','结算状态','select',['未结算','部分结算','已结算']]]},people:{cat:'岗位/人员类别',extra:[['section','人员分区','select',[['profile','人员档案'],['training','培训记录'],['authorization','能力授权'],['certificate','证书资质'],['evaluation','能力评价']]],['skills','授权能力'],['certificate','证书/资质'],['training','培训记录']]}};
 let current='dashboard',items=[],editing=null,selected=null,navConfig=[],currentUser=null,loadSequence=0,detailSequence=0,appVersion='';
 const $=s=>document.querySelector(s),esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const call=async(u,o={})=>{const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o});const d=await r.json();if(!r.ok)throw Object.assign(Error(d.error||'请求失败'),{status:r.status});return d};
+const call=async(u,o={})=>{
+  let r,d;
+  try{r=await fetch(u,{headers:{'Content-Type':'application/json'},...o});d=await r.json();}
+  catch(error){if(!['GET','HEAD'].includes((o.method||'GET').toUpperCase()))error.uncertain=true;throw error;}
+  if(!r.ok)throw Object.assign(Error(d.error||'请求失败'),{status:r.status,code:d.code,uncertain:d.uncertain===true});
+  return d;
+};
 const toast=x=>{const t=$('#toast');t.textContent=x;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)};
 const menuDef=m=>{const n=navConfig.find(x=>x.target===m&&x.visible!==0);return n?[n.label,n.icon,n.description]:M[m]||[m,'□','']};
 const can=permission=>Boolean(currentUser?.permissions?.includes('*')||currentUser?.permissions?.includes(permission));
 function canOpen(module){if(module==='materials')return Boolean(currentUser);if(module==='management'||module==='permissions')return can('permissions.read');if(module==='datahub')return ['export.read','backup.read','backup.restore'].some(can);return can(module+'.read')}
-function applyPermissions(){document.querySelectorAll('[data-permission]').forEach(x=>x.hidden=!can(x.dataset.permission));$('#add').style.display=current!=='materials'&&C[current]&&can(current+'.write')&&!document.querySelector('#page [data-ws-primary]')?'':'none';for(const id of ['global-from','global-to']){const node=$('#'+id);if(node)node.style.display=current==='materials'||!C[current]?'none':''}}
+function applyPermissions(){document.querySelectorAll('[data-permission]').forEach(x=>x.hidden=!can(x.dataset.permission));$('#add').style.display=current!=='materials'&&C[current]&&can(current+'.write')&&!document.querySelector('#page [data-ws-primary]')?'':'none';const dates=$('#global-date-range');if(dates)dates.hidden=current==='materials'||!C[current];for(const id of ['global-from','global-to']){const node=$('#'+id);if(node)node.style.display=current==='materials'||!C[current]?'none':''}}
 // 同一张表在手机上转为卡片，字段名统一取自表头。
 function labelTable(root){
   (root||document).querySelectorAll('table').forEach(table=>{
@@ -94,8 +100,18 @@ async function load(){
     if(request===loadSequence&&current===module)applyPermissions();
   }catch(error){if(request===loadSequence&&current===module){$('#page').innerHTML=`<div class="empty">${esc(error.message)}</div>`;toast(error.message)}}
 }
-function renderRecords(){$('#page').innerHTML=`<div class="toolbar"><span>共 ${items.length} 条记录</span><button class="ghost" id="csv" data-permission="export.read">导出 CSV</button></div><div class="table"><table><thead><tr><th>名称 / 编号</th><th>类别</th><th>状态</th><th>负责人</th>${current==='finance'?'<th>金额</th>':''}${['assets','materials'].includes(current)?'<th>数量/原值</th>':''}<th>日期</th><th>操作</th></tr></thead><tbody>${items.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${esc(r.code||'未设置编号')}</small></td><td>${esc(r.category||'-')}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.owner||'-')}</td>${current==='finance'?`<td>¥${Number(r.amount).toLocaleString()}</td>`:''}${['assets','materials'].includes(current)?`<td>${current==='assets'?'¥'+Number(r.amount).toLocaleString():r.quantity}</td>`:''}<td>${esc(r.due_date||r.updated_at.slice(0,10))}</td><td class="ops"><button onclick="show(${r.id})">查看</button><button data-permission="${current}.write" onclick="openEditor(${r.id})">编辑</button><button class="danger" data-permission="${current}.delete" onclick="del(${r.id})">删除</button></td></tr>`).join('')}</tbody></table>${items.length?'':'<div class="empty">暂无数据，点击右上角新建记录。</div>'}</div>`;labelTable($('#page'));$('#csv').onclick=csv}
+function recordEmptyState(){
+  const filtered=['#search','#global-from','#global-to'].some(selector=>Boolean($(selector)?.value));
+  return `<div class="empty record-empty" role="status"><p>${filtered?'没有符合条件的记录':'暂无可查看记录'}</p>${filtered?'<button type="button" class="ghost" id="record-empty-clear">清除筛选</button>':can(current+'.write')?'<button type="button" class="primary" id="record-empty-add">新建记录</button>':''}</div>`;
+}
+function bindRecordEmpty(){
+  const clear=$('#record-empty-clear'),add=$('#record-empty-add');
+  if(clear)clear.onclick=async()=>{clearTimeout(window.st);['#search','#global-from','#global-to'].forEach(selector=>{const input=$(selector);if(input)input.value='';});await load();};
+  if(add)add.onclick=()=>openEditor();
+}
+function renderRecords(){$('#page').innerHTML=`<div class="toolbar"><span>共 ${items.length} 条记录</span><button class="ghost" id="csv" data-permission="export.read">导出 CSV</button></div><div class="table"><table><thead><tr><th>名称 / 编号</th><th>类别</th><th>状态</th><th>负责人</th>${current==='finance'?'<th>金额</th>':''}${['assets','materials'].includes(current)?'<th>数量/原值</th>':''}<th>日期</th><th>操作</th></tr></thead><tbody>${items.map(r=>`<tr><td><strong>${esc(r.title)}</strong><small>${esc(r.code||'未设置编号')}</small></td><td>${esc(r.category||'-')}</td><td><span class="pill">${esc(r.status)}</span></td><td>${esc(r.owner||'-')}</td>${current==='finance'?`<td>¥${Number(r.amount).toLocaleString()}</td>`:''}${['assets','materials'].includes(current)?`<td>${current==='assets'?'¥'+Number(r.amount).toLocaleString():r.quantity}</td>`:''}<td>${esc(r.due_date||r.updated_at.slice(0,10))}</td><td class="ops"><button onclick="show(${r.id})">查看</button><button data-permission="${current}.write" onclick="openEditor(${r.id})">编辑</button><button class="danger" data-permission="${current}.delete" onclick="del(${r.id})">删除</button></td></tr>`).join('')}</tbody></table>${items.length?'':recordEmptyState()}</div>`;labelTable($('#page'));$('#csv').onclick=csv;bindRecordEmpty()}
 window.openEditor=id=>{
+  if(editor.dataset.wsUncertain==='true')return toast('本次提交结果待确认，请保留当前输入并核对记录，勿重复保存。');
   if(current==='materials')return toast('旧物资台账仅供查询，请在物资申报中录入');
   if(!C[current]||!can(current+'.write'))return toast('没有新增或编辑权限');
   editing=id?items.find(x=>x.id===id):null;
@@ -122,11 +138,12 @@ $('#record-form').onsubmit=async e=>{
     await call(editing?`/api/records/${editing.id}`:'/api/records',{method:editing?'PUT':'POST',body:JSON.stringify(b)});
     window.Workspace.close(editor,{force:true});toast('保存成功');await load();
   }catch(error){
-    $('#record-error').textContent=error.status===409?'记录已被其他用户修改，当前输入已保留。请先复制需要保留的内容，再放弃输入并重新加载记录。':error.message;
+    if(error.uncertain){editor.dataset.wsUncertain='true';e.target.querySelectorAll('input,select,textarea').forEach(node=>{node.disabled=true;});}
+    $('#record-error').textContent=error.uncertain?'保存结果待确认，可能已保存。当前输入已保留，请联系管理员核对记录，勿再次新增或保存。':error.status===409?'记录已被其他用户修改，当前输入已保留。请先复制需要保留的内容，再放弃输入并重新加载记录。':error.message;
     $('#record-error').hidden=false;
-    $('#reload-record').hidden=error.status!==409;
+    $('#reload-record').hidden=error.uncertain||error.status!==409;
     toast(error.message);
-  }finally{save.disabled=false;delete editor.dataset.wsBusy}
+  }finally{save.disabled=editor.dataset.wsUncertain==='true';delete editor.dataset.wsBusy}
 };
 $('#reload-record').onclick=async()=>{
   const id=editing?.id;
@@ -139,17 +156,25 @@ function detailMatches(recordId,module,ticket){return detail.open&&current===mod
 async function files(recordId,module,ticket){const target=$('#files'),a=await call('/api/files?record_id='+recordId);if(!detailMatches(recordId,module,ticket)||target!==$('#files'))return;target.innerHTML=a.length?a.map(x=>`<div class="file-row"><span>${esc(x.original_name)} · ${(x.size/1024).toFixed(1)}KB</span><a href="/api/files/${x.id}/download">下载</a></div>`).join(''):'<p style="color:#718096;font-size:13px">暂无附件</p>'}
 $('#file').onchange=e=>{
   const input=e.target,f=input.files[0],recordId=selected?.id,module=current,ticket=detailSequence;
-  if(!f||!recordId||detail.dataset.wsBusy==='true')return;
+  if(!f||!recordId||detail.dataset.wsBusy==='true'||detail.dataset.wsUncertain==='true')return;
   $('#file-error').hidden=true;
   const report=message=>{const error=$('#file-error');error.textContent=message;error.hidden=false;error.focus();toast(message);};
   detail.dataset.wsBusy='true';
-  const reader=new FileReader(),finish=()=>{delete detail.dataset.wsBusy;};
+  input.disabled=true;
+  const reader=new FileReader(),finish=()=>{delete detail.dataset.wsBusy;input.disabled=detail.dataset.wsUncertain==='true';};
   reader.onload=async()=>{
     try{
       await call('/api/files',{method:'POST',body:JSON.stringify({record_id:recordId,name:f.name,type:f.type,content:reader.result})});
       if(input.files[0]===f)input.value='';
-      toast('上传成功');if(detailMatches(recordId,module,ticket))await files(recordId,module,ticket);
-    }catch(error){report('上传失败：'+error.message+' 请保留所选文件后重试。')}finally{finish()}
+      toast('上传成功');
+      if(detailMatches(recordId,module,ticket)){
+        try{await files(recordId,module,ticket);}
+        catch{report('文件已上传成功，附件列表刷新失败。请返回后重新查看，勿重复上传。');}
+      }
+    }catch(error){
+      if(error.uncertain){detail.dataset.wsUncertain='true';report('上传结果待确认，文件可能已保存。请保留所选文件并联系管理员核对，勿再次上传。');}
+      else report('上传失败：'+error.message+' 请保留所选文件后重试。');
+    }finally{finish()}
   };
   reader.onerror=()=>{report('读取文件失败，请重新选择。');finish();};
   try{reader.readAsDataURL(f)}catch(error){finish();report('读取文件失败：'+error.message)}

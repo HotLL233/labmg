@@ -313,15 +313,44 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), before);
     }
     const note = await noteRow.locator('td').nth(6).evaluate(cell => {
-      const text = cell.querySelector('.mw-cell-text'), style = text && getComputedStyle(text);
-      return { full: cell.title, text: text?.textContent, clamp: style?.webkitLineClamp, height: text?.getBoundingClientRect().height, lineHeight: Number.parseFloat(style?.lineHeight) };
+      const text = cell.querySelector('.mw-text-preview'), style = text && getComputedStyle(text);
+      return { preview: text?.textContent, full: cell.querySelector('.mw-text-full')?.textContent,
+        printed: cell.querySelector('.mw-text-print')?.textContent, clamp: style?.webkitLineClamp,
+        height: text?.getBoundingClientRect().height, lineHeight: Number.parseFloat(style?.lineHeight) };
     });
-    check(note.full === stockNote && note.text === stockNote && note.clamp === 'none',
-      label + ': inventory retains the complete readable note without a forced two-line crop', note);
+    check(note.preview === stockNote && note.full === stockNote && note.printed === stockNote && note.clamp === '3' && note.height <= note.lineHeight * 3 + 1,
+      label + ': the note has a compact preview and preserves the full screen and print text', note);
+    const noteToggle = noteRow.locator('.mw-text-details summary');
+    await noteToggle.scrollIntoViewIfNeeded();
+    await noteToggle.click();
+    check(await noteRow.locator('.mw-text-details').evaluate(node => node.open) && await noteRow.locator('.mw-text-full').isVisible(),
+      label + ': a real click opens the complete note');
+    await noteToggle.click();
+    check(!(await noteRow.locator('.mw-text-details').evaluate(node => node.open)), label + ': the full note can close and reopen');
+    if (page.viewportSize().width >= 768) {
+      const actions = await noteRow.locator('.stock-name').evaluate(cell => {
+        const tools = cell.querySelector('.mw-actions'), code = cell.querySelector('small');
+        return { position: getComputedStyle(tools).position, gap: tools.getBoundingClientRect().top - code.getBoundingClientRect().bottom };
+      });
+      check(actions.position === 'static' && actions.gap >= 0 && actions.gap <= 12,
+        label + ': row actions stay beside the name and code rather than sinking to the tall note row bottom', actions);
+    }
     if (label === '1366-stock') {
       await noteRow.locator('[data-mw="stock-detail"]').click();
       await page.locator('#mw-view').waitFor({ state: 'visible' });
       check((await page.locator('#mw-view-body').textContent()).includes(stockNote), label + ': inventory detail preserves the full long note');
+      const stockIdentity = () => page.locator('#mw-view .mw-stock-context').evaluate(node => ({
+        name: node.querySelector('strong').textContent, code: node.querySelector('small').textContent,
+      }));
+      const identity = await stockIdentity();
+      await page.locator('#mw-view .mw-detail-tabs [data-mw="batches"]').click();
+      await page.locator('#mw-view .mw-detail-tabs [data-mw="batches"].active').waitFor();
+      check(JSON.stringify(await stockIdentity()) === JSON.stringify(identity) && (await page.locator('#mw-view .mw-stock-context').textContent()).includes(region.name), label + ': local batch navigation retains the material identity and region');
+      await page.locator('#mw-view .mw-detail-tabs [data-mw="movements"]').click();
+      await page.locator('#mw-view .mw-detail-tabs [data-mw="movements"].active').waitFor();
+      check(JSON.stringify(await stockIdentity()) === JSON.stringify(identity) && (await page.locator('#mw-view .mw-stock-context').textContent()).includes(region.name), label + ': source movements retain the same material identity and region');
+      await page.locator('#mw-view .mw-detail-tabs [data-mw="stock-summary"]').click();
+      check(await page.locator('#mw-view .mw-detail-tabs [data-mw="stock-summary"]').getAttribute('aria-current') === 'page', label + ': summary returns as a local tab rather than an extra dialog level');
       await page.locator('#mw-view [data-mw="close-view"]').first().click();
       await page.locator('#mw-view').waitFor({ state: 'hidden' });
     }

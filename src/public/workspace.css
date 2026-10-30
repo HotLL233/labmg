@@ -122,3 +122,19 @@
   #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>input:not([type="checkbox"]),
   #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>select{min-height:44px;font-size:16px}
 }
+
+@media screen{
+  .ws-logout{border-color:var(--c-line);color:var(--c-text);font-weight:500}
+  .ws-logout:hover{border-color:var(--c-danger);color:var(--c-danger)}
+  .global-date-range{display:flex;align-items:flex-end;gap:8px;min-width:0;flex-wrap:wrap}
+  .global-date-range[hidden]{display:none}
+  .global-date-range label{display:grid;gap:4px;font-size:var(--fs-label);color:var(--c-text-2);min-width:0}
+  .global-date-range input{width:145px;min-width:0}
+  .global-date-separator{padding-bottom:8px;color:var(--c-text-2);font-size:var(--fs-label)}
+  dialog[data-ws-uncertain="true"] :is(#record-error,#file-error){color:var(--c-attention);background:var(--c-attention-bg);border-color:var(--c-attention)}
+}
+@media screen and (max-width:767px){
+  .global-date-range{flex-basis:100%}
+  .global-date-range label{flex:1;min-width:0}
+  .global-date-range input{width:100%;min-height:44px;font-size:16px}
+}

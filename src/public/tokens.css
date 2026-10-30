@@ -11,6 +11,8 @@
   --c-subtle:#fafbfd;
   --c-surface:#fff;
   --c-text-3:#8a98ab;
+  --c-attention:#815307;
+  --c-attention-bg:#fff3d9;
   --fs-micro:11px;
   --fs-page:22px;
   --fs-panel:18px;
@@ -81,4 +83,12 @@ td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw
   /* 勾选行高亮：确认当前选中的是哪几行 */
   .mw table tr:has(input[type=checkbox]:checked),
   .mw-dialog table tr:has(input[type=checkbox]:checked){background:var(--c-primary-50)}
+}
+@media screen{
+  .pill[data-tone="neutral"]{background:var(--c-subtle);color:var(--c-text-2)}
+  .pill[data-tone="progress"]{background:var(--c-primary-50);color:var(--c-primary-500)}
+  .pill[data-tone="done"]{background:var(--c-subtle);color:var(--c-success)}
+  .pill[data-tone="warn"]{background:var(--c-attention-bg);color:var(--c-attention)}
+  .pill[data-tone="danger"]{background:var(--c-subtle);color:var(--c-danger)}
+  summary:focus-visible{outline:2px solid var(--c-primary-500);outline-offset:2px;box-shadow:var(--ring)}
 }

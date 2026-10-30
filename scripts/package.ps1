@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
-# Windows PowerShell 5.1 需要显式加载该程序集；PowerShell 7（含 Linux runner）已内置同名类型，
-# 直接 Add-Type -AssemblyName 反而会因程序集名不存在而抛错，故先探测类型。
+# 仅在 ZIP 类型尚未加载时补充程序集，兼容不同 PowerShell 运行时。
 if (-not ('System.IO.Compression.ZipFile' -as [type])) { Add-Type -AssemblyName System.IO.Compression.FileSystem }
 function Get-Sha256($file) {
     $stream = [System.IO.File]::OpenRead($file)
@@ -36,7 +35,7 @@ try {
         $item = $_
         while ($item.FullName -ne $root) {
             if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "Cannot package linked path: $relative" }
-            $item = Get-Item -LiteralPath (Split-Path $item.FullName -Parent)
+            $item = Get-Item -LiteralPath (Split-Path $item.FullName -Parent) -Force
         }
         [ordered]@{ path = $relative; size = $_.Length; sha256 = Get-Sha256 $_.FullName }
     } | Sort-Object { $_.path })

@@ -24,6 +24,9 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   fs.copyFileSync(path.join(root, 'config/.env.example'), path.join(fixture, 'config/.env.example'));
   fs.cpSync(path.join(root, 'config/label-templates'), path.join(fixture, 'config/label-templates'), { recursive: true });
   for (const name of ['package.json', 'package-lock.json', 'README.md', 'AGENTS.md']) fs.copyFileSync(path.join(root, name), path.join(fixture, name));
+  const hiddenSource = '.github/.package-regression/probe.txt';
+  fs.mkdirSync(path.dirname(path.join(fixture, hiddenSource)), { recursive: true });
+  fs.writeFileSync(path.join(fixture, hiddenSource), 'hidden source directories must remain packageable');
   for (const name of ['var/data/private.db', 'artifacts/private.zip', '.env', 'config/.env', 'config/private.json', 'config/label-templates/private.txt', 'config/label-templates/.env.json', 'config/label-templates/data/private.json', 'deploy/.env', 'deploy/https/data/caddy/pki/authorities/local/root.key', 'deploy/https/config/private.json', 'deploy/runtime/private.json', 'deploy/runtime/uploads/private.txt', 'deploy/backups/private.tar.gz', 'src/runtime/private.txt', 'src/public/.env', 'src/data/private.db', 'src/private.log', 'scripts/test.db', 'scripts/test.db-wal', 'docs/test.db-shm']) {
     const file = path.join(fixture, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -40,6 +43,9 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   const build = expected => run('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(fixture, 'scripts/package.ps1')], expected);
   const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  if (process.platform === 'win32') {
+    powershell(`foreach ($path in @('.github', '.github/.package-regression')) { $item = Get-Item -LiteralPath $path -Force; $item.Attributes = $item.Attributes -bor [System.IO.FileAttributes]::Hidden }`);
+  }
   run('git', ['init', '--quiet']);
   run('git', ['-c', 'user.name=Package Test', '-c', 'user.email=package-test@example.invalid', 'commit', '--allow-empty', '--quiet', '-m', 'fixture']);
   assert.match(build(), /Created/);
@@ -61,6 +67,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   for (const name of ['label-38.5x30.5-0deg.json', 'label-38.5x30.5-90deg.json']) assert.ok(manifest.sources.some(source => source.path === 'config/label-templates/' + name));
   assert.ok(manifest.sources.some(source => source.path === 'deploy/.env.example'));
   assert.ok(manifest.sources.some(source => source.path === 'package-lock.json'));
+  assert.ok(manifest.sources.some(source => source.path === hiddenSource), 'hidden parent directories must pass source-path checks');
   const zipHash = digest(archive);
   const zipMtime = fs.statSync(archive).mtimeMs;
   run('git', ['-c', 'user.name=Package Test', '-c', 'user.email=package-test@example.invalid', 'commit', '--allow-empty', '--quiet', '-m', 'same tree']);
@@ -80,6 +87,7 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   assert.ok(files.every(file => !/\.(log|db(-wal|-shm)?)$/i.test(file)), files.join('\n'));
   assert.deepEqual(files.filter(file => path.basename(file).startsWith('.env')).sort(), ['config/.env.example', 'deploy/.env.example']);
   assert.deepEqual(manifest.sources.filter(source => source.path.startsWith('config/')).map(source => source.path), ['config/.env.example', 'config/label-templates/label-38.5x30.5-0deg.json', 'config/label-templates/label-38.5x30.5-90deg.json']);
+  assert.equal(fs.readFileSync(path.join(extracted, hiddenSource), 'utf8'), 'hidden source directories must remain packageable');
   for (const source of manifest.sources) assert.equal(digest(path.join(extracted, source.path)), source.sha256, source.path);
   const launcher = fs.readFileSync(path.join(extracted, 'start-labos.cmd'), 'utf8');
   assert.match(launcher, /npm ci --omit=dev --ignore-scripts/);

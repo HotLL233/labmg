@@ -1,0 +1,18 @@
+{
+  "repository": "HotLL233/labmg",
+  "commit": "7abc4f8569f1b5a7ebb66aa09d2007832364e16c",
+  "successfulRunId": 40645846332,
+  "files": {
+    "export-ghcr-offline.cjs": "303d8f9d8a246eb3818740ad486cbe682109fc03",
+    "postgres-image.cjs": "06ee46c22a4e77252c9353d2ffda0e80b2e48d28",
+    "upload-draft-assets.cjs": "1fbe2ace8cf05997d9f7b3aee068adaf663ad115",
+    "verify-ghcr-anonymous.cjs": "3819159df890f91f921069b6c70aff32fde20fef",
+    "verify-https.cjs": "4a1469ecaa3b6e34d5d6216c596c5239616f22a9",
+    "verify-postgresql.cjs": "abc45bcdbe5a7f1a23a65fd37fd72bbecc3fac6a",
+    "verify-runtime-backup.cjs": "c2d0cbb411a6c948b2f55180a9d4a4b31d747f2b"
+  },
+  "adaptations": {
+    "verify-ghcr-anonymous.cjs": "Derive the generated launcher version from its manifest and use the Linux packaging host newline.",
+    "verify-runtime-backup.cjs": "Read the release version from runner-generated configuration outside self-check mode."
+  }
+}

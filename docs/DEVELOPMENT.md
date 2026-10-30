@@ -1,5 +1,9 @@
 # 开发与版本管理
 
+> 2026-10-30候选本机验收完成：0.14.8综合UI V2最终37文件串行343项／342通过／0失败取消／1本机Docker条件跳过，四份Edge实际执行，102份受控摘要一致；原命令及边界见UI_CONSOLIDATED_PLAN第10节。本地新合成预览由npm run dev运行localhost:3002（数据库labos_ui_v2_preview、专用PG55516及ui-v2-20261030/preview-runtime），旧3001和NAS保留；同hostname端口共享Cookie，请使用独立／无痕窗口，凭据仅在private配置。先运行pwsh7下`./artifacts/cache/ui-v2-20261030/stop-preview.ps1`再运行同目录`stop-postgres.ps1`可按身份停止本轮服务；本轮保留预览，未执行停止链，不删除数据。云端先测试／镜像，再创建7件私有草稿，经四门禁及完整恢复补为12件仍保持draft，最后独立核对才显式公开；本条不表示云端已运行或NAS已升级。
+
+> 2026-10-30当前开发：用户已授权综合UI V2下一版开发及打包发布，候选版本0.14.8，分支feature/ui-v2-next，施工范围见UI_施工卡第15节；旧“仅方案”描述保留原阶段，不表示本轮已验收。新专用PG18.4位于artifacts/cache/ui-v2-20261030/postgres/data，仅本机55516端口，临时测试库／运行目录与日常库及NAS隔离，凭据不记文档。首轮VM及真实丢响应专项已执行，完整回归／最终原型／云端门禁／公开发布仍待后补。此轮实际pwsh7.6.5、Node命令正常；旧“外部程序空输出／无PS7”仅是此前阶段记录，不适用于本轮工具环境。0.14.7已从原始日志证实失败于隐藏.github父目录Get-Item缺-Force，已补修及回归，不再把Add-Type猜测写成已证根因。版本／部署YML为候选0.14.8，尚无新标签或公开资产；旧标签保留，不自动升级NAS。
+
 > 2026-10-30 0.14.5候选：`package.json`／`package-lock.json`、两份部署YML与README版本引用已同步0.14.7，CHANGELOG归入本版，源码ZIP经未修改的`scripts/package.ps1`产出。**未产出双架构镜像TAR与GitHub Release**（本机Docker引擎未运行、无`gh` CLI／令牌），未打标签、未推送、未动NAS。完整`npm test`与浏览器专项未跑（无`LABOS_TEST_DATABASE_URL`与PG口令），本轮门禁仅为普通verify与无需数据库的静态测试；下方“当前交付0.14.4”仍指最新公开版本。
 
 > 2026-10-30 NAS独立测试已交付：用户授权打包并在NAS测试，新增`labos-ui-v1-test-20261030`项目，3101／8544端口、独立runtime／https／PG及测试CA，正式labos 0.14.4与labflow不动。本轮应用版本保持0.14.4，唯一测试标签`labos:ui-v1-test-20261030-a9d1effd1700`，未公开发布。交付目录`artifacts/packages/ui-v1-test-20261030-a9d1effd1700/`的README_TEST与DEPLOYMENT记录范围和停止命令；旧版本包、标签和registry未改。NAS38浏览器检查／11图、最终59客户端检查及测试应用重启持久化通过；本地代码摘要仍与前轮完整320项一致，不能冒称本轮又跑了320项。测试数据全合成，同IP不同端口共享Cookie风险须用无痕窗口／独立浏览器配置规避，未改正式认证合同或设备信任。
