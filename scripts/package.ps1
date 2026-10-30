@@ -22,8 +22,8 @@ try {
     foreach ($directory in @('.github', 'src', 'scripts', 'deploy', 'docs', 'tests', 'migrations')) {
         $inputs += Get-ChildItem -LiteralPath (Join-Path $root $directory) -Recurse -File -Force
     }
-    $inputs += Get-ChildItem -LiteralPath (Join-Path $root 'config\label-templates') -Filter '*.json' -File -Force
-    foreach ($file in @('config\.env.example', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md')) {
+    $inputs += Get-ChildItem -LiteralPath (Join-Path $root (Join-Path 'config' 'label-templates')) -Filter '*.json' -File -Force
+    foreach ($file in @((Join-Path 'config' '.env.example'), 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md')) {
         $inputs += Get-Item -LiteralPath (Join-Path $root $file) -Force
     }
     $sources = @($inputs | ForEach-Object {
