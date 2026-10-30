@@ -89,3 +89,28 @@
 @media print{
   .menu-toggle,.drawer-close,.scrim{display:none!important}
 }
+
+/* V1 keeps the stock ledger DOM and print order; only the phone reading layout changes. */
+@media screen and (max-width:767px){
+  .page .table .mw-stock-table tr{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-3)}
+  .page .table .mw-stock-table td{grid-column:auto;grid-row:auto;font-weight:400}
+  .page .table .mw-stock-table td.stock-name{grid-column:1/-1;grid-row:1;font-weight:600}
+  .page .table .mw-stock-table td.stock-quantity{grid-column:1;grid-row:2}
+  .page .table .mw-stock-table td.stock-unit{grid-column:2;grid-row:2}
+  .page .table .mw-stock-table td.stock-date{grid-column:1;grid-row:3}
+  .page .table .mw-stock-table td.stock-spec{grid-column:2;grid-row:3}
+  .page .table .mw-stock-table td.stock-manufacturer{grid-column:1/-1;grid-row:4}
+  .page .table .mw-stock-table td.stock-note{grid-column:1/-1;grid-row:5}
+  .page .table .mw-stock-table td.stock-name::before{display:none}
+}
+@media screen and (max-width:359px){
+  .page .table .mw-stock-table tr{grid-template-columns:minmax(0,1fr)}
+  .page .table .mw-stock-table td:is(.stock-date,.stock-name,.stock-quantity,.stock-spec,.stock-unit,.stock-manufacturer,.stock-note){grid-column:1/-1;grid-row:auto}
+  .page .table .mw-stock-table td.stock-name{order:0}
+  .page .table .mw-stock-table td.stock-quantity{order:1}
+  .page .table .mw-stock-table td.stock-unit{order:2}
+  .page .table .mw-stock-table td.stock-date{order:3}
+  .page .table .mw-stock-table td.stock-spec{order:4}
+  .page .table .mw-stock-table td.stock-manufacturer{order:5}
+  .page .table .mw-stock-table td.stock-note{order:6}
+}

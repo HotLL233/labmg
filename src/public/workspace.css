@@ -96,3 +96,29 @@
   dialog.mw-compact.ws-dialog:not(.mw-inline-form){left:8px;right:8px;margin:0 auto;width:calc(100vw - 16px);max-height:calc(100dvh - var(--ws-header-bottom,64px) - 16px)}
   .ws-dialog .mw-dialog-body>.mw-table table{min-width:0}
 }
+
+/* V1 limits only the approved material forms and material/archive detail surfaces. */
+@media screen{
+  .ws-icon{display:inline-block;width:18px;height:18px;flex-shrink:0;vertical-align:middle;pointer-events:none}
+  .ws-page-size{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-label)}
+  .ws-page-size select{width:auto;min-height:var(--h-control);padding:var(--sp-1) var(--sp-2)}
+  #mw-dialog.mw-compact:not(.mw-inline-form){box-shadow:none;border:0;border-radius:0}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-grid{gap:var(--sp-4)}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field{font-size:var(--fs-label);gap:var(--sp-2)}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field:has(>[name="unit"]){max-width:160px}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field:has(>[name="quantity"],>[name="amount"]){max-width:220px}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field:has(>input[type="date"]){max-width:200px}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>input:not([type="checkbox"]),
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>select{min-height:var(--h-control);padding:6px 10px;font-size:var(--fs-body)}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-readonly-value>input[readonly]{border:0;background:transparent;padding-inline:0;color:var(--c-text-2)}
+  #mw-view.ws-dialog,#detail.ws-dialog[data-ws-module="archives"]{max-width:1120px;margin-inline:auto;box-shadow:none;border:0;border-radius:0}
+  #mw-view .detail-grid,#detail[data-ws-module="archives"] .detail-grid{gap:var(--sp-4) var(--sp-6)}
+  #mw-view .detail-item,#detail[data-ws-module="archives"] .detail-item{padding:0;border:0;border-radius:0;background:transparent;font-size:var(--fs-body)}
+  #mw-view .detail-item small,#detail[data-ws-module="archives"] .detail-item small{font-size:var(--fs-label)}
+}
+@media screen and (max-width:767px){
+  .ws-page-size select{min-height:44px}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field:has(>[name="unit"],>[name="quantity"],>[name="amount"],>input[type="date"]){max-width:none}
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>input:not([type="checkbox"]),
+  #mw-dialog.mw-compact:not(.mw-inline-form) .mw-field>select{min-height:44px;font-size:16px}
+}

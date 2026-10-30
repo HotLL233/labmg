@@ -71,7 +71,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.4/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.5/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -82,7 +82,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.4/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.5/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -106,7 +106,7 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.4`，本地三镜像包使用 `labos:0.14.4`；[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)已公开，请下载同版文件，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.5`，本地三镜像包使用 `labos:0.14.5`；0.14.5 的镜像与 Release **尚未产出**，当前可下载的仍是[0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)，下载使用前请确认版本一致，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |

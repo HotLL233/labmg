@@ -13,7 +13,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 test('material workflow uses actual batch transactions, per-arrival files and fixed revision QR with real PostgreSQL and Edge',{
   skip:(!process.env.LABOS_TEST_BROWSER_MODULE||!process.env.LABOS_TEST_DATABASE_URL)&&'Set dedicated PostgreSQL and browser environment for the actual material workflow',timeout:240000
 },async t=>{
-  const database=await createTestDatabase(t),cache=path.join(root,'artifacts/cache',version);
+  const database=await createTestDatabase(t),cache=process.env.LABOS_TEST_CACHE_DIR||path.join(root,'artifacts/cache',version);
   fs.mkdirSync(cache,{recursive:true});const directory=fs.mkdtempSync(path.join(cache,'material-workflow-')),runtime=path.join(directory,'runtime');
   const reservation=net.createServer().listen(0,'127.0.0.1');await once(reservation,'listening');const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,[path.join(root,'src/server.js')],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,DATABASE_URL:database.url,PORT:String(port),LABOS_RUNTIME_DIR:runtime,LABOS_ADMIN_USER:'workflow-admin',LABOS_ADMIN_PASSWORD:'synthetic-workflow-password'}});
@@ -46,11 +46,16 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
   const docsMode=()=>page.locator('[data-mw="wf-mode"][data-mode="documents"]');
   const isVisibleInViewport=locator=>locator.evaluate(node=>{const b=node.getBoundingClientRect();return b.width>0&&b.height>0&&b.left>=-1&&b.top>=-1&&b.right<=innerWidth+1&&b.bottom<=innerHeight+1;});
   async function geometry(label,completeRow=false){
-    const result=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,table:(()=>{const table=document.querySelector('#mw-order-workspace .mw-order-panel>.mw-table'),head=table?.querySelector('thead'),row=table?.querySelector('tbody tr:not([hidden])');if(!table||!row)return null;const b=table.getBoundingClientRect(),h=head?.getBoundingClientRect(),r=row.getBoundingClientRect();return {top:b.top,bottom:b.bottom,head:h?.height||0,row:r.height,available:Math.min(b.bottom,innerHeight)-(h?.bottom||b.top)};})()}));
+    const result=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,table:(()=>{const table=document.querySelector('#mw-order-workspace .mw-order-panel>.mw-table'),head=table?.querySelector('thead'),row=table?.querySelector('tbody tr:not([hidden])');if(!table||!row)return null;const b=table.getBoundingClientRect(),h=head?.getBoundingClientRect(),r=row.getBoundingClientRect();return {top:b.top,bottom:b.bottom,head:h?.height||0,row:r.height,horizontal:table.scrollWidth-table.clientWidth,available:Math.min(b.bottom,innerHeight)-(h?.bottom||b.top)};})()}));
     check(result.scroll<=result.width+1,label+': no whole-page horizontal overflow',result);
     check(await isVisibleInViewport(page.locator('#logout')),label+': logout remains in view');
-    if(result.width>=768&&label.indexOf('documents')<0)check(await isVisibleInViewport(button('wf-adjust')),label+': row action remains visible while its table scrolls');
-    if(completeRow&&result.width>=1024){check(Boolean(result.table)&&result.table.available>=result.table.row-1,label+': a complete row fits below the table header',result.table);check(await isVisibleInViewport(button('wf-receive-all')),label+': batch action remains in view');}
+    if(result.width>=768&&label.indexOf('documents')<0){
+      if(result.width<=1100)await button('wf-adjust').scrollIntoViewIfNeeded();
+      check(await isVisibleInViewport(button('wf-adjust')),label+': row action remains reachable in its table or adaptive editing grid');
+      if(result.width<=1100)await page.locator('.mw-order-panel>.mw-panel-top').scrollIntoViewIfNeeded();
+    }
+    if(result.width>=1280&&label.indexOf('documents')<0)check(result.table?.horizontal<=1,label+': the full-width desktop acceptance editor needs no horizontal scrolling',result.table);
+    if(completeRow&&result.width>=1024){check(Boolean(result.table)&&result.table.available>=result.table.row-1,label+': a complete row fits below the table header',result.table);await button('wf-receive-all').scrollIntoViewIfNeeded();check(await isVisibleInViewport(button('wf-receive-all')),label+': batch action remains reachable');await page.locator('.mw-order-panel>.mw-panel-top').scrollIntoViewIfNeeded();}
   }
   let status='failed';
   try{
@@ -58,6 +63,16 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
     check(await page.locator('.mw-nav [data-page]').count()===3,'materials primary navigation has exactly declaration, acceptance and inventory');
     check((await input(ids[0],'quantity').inputValue())==='3.000','remaining demand is the default acceptance quantity');
     check((await input(ids[0],'manufacturer').inputValue())==='合成厂家1','actual manufacturer starts from declaration for explicit verification');
+    await geometry('1366x768 initial editor',true);
+    check(!(await page.locator('#mw-order-picker').isVisible()),'the order chooser does not permanently occupy editor width');
+    await input(ids[0],'amount').fill('20');await page.locator('#mw-order-picker-toggle').click();
+    await page.locator('#mw-filters [name="q"]').fill('__no_candidate_order__');
+    await page.locator('#mw-filters [type="submit"]').first().click();
+    await button('wf-leave-keep').click();
+    await page.locator('#mw-order-picker').getByText('没有符合条件的申报单。',{exact:true}).waitFor();
+    check(await page.evaluate(()=>document.activeElement.id==='mw-order-picker'),'a filtered chooser restores keyboard focus instead of falling back to the global navigation');
+    await button('wf-picker-close').click();
+    check((await input(ids[0],'amount').inputValue())==='20','a no-match candidate search and return preserve the real current order draft');
     await input(ids[0],'quantity').fill('2');await input(ids[1],'quantity').fill('1');await input(ids[0],'amount').fill('20');await button('wf-receive-selected').click();
     await page.locator('#mw-order-errors').waitFor();check((await page.locator('#mw-order-errors').textContent()).includes('核对物资2'),'missing amount identifies the exact material row');
     check((await api('GET','/api/materials/receipts')).data.total===0,'validation failure does not create any receipt');
@@ -80,6 +95,7 @@ test('material workflow uses actual batch transactions, per-arrival files and fi
     await button('wf-receive-selected').click();await button('wf-retry').waitFor();
     check((await api('GET','/api/materials/receipts')).data.total===2,'lost HTTP response may already have committed the complete batch');
     check(await input(ids[0],'amount').isDisabled(),'uncertain result freezes original inputs');
+    check(await page.locator('#mw-order-picker-toggle').isDisabled(),'an uncertain batch result blocks order switching');
     await button('wf-retry').click();await button('wf-retry').waitFor({state:'detached'});await page.unroute('**/receipts/batch');
     check(payloads.length===2&&JSON.stringify(payloads[0])===JSON.stringify(payloads[1]),'retry reuses the exact batch body and idempotency key');
     check((await api('GET','/api/materials/receipts')).data.total===2,'retry does not duplicate stock or receipt records');

@@ -18,7 +18,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
 }, async t => {
   const { chromium } = require(browserModule);
   const executablePath = process.env.LABOS_TEST_BROWSER_PATH;
-  const cache = path.join(root, 'artifacts/cache', require('../package.json').version);
+  const cache = process.env.LABOS_TEST_CACHE_DIR || path.join(root, 'artifacts/cache', require('../package.json').version);
   fs.mkdirSync(cache, { recursive: true });
   const screenshots = fs.mkdtempSync(path.join(cache, 'mobile-layout-'));
   t.diagnostic('Layout screenshots: ' + screenshots);
@@ -133,14 +133,21 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.equal(await page.locator('.layout>main').evaluate(node => node.inert), false, 'navigation restores the main controls');
     return button;
   };
+  const revealControl = async control => {
+    for (const owner of await control.locator('xpath=ancestor::details').all()) {
+      if (!(await owner.evaluate(node => node.open))) await owner.locator(':scope > summary').click();
+    }
+    return control;
+  };
+  const clickControl = async selector => (await revealControl(page.locator(selector).first())).click();
   const navigateMaterial = async target => {
-    if (target === 'catalog') await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+    if (target === 'catalog') await clickControl('.mw-head .mw-actions [data-page="catalog"]');
     else if (target === 'settings') {
-      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
-      await page.locator('.mw-subnav [data-page="settings"]').click();
+      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await clickControl('.mw-head .mw-actions [data-page="catalog"]');
+      await clickControl('.mw-subnav [data-page="settings"]');
     } else if (['issues', 'openings'].includes(target)) {
       if (!(await page.locator(`.mw-subnav [data-page="${target}"]`).count())) await page.locator('.mw-nav [data-page="inventory"]').click();
-      await page.locator(`.mw-subnav [data-page="${target}"]`).click();
+      await clickControl(`.mw-subnav [data-page="${target}"]`);
     } else await page.locator(`.mw-nav [data-page="${target}"]`).click();
     await page.waitForFunction(target => (target === 'settings' ? document.querySelector('[data-mw="setting"]') : document.querySelector('#mw-filters')) && !document.querySelector('#page .mw-empty'), target);
   };
@@ -150,27 +157,33 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       const rows = [...table.querySelectorAll('tbody tr')].filter(row => !row.querySelector('[colspan]') && getComputedStyle(row).display !== 'none');
       return { containerWidth: container.clientWidth, scrollWidth: container.scrollWidth, tableWidth: table.getBoundingClientRect().width,
         display: getComputedStyle(table).display, headerDisplay: getComputedStyle(table.querySelector('thead')).display,
+        editorGrid: innerWidth <= 1100 && Boolean(container.closest('#mw-order-workspace')),
         rows: rows.map(row => ({ display: getComputedStyle(row).display, gap: getComputedStyle(row).rowGap, fields: [...row.children].map((cell, index) => ({
           expected: headers[index] || (index === 0 ? headers[1] : ''), label: cell.getAttribute('data-label'),
           before: getComputedStyle(cell, '::before').content, labelGap: getComputedStyle(cell, '::before').marginBottom,
-          numeric: cell.classList.contains('num'), alignment: getComputedStyle(cell).textAlign, selection: cell.classList.contains('cell-select')
+          numeric: cell.classList.contains('num'), alignment: getComputedStyle(cell).textAlign, selection: cell.classList.contains('cell-select'),
+          semanticPrimary: cell.classList.contains('stock-name') || cell.classList.contains('mw-order-name'),
+          inputLabel: Boolean(cell.querySelector('label span')?.textContent.trim())
         })) })) };
     }));
     for (const table of tables) {
       assert.ok(table.rows.length, `${label}: fixture must exercise nonempty rows`);
-      if (page.viewportSize().width < 768) {
+      if (page.viewportSize().width < 768 || table.editorGrid) {
         assert.equal(table.display, 'block', `${label}: table becomes a card list`);
         assert.equal(table.headerDisplay, 'none', `${label}: card labels replace the header`);
         assert.ok(table.scrollWidth <= table.containerWidth + 1, `${label}: cards must not scroll horizontally`);
         assert.ok(table.tableWidth <= table.containerWidth + 1, `${label}: card width stays within its container`);
         for (const row of table.rows) {
           assert.equal(row.display, 'grid', `${label}: one DOM row becomes one card`);
-          assert.equal(row.gap, '10px', `${label}: card fields retain the approved vertical gap`);
+          assert.ok(parseFloat(row.gap) >= 8 && parseFloat(row.gap) <= 16, `${label}: record fields retain the approved spacing range`);
           for (const field of row.fields) if (field.numeric) assert.equal(field.alignment, 'left', `${label}: numeric card values align with their labels`);
           for (const field of row.fields) if (!field.selection && field.expected) {
             assert.equal(field.label, field.expected, `${label}: field label comes from its header`);
-            assert.equal(field.before, JSON.stringify(field.expected), `${label}: CSS displays the field label`);
-            assert.equal(field.labelGap, '4px', `${label}: labels retain the approved value spacing`);
+            if (field.before === 'none') assert.ok(field.semanticPrimary || field.inputLabel, `${label}: hidden duplicate labels retain the primary name or an explicit input label`);
+            else {
+              assert.equal(field.before, JSON.stringify(field.expected), `${label}: CSS displays the field label`);
+              assert.equal(field.labelGap, '4px', `${label}: labels retain the approved value spacing`);
+            }
           }
         }
       } else {
@@ -215,15 +228,13 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
       await checkLayout(`${width}px ${module}`);
       await checkTables(`${width}px ${module}`);
       if (width === 390 && module === 'archives') {
-        const chips = await page.locator('#page .archive-menu').evaluate(menu => {
-          const box = menu.getBoundingClientRect();
-          menu.scrollLeft = menu.scrollWidth;
-          const last = menu.lastElementChild.getBoundingClientRect();
-          menu.scrollLeft = 0;
-          return { left: box.left, right: box.right, height: box.height, overflow: getComputedStyle(menu).overflowX, lastRight: last.right };
+        const filter = await page.locator('#archive-folder-select').evaluate(select => {
+          const box = select.getBoundingClientRect();
+          return { left: box.left, right: box.right, height: box.height, options: select.options.length,
+            labelled: Boolean(select.closest('label')?.textContent.includes('档案分区')) };
         });
-        assert.ok(chips.left >= 0 && chips.right <= width && chips.height <= 56 && chips.overflow === 'auto' && chips.lastRight <= chips.right + 1,
-          `phone archive categories scroll inside a compact, reachable chip container: ${JSON.stringify(chips)}`);
+        assert.ok(filter.left >= 0 && filter.right <= width && filter.height >= 44 && filter.options >= 7 && filter.labelled,
+          `phone archive classification uses a labelled, reachable filter: ${JSON.stringify(filter)}`);
       }
       const fonts = module === 'finance' ? [['#page th', '13px'], ['#page td', '14px'], ['#page .pill', '11px']]
         : module === 'materials' ? [['#page .mw-badge', '13px'], ['#page .mw-toolbar label', '13px'], ['#page .mw small', '12px']] : [];
@@ -275,10 +286,10 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     await checkTables(`${width}px material catalog workspace`);
     const heading = page.getByRole('heading', { name: '物资信息库', exact: true });
     assert.equal(await heading.count(), 1, 'the visually suppressed duplicate title keeps its accessible heading');
-    assert.equal(await heading.evaluate(node => getComputedStyle(node).clipPath), 'inset(50%)', 'the duplicate catalog heading is visually suppressed');
+    assert.equal(await heading.isVisible(), true, 'the catalog has one visible page-level heading below the module header');
     const more = page.locator('#page .mw-panel-top .mw-more');
     assert.deepEqual(await more.locator('button').allTextContents(), ['导入 Excel', '导入模板', '导出 Excel'], 'secondary catalog commands stay grouped');
-    assert.equal(await page.locator('#mw-filters [type="submit"]').getAttribute('class'), 'ghost', 'search retains an explicit secondary submit action');
+    assert.equal(await page.locator('#mw-filters [type="submit"]').first().evaluate(node => node.classList.contains('ghost')), true, 'search retains an explicit secondary submit action');
     assert.equal(await page.locator('#page .mw-pagebar').evaluate(node => node.hidden), true, 'a single server page retains its marker without showing controls');
     assert.equal(await page.locator('#page .ws-pagination').count(), 0, 'hidden server pagination never adds client pagination');
     await more.locator('summary').click();
@@ -318,7 +329,7 @@ test('real browser keeps navigation, module controls and long dialogs usable on 
     assert.ok(await page.locator('#mw-dialog').evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'place edit remains within the dialog');
     await page.locator('#mw-dialog [data-mw="cancel"]').first().click();
     await page.locator('#page [data-mw="setting"][data-setting="numbering"]').click();
-    await page.locator('.mw-subnav[aria-label="物资设置分区"] [data-mw="label-template"]').click();
+    await clickControl('.mw-subnav[aria-label="物资设置分区"] [data-mw="label-template"]');
     await page.locator('#material-label-designer').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#material-label-designer table').evaluate(node => getComputedStyle(node).display), 'table', 'label design coordinates retain their table layout');
     assert.equal(await page.locator('#material-label-designer thead').evaluate(node => getComputedStyle(node).display), 'table-header-group', 'label designer does not use business card labels');

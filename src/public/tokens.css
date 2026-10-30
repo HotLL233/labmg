@@ -70,3 +70,15 @@ td small,.card small,.field small,.mw small,.mw-dialog small,.mw-field small,.mw
   .page .ops>button.primary{background:var(--c-primary-500);color:var(--c-surface);padding:10px 15px}
   .page .ops>button.primary:hover{filter:brightness(.96)}
 }
+@media screen{
+  /* 说明条：与 .mw-hint 同类提示必须有底色，否则被当成正文忽略 */
+  .mw-record-note{
+    background:var(--c-primary-50);
+    border:1px solid var(--c-line);
+    border-radius:var(--r-sm);
+    padding:var(--sp-3) var(--sp-4);
+  }
+  /* 勾选行高亮：确认当前选中的是哪几行 */
+  .mw table tr:has(input[type=checkbox]:checked),
+  .mw-dialog table tr:has(input[type=checkbox]:checked){background:var(--c-primary-50)}
+}

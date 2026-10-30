@@ -1,6 +1,6 @@
 # 项目维护约定
 
-- 开始任务前读取 `docs/MEMORY.md` 和 `docs/DEVELOPMENT.md`；需要历史背景时查看 `docs/HISTORY.md`，发布信息查看 `docs/CHANGELOG.md`。
+- **开工只读 `docs/CONTEXT.md`**（约 80 行速查卡：命令表、文件地图、CSS 覆盖链、压缩文件名单、绝对禁令）。`docs/MEMORY.md`（938 行）、`docs/HISTORY.md`（1041 行）、`docs/DEVELOPMENT.md`（650 行）合计约 28 万字符，**不要通读**：需要历史背景或发布信息时用 `rg 关键词 docs/MEMORY.md docs/HISTORY.md docs/CHANGELOG.md` 定位，只读命中段落。
 - **涉及界面（`src/public/`）的任务，动手前必须读 `docs/UI_施工卡.md`**：它把 `docs/UI_DESIGN_SYSTEM.md` 的设计规范转成了文件级、选择器级的施工指令，照卡施工即可，不要自行按规范做设计判断。交付前运行 `node scripts/ui-audit.js` 自查。
 - 记录与代码或 Git 状态冲突时先核实，并注明更正；不要将计划、静态分析或有限测试写成已实现、已修复或全面验证。
 - 完成有意义的工作后，更新 `docs/MEMORY.md` 的当前状态与新记忆，在 `docs/HISTORY.md` 追加开发事件，并将对外变更记入 `docs/CHANGELOG.md` 的“未发布”部分。

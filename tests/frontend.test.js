@@ -149,7 +149,7 @@ function parse(html, parent) {
       attrs[item[1]] = decode(item[2] ?? item[3] ?? item[4] ?? '');
     }
     const node = stack.at(-1).appendChild(new Element(tag, attrs));
-    if (!['input', 'link', 'meta', 'br', 'img', 'hr'].includes(tag)) stack.push(node);
+    if (!match[0].endsWith('/>') && !['input', 'link', 'meta', 'br', 'img', 'hr'].includes(tag)) stack.push(node);
   }
   stack.at(-1)._text += decode(html.slice(previous));
 }
@@ -560,6 +560,43 @@ test('workspace hides single-page navigation and restores it when fewer rows fit
   assert.equal(rows.filter(row=>!row.hidden).length,5);
 });
 
+test('workspace fixed paging keeps capacity across long rows and viewport changes without replacing rows', async () => {
+  const app=await browser();
+  app.$('#page').innerHTML='<div class="table" data-ws-fixed="true"><table><thead><tr><th>名称</th></tr></thead><tbody>'+Array.from({length:38},(_,i)=>`<tr><td>记录${i}</td></tr>`).join('')+'</tbody></table></div>';
+  const container=app.$('#page .table'),rows=container.querySelectorAll('tbody tr');
+  container.getBoundingClientRect=()=>({top:200});
+  container.querySelector('thead').getBoundingClientRect=()=>({height:36});
+  rows.forEach((row,index)=>{row.getBoundingClientRect=()=>({height:index===0?300:44});});
+  app.context.innerHeight=768;app.context.getComputedStyle=()=>({display:'table'});
+  app.run("Workspace.enhance(document.querySelector('#page'))");
+  assert.equal(rows.filter(row=>!row.hidden).length,10);
+  app.$('[data-ws-page=next]').onclick();
+  assert.equal(container.dataset.wsPage,'1');
+  assert.equal(rows.filter(row=>!row.hidden)[0],rows[10]);
+  app.context.innerHeight=480;app.run("Workspace.fit(document.querySelector('#page'))");
+  assert.equal(rows.filter(row=>!row.hidden).length,10);
+  const select=app.$('[data-ws-size]');select.value='20';select.onchange();
+  assert.equal(container.dataset.wsPage,'0');assert.equal(container.dataset.wsSize,'20');
+  assert.equal(rows.filter(row=>!row.hidden).length,20);
+  select.value='50';select.onchange();
+  assert.equal(rows.filter(row=>!row.hidden).length,38);
+  assert.equal(app.$('.ws-pagination').hidden,false,'the size selector stays reachable after selecting a single large page');
+  select.value='99';select.onchange();assert.equal(container.dataset.wsSize,'50');
+  app.run("Workspace.enhance(document.querySelector('#page'))");
+  assert.equal(app.$('#page .table tbody tr'),rows[0]);
+  assert.equal(app.$('#page').querySelectorAll('.ws-pagination').length,1);
+});
+
+test('workspace icons only emit trusted static geometry with no business text interpolation', async () => {
+  const app=await browser();
+  for(const name of ['Eye','SquarePen','Ellipsis','Download','Search','ListFilter','SlidersHorizontal','ClipboardCheck','Printer']){
+    const svg=app.run(`Workspace.icon(${JSON.stringify(name)})`);
+    assert.match(svg,/^<svg /);assert.match(svg,/aria-hidden="true"/);assert.match(svg,/focusable="false"/);
+    assert.doesNotMatch(svg,/\bon\w+=|<script|<foreignObject/i);
+  }
+  for(const name of ['__proto__','constructor','<svg onload=alert(1)>',null,0,{}])assert.equal(app.run(`Workspace.icon(${JSON.stringify(name)})`),'');
+});
+
 test('generic record workspaces keep one return action and preserve form cancel and save', async () => {
   const app=await browser();
   assert.deepEqual(app.$('#detail').querySelectorAll('button').map(node=>node.textContent),['← 返回列表','打印']);
@@ -836,7 +873,9 @@ test('user-controlled fields and account names stay out of executable markup', a
   assert.match(namedOption, /&quot;/);
   app.state.materialRequests[0].title = '<img src=x onerror=alert(1)><svg onload=alert(1)>';
   await app.run("go('materials')");
-  assert.doesNotMatch(app.$('#page').innerHTML, /<img|<svg/);
+  assert.doesNotMatch(app.$('#page').innerHTML, /<img|<svg[^>]*\bonload\s*=/i);
+  assert.equal(app.$('.mw-request-table strong').textContent, app.state.materialRequests[0].title);
+  assert.equal(app.$('#page img'), null);
   assert.match(app.$('#page').innerHTML, /&lt;img/);
   await app.run("go('management')"); app.run('renderAccounts()');
   await new Promise(resolve => setImmediate(resolve));
@@ -894,7 +933,7 @@ async function materialApp(manager = true) {
   const request = { ...app.state.materialRequests[0], status: 'draft', version: 1, canEditHeader: true, canAddItem: true, canSubmit: manager, items: [item] };
   app.state.materialDetails[101] = request;
   const click = async node => {
-    const dispatch = target => app.document.listeners.click({ target: { closest: () => target } });
+    const dispatch = target => app.document.listeners.click({ target: { closest: selector => selector==='[data-mw]'?target:target?.closest?.(selector)||null } });
     if(node==='[data-mw=dictionaries]')return dispatch(app.$('[data-page=catalog]'));
     if(node==='[data-mw=numbering-rules]'||node==='[data-mw=storage-places]'){
       await dispatch(app.$('[data-page=settings]'));
@@ -1598,8 +1637,8 @@ test('catalog groups secondary actions without losing permissions or submit-base
   const {app,click}=await materialApp();
   await click('[data-page=catalog]');
   const heading=app.$('.mw-panel-top h3');
-  assert.equal(heading.classList.contains('ws-repeated-heading'),true);
-  assert.equal(heading.getAttribute('aria-label'),'物资信息库');
+  assert.equal(heading.classList.contains('ws-repeated-heading'),false);
+  assert.equal(heading.textContent,'物资信息库');
   assert.deepEqual(app.$('.mw-panel-top').querySelectorAll('button').filter(node=>node.classList.contains('primary')).map(node=>node.dataset.mw),['new-catalog']);
   assert.deepEqual(app.$('.mw-panel-top details').querySelectorAll('button').map(node=>node.dataset.mw),['catalog-import','catalog-template','catalog-export']);
   assert.equal(app.$('#mw-filters button').classList.contains('ghost'),true);
@@ -1626,10 +1665,10 @@ test('catalog groups secondary actions without losing permissions or submit-base
 
 test('material server pagers hide on one page but retain a way back from an emptied later page',async()=>{
   const {app,click}=await materialApp();
-  let total=9;
+  let total=11;
   app.state.materialResponse=({url,method})=>{
     if(url.pathname!=='/api/materials/catalog'||method!=='GET')return;
-    const page=Number(url.searchParams.get('page')||1),pageSize=Number(url.searchParams.get('pageSize')||8);
+    const page=Number(url.searchParams.get('page')||1),pageSize=Number(url.searchParams.get('pageSize')||10);
     return {body:{items:[],total,page,pageSize}};
   };
   await click('[data-page=catalog]');
@@ -2145,7 +2184,7 @@ test('catalog server pagination keeps a stable capacity across long and short pa
     app.state.materialResponse=({url,method})=>{if(url.pathname!=='/api/materials/catalog'||method!=='GET')return;const page=Number(url.searchParams.get('page')||1),pageSize=Number(url.searchParams.get('pageSize')||50);return {body:{items:entries.slice((page-1)*pageSize,page*pageSize),total:38,page,pageSize}};};
     await click('[data-mw=dictionaries]');await new Promise(setImmediate);
     const first=app.requests.filter(row=>row.url.pathname==='/api/materials/catalog'&&row.url.searchParams.get('active')==='all').at(-1).url;
-    const capacity=Number(first.searchParams.get('pageSize'));assert.ok(capacity<8&&capacity>=1);
+    const capacity=Number(first.searchParams.get('pageSize'));assert.equal(capacity,10);
     await click('[data-mw=next]');await new Promise(setImmediate);
     const next=app.requests.filter(row=>row.url.pathname==='/api/materials/catalog').at(-1).url;
     assert.equal(next.searchParams.get('page'),'2');assert.equal(Number(next.searchParams.get('pageSize')),capacity);
@@ -2243,4 +2282,73 @@ test('keeping an acceptance draft permits navigation outside acceptance and rest
   await click('[data-page=requests]');assert.match(app.$('#page').textContent,/申报记录/);
   await click('[data-page=acceptance]');assert.equal(acceptanceField(app,'amount').value,'12.50');
   assert.equal(app.$('.mw-order-back').getAttribute('href'),'#mw-order-picker');
+});
+
+test('on-demand acceptance chooser opens and closes without losing the current draft or triggering leave confirmation',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'12.50'});
+  let confirmations=0;app.context.confirm=()=>{confirmations++;return false;};
+  assert.equal(app.$('#mw-order-picker').hidden,true);
+  await click('[data-mw=wf-picker]');
+  assert.equal(app.$('#mw-order-picker').hidden,false);
+  assert.equal(app.$('.mw-order-panel').hidden,true);
+  assert.equal(app.$('[data-mw=wf-leave-keep]'),null);
+  await click('[data-mw=wf-picker-close]');
+  assert.equal(app.$('#mw-order-picker').hidden,true);
+  assert.equal(acceptanceField(app,'amount').value,'12.50');
+  assert.equal(confirmations,0);
+  assert.equal(app.$('#mw-order-picker-toggle'),app.document.activeElement);
+});
+
+test('changing page size from a dirty acceptance chooser resumes through one guard without leaking leave permission',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'12.50'});
+  await click('[data-mw=wf-picker]');
+  const select=app.$('[data-mw-page-size]');select.value='20';
+  let confirmations=0;app.context.confirm=()=>{confirmations++;return false;};
+  await app.document.listeners.change({target:select});
+  assert.ok(app.$('[data-mw=wf-leave-keep]'));
+  await click('[data-mw=wf-leave-keep]');
+  assert.equal(confirmations,0,'the explicit keep choice must not prompt again');
+  await click('[data-mw=wf-picker-close]');
+  assert.equal(acceptanceField(app,'amount').value,'12.50');
+  await click('[data-page=inventory]');
+  assert.ok(app.$('[data-mw=wf-leave-keep]'),'a later unrelated navigation still needs the leave decision');
+  await click('[data-mw=wf-leave-cancel]');
+});
+
+test('filtering an on-demand order chooser to no results keeps the current order and draft available',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  app.state.materialResponse=({url,method})=>{
+    if(url.pathname==='/api/materials/requests'&&method==='GET'&&url.searchParams.get('q')==='没有匹配的候选单')return {body:{items:[],total:0,page:1,pageSize:10}};
+  };
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'12.50'});
+  await click('[data-mw=wf-picker]');
+  const form=app.$('#mw-filters');form.querySelector('[name=q]').value='没有匹配的候选单';
+  let confirmations=0;app.context.confirm=()=>{confirmations++;return false;};
+  await form.listeners.submit({target:form,preventDefault(){}});
+  assert.ok(app.$('[data-mw=wf-leave-keep]'));await click('[data-mw=wf-leave-keep]');
+  assert.match(app.$('#mw-order-picker').textContent,/没有符合条件的申报单/);
+  assert.equal(app.document.activeElement,app.$('#mw-order-picker'),'candidate refresh restores focus to the new chooser');
+  assert.ok(app.$('[data-mw=wf-picker-close]'));
+  await click('[data-mw=wf-picker-close]');
+  assert.equal(acceptanceField(app,'amount').value,'12.50');
+  assert.match(app.$('.mw-order-panel').textContent,/专用申报单/);
+  assert.equal(confirmations,0);
+  assert.equal(app.requests.some(entry=>entry.method==='POST'),false);
+});
+
+test('a preserved current order that was cancelled externally retains its draft but cannot start a new receipt',async()=>{
+  const {app,request,click}=await materialApp();request.status='submitted';
+  await click({dataset:{mw:'page',page:'acceptance'}});await fillAcceptance(app,{amount:'12.50'});
+  request.status='cancelled';request.version++;
+  await click('[data-page=acceptance]');await click('[data-mw=wf-leave-keep]');
+  assert.equal(acceptanceField(app,'amount').value,'12.50');
+  assert.equal(acceptanceField(app,'amount').disabled,true);
+  assert.equal(app.$('[data-mw=wf-receive-one]').disabled,true);
+  assert.equal(app.$('[data-mw=wf-receive-selected]').disabled,true);
+  assert.equal(app.$('[data-mw=wf-receive-all]').disabled,true);
+  await click({dataset:{mw:'wf-receive-selected'}});
+  assert.equal(app.requests.some(entry=>entry.method==='POST'),false,'even a stale receipt action cannot create a fresh request');
+  assert.ok(app.$('#mw-order-picker-toggle'));
 });

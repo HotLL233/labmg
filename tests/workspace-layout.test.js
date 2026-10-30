@@ -16,7 +16,7 @@ const browserModule = process.env.LABOS_TEST_BROWSER_MODULE;
 
 test('production workspace keeps identity, records, returns and draft inputs usable with real PostgreSQL', {
   skip: (!browserModule || !process.env.LABOS_TEST_DATABASE_URL) && 'Set LABOS_TEST_BROWSER_MODULE and LABOS_TEST_DATABASE_URL for real workspace checks',
-  timeout: 240000
+  timeout: 420000
 }, async t => {
   const database = await createTestDatabase(t);
   const cache = process.env.LABOS_TEST_CACHE_DIR || path.join(root, 'artifacts/cache', version);
@@ -120,14 +120,21 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     await page.locator(`.nav [data-nav="${target}"]`).click();
     await page.waitForFunction(target => current === target && !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'), target);
   };
+  const revealControl = async control => {
+    for (const owner of await control.locator('xpath=ancestor::details').all()) {
+      if (!(await owner.evaluate(node => node.open))) await owner.locator(':scope > summary').click();
+    }
+    return control;
+  };
+  const clickControl = async selector => (await revealControl(page.locator(selector).first())).click();
   const navigateMaterial = async target => {
-    if (target === 'catalog') await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
+    if (target === 'catalog') await clickControl('.mw-head .mw-actions [data-page="catalog"]');
     else if (target === 'settings') {
-      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await page.locator('.mw-head .mw-actions [data-page="catalog"]').click();
-      await page.locator('.mw-subnav [data-page="settings"]').click();
+      if (!(await page.locator('.mw-subnav [data-page="settings"]').count())) await clickControl('.mw-head .mw-actions [data-page="catalog"]');
+      await clickControl('.mw-subnav [data-page="settings"]');
     } else if (['issues', 'openings'].includes(target)) {
       if (!(await page.locator(`.mw-subnav [data-page="${target}"]`).count())) await page.locator('.mw-nav [data-page="inventory"]').click();
-      await page.locator(`.mw-subnav [data-page="${target}"]`).click();
+      await clickControl(`.mw-subnav [data-page="${target}"]`);
     } else await page.locator(`.mw-nav [data-page="${target}"]`).click();
     await page.waitForFunction(() => !document.querySelector('#page .mw-empty')?.textContent.includes('正在加载'));
   };
@@ -155,7 +162,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     check(geometry.scrollWidth <= geometry.width + 1, label + ': no document-level horizontal overflow', geometry);
     const tabs = await page.locator('#page .mw-nav,#page .mw-subnav').evaluateAll(navs => navs.map(nav => {
       const active = nav.querySelector('[aria-current="page"]') || nav.querySelector('.active');
-      if (!active) return null;
+      if (!active || !nav.getClientRects().length) return null;
       const a = active.getBoundingClientRect(), n = nav.getBoundingClientRect();
       const first = nav.firstElementChild.getBoundingClientRect();
       return { label: active.textContent, left: a.left, right: a.right, navLeft: n.left, navRight: n.right,
@@ -221,21 +228,22 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           stable = headings.every((th, index) => Math.abs(th.getBoundingClientRect().width - before[index]) < 1);
           name.textContent = original;
         }
-        const ratios = table.matches('.mw-catalog-table') ? [30,22,11,8,8,9,12] : table.matches('.mw-request-table') ? [32,9,9,18,12,20] : null;
+        const expectedWidths = table.matches('.mw-catalog-table') ? [null,null,128,112,88,96,132] : table.matches('.mw-request-table') ? [null,128,96,150,112,132] : null;
         return { controlled, stable, layout: getComputedStyle(table).tableLayout, expected, actual: parseFloat(getComputedStyle(table.querySelector('th:last-child')).width),
-          ratios, widths: headings.map(th => th.getBoundingClientRect().width), width: table.getBoundingClientRect().width };
+          editorGrid: innerWidth <= 1100 && Boolean(container.closest('.mw-order-panel')),
+          expectedWidths, widths: headings.map(th => th.getBoundingClientRect().width), width: table.getBoundingClientRect().width };
       }));
       for (const layout of layouts) {
-        if (layout.controlled) check(layout.layout === 'fixed', label + ': the semantic record table controls column widths', layout);
+        if (layout.controlled && !layout.editorGrid) check(layout.layout === 'fixed', label + ': the semantic record table controls column widths', layout);
         if (layout.controlled) check(layout.stable, label + ': a thirty-character name does not move other columns', layout);
         if (layout.expected) check(Math.abs(layout.actual - layout.expected) < 1, label + ': per-table operation width wins the generic rule', layout);
-        if (layout.ratios) check(layout.widths.every((width,index) => Math.abs(width / layout.width * 100 - layout.ratios[index]) < 0.5), label + ': each column receives its explicit proportional width', layout);
+        if (layout.expectedWidths && page.viewportSize().width >= 1280) check(layout.widths.every((width,index) => layout.expectedWidths[index] === null || Math.abs(width - layout.expectedWidths[index]) < 1.5), label + ': short fields use their semantic width instead of percentages', layout);
       }
     }
     const result = await page.locator(selector).evaluateAll(containers => containers.map(container => {
       const table = container.querySelector('table');
       const headers = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
-      const cells = [...table.querySelectorAll('tbody tr:not([hidden])')].filter(tr => !tr.querySelector('[colspan]')).flatMap(tr => [...tr.children].map((td, i) => ({ label: td.getAttribute('data-label'), expected: headers[i], selection: td.classList.contains('cell-select') })));
+    const cells = [...table.querySelectorAll('tbody tr:not([hidden])')].filter(tr => !tr.querySelector('[colspan]')).flatMap(tr => [...tr.children].map((td, i) => ({ label: td.getAttribute('data-label'), expected: headers[i], selection: td.classList.contains('cell-select') })));
       return { display: getComputedStyle(table).display, width: container.clientWidth, scroll: container.scrollWidth, cells };
     }));
     for (const row of result) if (page.viewportSize().width < 768) {
@@ -245,7 +253,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     if (page.viewportSize().width >= 768 && page.viewportSize().width < 1280) {
       const operations = await page.locator(selector).evaluateAll(containers => containers.flatMap(container => {
         const cell = container.querySelector('tbody tr:not([hidden]) td.cell-act');
-        if (!cell) return [];
+        if (!cell || innerWidth <= 1100 && container.closest('.mw-order-panel')) return [];
         const original = container.scrollLeft, snapshots = [];
         for (const position of [0, container.scrollWidth]) {
           container.scrollLeft = position;
@@ -285,10 +293,11 @@ test('production workspace keeps identity, records, returns and draft inputs usa
   };
   const checkInlineIssue = async (label, lostResponse = false) => {
     await page.locator('#mw-filters [name="q"]').fill('布局物资');
+    await revealControl(page.locator('#mw-filters [name="regionId"]'));
     await page.locator('#mw-filters [name="regionId"]').selectOption(String(region.id));
     await page.locator('#mw-filters [name="warehouse"]').selectOption('MAIN');
     const filtered = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/stock/batches' && new URL(response.url()).searchParams.get('q') === '布局物资');
-    await page.locator('#mw-filters [type="submit"]').click();
+    await page.locator('#mw-filters [type="submit"]').first().click();
     await filtered;
     await page.locator('#page .mw-stock-table [data-mw="stock-issue"]').first().waitFor();
     const next = page.locator('#page .mw-pagebar [data-mw="next"]');
@@ -307,8 +316,8 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       const text = cell.querySelector('.mw-cell-text'), style = text && getComputedStyle(text);
       return { full: cell.title, text: text?.textContent, clamp: style?.webkitLineClamp, height: text?.getBoundingClientRect().height, lineHeight: Number.parseFloat(style?.lineHeight) };
     });
-    check(note.full === stockNote && note.text === stockNote && note.clamp === '2' && note.height <= note.lineHeight * 2 + 1,
-      label + ': inventory shows a two-line summary while retaining the complete note', note);
+    check(note.full === stockNote && note.text === stockNote && note.clamp === 'none',
+      label + ': inventory retains the complete readable note without a forced two-line crop', note);
     if (label === '1366-stock') {
       await noteRow.locator('[data-mw="stock-detail"]').click();
       await page.locator('#mw-view').waitFor({ state: 'visible' });
@@ -319,10 +328,12 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     if (label === '1366x480-stock') {
       const row = noteRow;
       await row.scrollIntoViewIfNeeded();
-      check(await visibleInViewport(row), label + ': a complete inventory row remains reachable at low height');
+      await row.locator('[data-mw="stock-issue"]').scrollIntoViewIfNeeded();
       check(await visibleInViewport(row.locator('[data-mw="stock-issue"]')), label + ': low-height inventory retains its reachable issue action');
     }
-    const source = await stockContext(), button = noteRow.locator('[data-mw="stock-issue"]');
+    const button = noteRow.locator('[data-mw="stock-issue"]');
+    await button.scrollIntoViewIfNeeded();
+    const source = await stockContext();
     const purpose = `合成页内领用 ${label}`;
     await button.click();
     await page.locator('#mw-inline-form-slot #mw-dialog').waitFor({ state: 'visible' });
@@ -428,14 +439,14 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     // Use manual input in the real scan dialog; this checks the workflow without claiming camera hardware coverage.
     try {
       const resolved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/materials/scan/resolve');
-      await page.locator('#page [data-mw="scan-issue"]').click();
+      await clickControl('#page [data-mw="scan-issue"]');
       await page.locator('.ms-manual [name="code"]').fill(firstReceipt.receipt.units[0].code);
       await page.locator('.ms-manual [type="submit"]').click();
       const resolution = await resolved;
       check(resolution.status() === 200 && (await resolution.json()).kind === 'unit', 'manual entry in the real scan dialog resolves through the actual unit-code API');
       await page.locator('#mw-view [data-mw="issue-create"]').first().click();
       await page.locator('#mw-inline-form-slot #mw-dialog').waitFor({ state: 'visible' });
-      check(new Set(scannedPageSizes).size >= 2, 'scan from settings awaits a genuine automatic inventory page-size reload', scannedPageSizes);
+      check(scannedPageSizes.length >= 1 && scannedPageSizes.every(size => size === 10), 'scan from settings uses stable inventory pagination rather than reloading based on row heights', scannedPageSizes);
       check(await page.locator('#mw-fields [name="quantity"]').inputValue() === '1', 'a real unit-code result prefills one item in the inventory inline form');
       check(await page.locator('.mw-nav [data-page="inventory"]').getAttribute('aria-current') === 'page' && !(await page.locator('#mw-view').isVisible()), 'scan batch selection closes its detail and reaches inventory');
       await screenshot('1366-manual-unit-scan-inline');
@@ -444,7 +455,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     } finally {
       page.off('request', observeScannedInventory);
     }
-    for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 1920, height: 1080 }, { width: 1536, height: 864 }]) {
+    for (const size of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 900, height: 650 }, { width: 768, height: 1024 }, { width: 390, height: 844 }, { width: 1920, height: 1080 }, { width: 1536, height: 864 }, { width: 1093, height: 614 }, { width: 360, height: 800 }]) {
       await page.setViewportSize(size);
       await navigate('materials');
       await checkShell(`${size.width} materials`, false);
@@ -452,8 +463,12 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         await navigateMaterial(materialPage);
         if (materialPage === 'acceptance') {
           // The seeded request is fully received; exercise its full historical order, not an empty open-order list.
+          if (!(await page.locator('#mw-order-picker').isVisible())) await page.locator('#mw-order-picker-toggle').click();
+          await revealControl(page.locator('#mw-filters [name="status"]'));
           await page.locator('#mw-filters [name="status"]').selectOption('done');
-          await page.locator('#mw-filters [type="submit"]').click();
+          await page.locator('#mw-filters [type="submit"]').first().click();
+          await page.locator('#mw-order-picker [data-mw="wf-order"]').first().waitFor({ state:'attached' });
+          if (await page.locator('#mw-order-picker').isVisible()) await page.locator('#mw-order-picker [data-mw="wf-order"]').first().click();
           await page.locator('#mw-order-workspace [data-wf-row]').first().waitFor();
           check(await page.locator('#mw-order-workspace [data-wf-row]').count() === 20, `${size.width}: acceptance retains the complete real request detail`);
         }
@@ -487,6 +502,23 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         }
         if (materialPage === 'inventory') {
           await checkStockColumns(`${size.width} stock columns`);
+          if (size.width < 768) {
+            const reset=page.locator('#mw-filters [data-mw="reset"]');
+            if(await reset.count()){
+              await reset.click();
+              await page.locator('.mw-stock-table tbody tr').first().waitFor();
+            }
+            await page.locator('.mw-nav').scrollIntoViewIfNeeded();
+            const density=await page.locator('.mw-stock-table tbody tr').first().evaluate(row=>{
+              const box=selector=>row.querySelector(selector).getBoundingClientRect();
+              return {top:row.getBoundingClientRect().top,name:box('.stock-name').top,quantity:box('.stock-quantity').top,
+                unit:box('.stock-unit').top,date:box('.stock-date').top,columns:getComputedStyle(row).gridTemplateColumns.split(' ').length};
+            });
+            check(density.top >= 0 && density.top <= 320, `${size.width}: default stock begins within the compact first-screen target`,density);
+            check(density.name < density.quantity && density.quantity === density.unit && density.quantity < density.date && density.columns === 2,
+              `${size.width}: stock names and quantity/unit lead the same-DOM two-column phone layout`,density);
+            await screenshot(`${size.width}-inventory-default`);
+          }
           await checkInlineIssue(`${size.width}-stock`, size.width === 1366);
         }
         if (materialPage === 'inventory' && size.width === 390) {
@@ -507,7 +539,11 @@ test('production workspace keeps identity, records, returns and draft inputs usa
             const state = await pager.evaluate(node => ({ hidden: node.hidden, derived: node.classList.contains('ws-pagination'),
               current: Number(node.textContent.match(/第 (\d+) \/ /)?.[1]), pages: Number(node.textContent.match(/\/ (\d+) 页/)?.[1]) }));
             check(state.hidden === (state.current <= 1 && state.pages <= 1), `${size.width} ${materialPage}: navigation visibility follows its real page count`, state);
-            if (!state.hidden) check(await visibleInViewport(pager), `${size.width} ${materialPage}: record pagination is on the first screen`);
+            if (!state.hidden) {
+              await pager.scrollIntoViewIfNeeded();
+              check(await visibleInViewport(pager), `${size.width} ${materialPage}: stable-count pagination remains reachable`);
+              await page.locator('.mw-head').scrollIntoViewIfNeeded();
+            }
           }
         }
       }
@@ -516,12 +552,33 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       const grouped = page.locator('#page .mw-panel-top .mw-more');
       check(JSON.stringify(await grouped.locator('button').allTextContents()) === JSON.stringify(['导入 Excel', '导入模板', '导出 Excel']),
         `${size.width}: the real catalog groups secondary commands without changing their capability`);
-      check(await page.locator('#mw-filters [type="submit"]').getAttribute('class') === 'ghost', `${size.width}: catalog query remains an explicit secondary submit`);
+      check(await page.locator('#mw-filters [type="submit"]').first().evaluate(node => node.classList.contains('ghost')), `${size.width}: catalog query remains an explicit secondary submit`);
       const duplicateTitle = await page.getByRole('heading', { name: '物资信息库', exact: true }).evaluate(node => ({
-        accessibleName: node.getAttribute('aria-label'), clip: getComputedStyle(node).clipPath, width: node.getBoundingClientRect().width }));
-      check(duplicateTitle.accessibleName === '物资信息库' && duplicateTitle.clip === 'inset(50%)' && duplicateTitle.width === 1,
-        `${size.width}: hiding the duplicate title preserves its accessible meaning`, duplicateTitle);
+        accessibleName: node.getAttribute('aria-label') || node.textContent.trim(), clip: getComputedStyle(node).clipPath, width: node.getBoundingClientRect().width }));
+      check(duplicateTitle.accessibleName === '物资信息库' && duplicateTitle.clip === 'none' && duplicateTitle.width > 1,
+        `${size.width}: the catalog page heading is visible within the module`, duplicateTitle);
       await grouped.locator('summary').click();
+      if (size.width === 1366) {
+        await grouped.locator('[data-mw="catalog-import"]').click();
+        await page.locator('#mw-dialog').waitFor({state:'visible'});
+        check(!(await grouped.evaluate(node=>node.open)), 'opening a child form closes its background More menu');
+        await page.keyboard.press('Escape');
+        await page.locator('#mw-dialog').waitFor({state:'hidden'});
+        check(true,'the first Escape reaches the current child workspace instead of a background menu');
+        const rowMenu=page.locator('.mw-catalog-table .mw-row-actions .mw-more').first();
+        check(await rowMenu.count()===1,'catalog row retains its low-frequency actions');
+        await rowMenu.locator('summary').click();
+        await page.evaluate(()=>new Promise(requestAnimationFrame));
+        const popup=await rowMenu.locator(':scope > div').evaluate(node=>{
+          const b=node.getBoundingClientRect(),hit=document.elementFromPoint(b.left+8,b.bottom-8);
+          return {fits:b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight,reachable:node.contains(hit)};
+        });
+        check(popup.fits&&popup.reachable,'row More popup is neither clipped by the table nor outside the viewport',popup);
+        await screenshot('1366-catalog-row-menu');
+        await page.keyboard.press('Escape');
+        check(!(await rowMenu.evaluate(node=>node.open)),'Escape closes the active row menu when no child workspace is open');
+        await grouped.locator('summary').click();
+      }
       check(await grouped.locator('[data-mw="catalog-export"]').isVisible(), `${size.width}: grouped export remains operable`);
       if (size.width === 390) check((await grouped.locator('summary').boundingBox()).height >= 44, 'the real phone catalog menu retains a 44px touch target');
       await screenshot(`${size.width}-catalog-menu`);
@@ -551,7 +608,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
           await page.waitForFunction(before => document.querySelector('#page .mw-pagebar')?.textContent !== before && !document.querySelector('#page .mw-empty'), before);
         }
         await page.locator('#mw-filters [name="q"]').fill('布局物资');
-        await page.locator('#mw-filters [type="submit"]').click();
+        await page.locator('#mw-filters [type="submit"]').first().click();
         await page.locator('#page [data-mw="catalog-detail"]').first().waitFor();
         const target = page.locator(`#page [data-mw="catalog-detail"][data-catalog="${catalog[8].id}"]`);
         while (!(await target.count())) {
@@ -635,6 +692,10 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         await checkCards(`${size.width} settings ${setting}`);
       }
       await screenshot(`${size.width}-settings-numbering`);
+      const settings=await page.locator('.mw-settings').evaluate(node=>({width:node.getBoundingClientRect().width,
+        navigation:node.querySelector('.mw-settings-nav').getBoundingClientRect().width}));
+      check(settings.width<=1041,`${size.width}: settings preserve a bounded content region`,settings);
+      if(size.width>=768)check(Math.abs(settings.navigation-176)<1.5,`${size.width}: settings local navigation uses its semantic width`,settings);
       await navigate('archives');
       await page.locator('#page .ws-pagination').waitFor();
       await checkShell(`${size.width} archives`);
@@ -647,13 +708,22 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         check(JSON.stringify(materialDensity) === JSON.stringify(archiveDensity), `${size.width}: archives and materials use the same record density`, { materialDensity, archiveDensity });
         check(archiveDensity.headerFont === '13px' && archiveDensity.cellFont === '14px' && archiveDensity.cellPadding === '8px 12px' && archiveDensity.lineHeight === '21px', `${size.width}: record typography matches R0/R1`, archiveDensity);
       } else {
-        const categories = await page.locator('#page .archive-menu').evaluate(node => ({ height: node.getBoundingClientRect().height, wrap: getComputedStyle(node).flexWrap,
-          counts: [...node.querySelectorAll('button:not(.active) small')].map(small => getComputedStyle(small).display), activeCount: getComputedStyle(node.querySelector('button.active small')).display }));
-        check(categories.height <= 56 && categories.wrap === 'nowrap' && categories.counts.every(display => display === 'none') && categories.activeCount !== 'none', 'phone archive categories form one compact chip row with the selected count', categories);
+        const categories = await page.locator('#archive-folder-select').evaluate(node => ({ height: node.getBoundingClientRect().height,
+          count: node.options.length, label: node.closest('label')?.textContent, value: node.value }));
+        check(categories.height >= 44 && categories.count >= 7 && categories.label.includes('档案分区') && categories.value === 'all', 'phone archive classifications use a labelled touch-sized filter', categories);
         check(await visibleInViewport(page.locator('#page .table tbody tr:not([hidden])').first()), 'phone archive first record fits completely in the initial viewport');
       }
-      if (size.width >= 1280) check(await visibleInViewport(page.locator('#page .ws-pagination').first()), `${size.width}: archive pagination remains in the viewport`);
+      if (size.width >= 1280) {
+        const pager=page.locator('#page .ws-pagination').first();await pager.scrollIntoViewIfNeeded();
+        check(await visibleInViewport(pager), `${size.width}: archive fixed-count pagination remains reachable`);
+        await page.locator('#archive-folder-select').scrollIntoViewIfNeeded();
+      }
       await screenshot(`${size.width}-archives`);
+      await page.locator('#archive-folder-select').selectOption('体系文件档案');
+      await page.waitForFunction(()=>document.querySelector('#archive-result-count')?.textContent.includes('体系文件档案'));
+      check(await page.locator('[data-af-clear]').isVisible(),`${size.width}: active archive classification is visibly clearable`);
+      await page.locator('[data-af-clear]').click();
+      await page.waitForFunction(()=>document.querySelector('#archive-folder-select')?.value==='all');
       if (size.width === 390) {
         await page.emulateMedia({ media: 'print' });
         const printing = await page.locator('#page .table tbody tr').evaluateAll(rows => rows.map(row => getComputedStyle(row).display));

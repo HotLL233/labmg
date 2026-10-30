@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>物资管理 · 布局优化参考</title>
+<style>
+/* ============ 令牌：沿用项目 tokens.css 的 7 级字号 / 8px 节奏 ============ */
+:root{
+  --navy:#14263d; --navy-soft:#24405f;
+  --blue:#2c6df6; --blue-ink:#1b52c4; --blue-bg:#eef4ff;
+  --bg:#f4f7fb; --surface:#fff; --subtle:#f8fafc;
+  --line:#e3e8ef; --line-soft:#f0f3f7;
+  --text:#192537; --text-2:#42536b; --muted:#718096; --faint:#96a3b5;
+  --green:#13895e; --green-bg:#eaf8f1;
+  --red:#c94646; --red-bg:#fdeeee;
+  --amber:#a86400; --amber-bg:#fdf3e3;
+
+  --fs-micro:11px; --fs-note:12px; --fs-label:13px; --fs-body:14px;
+  --fs-panel:17px; --fs-page:21px; --fs-metric:24px;
+  --lh-tight:1.3; --lh-body:1.5; --lh-prose:1.7;
+  --h-control:36px; --r-sm:8px; --r-md:10px; --r-lg:14px;
+  --ring:0 0 0 3px #2c6df63d;
+  --side:228px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif;
+  font-size:var(--fs-body); line-height:var(--lh-body);
+  color:var(--text); background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,p{margin:0}
+button{font:inherit;cursor:pointer;border:0;border-radius:var(--r-sm)}
+input,select{font:inherit;color:inherit}
+
+/* ============ 骨架 ============ */
+.app{display:grid;grid-template-columns:var(--side) 1fr;height:100vh;overflow:hidden}
+
+/* 侧栏 */
+.side{background:var(--navy);color:#c9d6e4;padding:18px 12px;display:flex;flex-direction:column;gap:6px}
+.brand{display:flex;gap:10px;align-items:center;padding:4px 8px 20px}
+.brand i{
+  font-style:normal;width:34px;height:34px;display:grid;place-items:center;border-radius:9px;
+  background:linear-gradient(135deg,#397dfb,#15c99c);color:#fff;font-weight:700;font-size:17px;
+}
+.brand b{display:block;font-size:15px;color:#fff;letter-spacing:.01em}
+.brand small{font-size:var(--fs-micro);color:#8fa4bb}
+.side-label{font-size:var(--fs-micro);color:#6f87a1;letter-spacing:.08em;padding:10px 10px 6px}
+.nav-item{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:9px 10px;border-radius:var(--r-sm);background:none;color:#b7c7d8;font-size:var(--fs-label);
+}
+.nav-item:hover{background:var(--navy-soft);color:#fff}
+.nav-item[aria-current="page"]{background:#2f5c8f;color:#fff;font-weight:600}
+.nav-item .ico{width:16px;text-align:center;opacity:.85;font-size:13px}
+.side-foot{margin-top:auto;padding:10px;font-size:var(--fs-micro);color:#7d93ac;display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:#22cf92;box-shadow:0 0 0 3px #22cf9222}
+
+/* 主区 */
+.main{display:flex;flex-direction:column;min-width:0}
+
+/* 页头：68px，一行装完标题 + 上下文 + 账号 */
+.topbar{
+  height:68px;flex:none;background:var(--surface);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:16px;padding:0 20px;
+}
+.crumb{display:flex;align-items:center;gap:8px;font-size:var(--fs-note);color:var(--muted)}
+.crumb b{color:var(--text);font-size:var(--fs-page);font-weight:650;letter-spacing:-.01em;line-height:1}
+.crumb .sep{color:#c7d1de}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.who{display:flex;align-items:center;gap:8px;font-size:var(--fs-note);color:var(--text-2)}
+.who .ver{color:var(--faint);font-variant-numeric:tabular-nums}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--blue-bg);color:var(--blue);display:grid;place-items:center;font-size:var(--fs-micro);font-weight:600}
+.btn-logout{background:none;color:var(--muted);padding:6px 10px;font-size:var(--fs-note);border:1px solid var(--line)}
+.btn-logout:hover{border-color:#f0b9b9;color:var(--red);background:#fffafa}
+
+/* 页签：与工具按钮分层（一条浅底带，页签左、工具右，中间留白隔开） */
+.tabsbar{flex:none;background:var(--surface);border-bottom:1px solid var(--line);padding:0 20px;display:flex;align-items:center;gap:4px}
+.tab{
+  background:none;color:var(--text-2);font-size:var(--fs-label);padding:11px 12px;
+  border-bottom:2px solid transparent;border-radius:0;position:relative;top:1px;
+}
+.tab:hover{color:var(--text)}
+.tab[aria-selected="true"]{color:var(--blue);font-weight:600;border-bottom-color:var(--blue)}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center;padding-left:16px}
+.tool{
+  background:none;color:var(--muted);font-size:var(--fs-note);
+  padding:5px 9px;border-radius:6px;display:flex;align-items:center;gap:5px;
+}
+.tool:hover{background:var(--subtle);color:var(--text-2)}
+.tools::before{content:"";width:1px;height:16px;background:var(--line);margin-right:6px}
+
+/* 面板撑满可用高度：数据少时空白留在面板内，不形成"页面下方断层" */
+.view>.panel{flex:1;min-height:0}
+.panel>.table-wrap{flex:1;min-height:0}
+.content{flex:1;min-height:0;padding:16px 20px 0;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.view{display:none;flex-direction:column;gap:12px;min-height:0}
+.view.is-active{display:flex;flex:1;min-height:0}
+
+/* 面板 */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);display:flex;flex-direction:column;min-height:0}
+
+/* 工具条：标题 + 计数 + 单主按钮 */
+.panel-top{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line-soft)}
+.panel-top h2{font-size:var(--fs-body);font-weight:650;line-height:var(--lh-tight)}
+.count{font-size:var(--fs-note);color:var(--muted);background:var(--subtle);border:1px solid var(--line);border-radius:20px;padding:1px 8px;font-variant-numeric:tabular-nums}
+.panel-top .spacer{margin-left:auto}
+.btn{height:var(--h-control);padding:0 14px;display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-label)}
+.btn-primary{background:var(--blue);color:#fff;font-weight:600}
+.btn-primary:hover{background:var(--blue-ink)}
+.btn-ghost{background:var(--surface);color:var(--text-2);border:1px solid #d5dde8}
+.btn-ghost:hover{border-color:#b9c5d6;background:var(--subtle)}
+.btn-sm{height:30px;padding:0 10px;font-size:var(--fs-note)}
+
+/* 筛选区：标签内联 + 控件等高 36 */
+.filters{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.field{display:flex;align-items:center;gap:6px;font-size:var(--fs-note);color:var(--muted)}
+.field>label{white-space:nowrap}
+.ctrl{
+  height:var(--h-control);border:1px solid #d5dde8;border-radius:var(--r-sm);
+  background:var(--surface);padding:0 10px;font-size:var(--fs-label);color:var(--text);
+}
+.ctrl:focus{outline:0;border-color:var(--blue);box-shadow:var(--ring)}
+.search{position:relative}
+.search input{width:264px;padding-left:30px}
+.search .mg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:13px;pointer-events:none}
+.date-range{display:flex;align-items:center;gap:6px}
+.date-range input{width:132px;font-variant-numeric:tabular-nums}
+.date-range .to{color:var(--faint);font-size:var(--fs-note)}
+.filters .end{margin-left:auto;display:flex;gap:8px}
+.btn-text{background:none;color:var(--muted);font-size:var(--fs-label);padding:0 8px;height:var(--h-control)}
+.btn-text:hover{color:var(--text-2)}
+
+/* 表格：单一密度，列宽受控 */
+.table-wrap{overflow:auto}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{
+  text-align:left;font-size:var(--fs-note);font-weight:500;color:#6b7a8e;
+  background:var(--subtle);padding:9px 14px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+td{padding:11px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+tbody tr:hover{background:#fbfcfe}
+tbody tr:last-child td{border-bottom:0}
+
+/* 主/副两行：只出现在需要的地方，且副行弱色 */
+.cell-main{display:block;font-weight:600;line-height:var(--lh-tight);color:var(--text)}
+.cell-sub{display:block;font-size:var(--fs-note);color:var(--muted);margin-top:3px;line-height:1.4;
+  font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* 状态：四档语义 */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-micro);font-weight:500;
+  padding:2px 8px;border-radius:20px;white-space:nowrap;line-height:1.7}
+.pill::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.75}
+.pill[data-tone="progress"]{color:var(--blue);background:var(--blue-bg)}
+.pill[data-tone="done"]{color:var(--green);background:var(--green-bg)}
+.pill[data-tone="warn"]{color:var(--amber);background:var(--amber-bg)}
+.pill[data-tone="danger"]{color:var(--red);background:var(--red-bg)}
+.rev{font-size:var(--fs-micro);color:var(--faint);margin-left:6px;font-variant-numeric:tabular-nums}
+
+/* 操作列：主任务描边按钮 + 次级进「⋯」 */
+.ops{display:flex;align-items:center;gap:6px}
+.btn-row{
+  height:28px;padding:0 10px;font-size:var(--fs-note);border:1px solid #cfd9e6;background:var(--surface);color:var(--blue-ink);
+  display:inline-flex;align-items:center;gap:4px;font-weight:500;border-radius:6px;white-space:nowrap;
+}
+.btn-row:hover{border-color:var(--blue);background:var(--blue-bg)}
+.btn-row.is-done{color:var(--text-2);border-color:var(--line)}
+.btn-row.is-done:hover{color:var(--blue-ink);border-color:var(--blue)}
+.more{
+  width:28px;height:28px;background:none;color:var(--muted);border-radius:6px;font-size:15px;line-height:1;
+  display:grid;place-items:center;
+}
+.more:hover{background:var(--subtle);color:var(--text)}
+.link-quiet{background:none;color:var(--muted);font-size:var(--fs-note);padding:2px 0}
+.link-quiet:hover{color:var(--blue-ink)}
+
+/* 分页 */
+.pager{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line-soft);font-size:var(--fs-note);color:var(--muted)}
+.pager .spacer{margin-left:auto}
+.page-btn{height:28px;min-width:28px;padding:0 8px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);font-size:var(--fs-note);border-radius:6px}
+.page-btn[aria-current="true"]{background:var(--blue);border-color:var(--blue);color:#fff}
+.page-btn:disabled{color:#c3ccd8;background:var(--subtle)}
+
+/* ============ 验收视图：左列表 + 右详情 ============ */
+.accept{display:grid;grid-template-columns:272px 1fr;gap:12px;flex:1;min-height:0}
+.queue{display:flex;flex-direction:column;min-height:0}
+.queue-head{padding:10px 12px;border-bottom:1px solid var(--line-soft);display:flex;gap:6px;align-items:center}
+.queue-head .search{flex:1}
+.queue-head .search input{width:100%;height:32px;font-size:var(--fs-note)}
+.queue-head .btn-icon{width:32px;height:32px;border:1px solid #d5dde8;background:var(--surface);color:var(--text-2);border-radius:6px;display:grid;place-items:center;font-size:13px}
+.queue-list{overflow:auto;flex:1;padding:6px}
+.q-item{
+  width:100%;text-align:left;background:none;padding:9px 10px;border-radius:var(--r-sm);
+  display:grid;gap:3px;position:relative;border:1px solid transparent;
+}
+.q-item:hover{background:var(--subtle)}
+.q-item[aria-current="true"]{background:var(--blue-bg);border-color:#cfe0ff}
+.q-item[aria-current="true"]::before{
+  content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--blue);
+}
+.q-top{display:flex;align-items:center;gap:6px}
+.q-no{font-size:var(--fs-label);font-weight:600;line-height:1.3}
+.q-sub{font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-meta{font-size:var(--fs-micro);color:var(--faint);display:flex;gap:8px;align-items:center}
+.q-meta em{font-style:normal;color:var(--amber)}
+
+.detail{display:flex;flex-direction:column;min-height:0}
+.detail-head{padding:12px 16px;border-bottom:1px solid var(--line-soft);display:flex;align-items:flex-start;gap:12px}
+.detail-head .meta{min-width:0}
+.detail-head h2{font-size:var(--fs-panel);font-weight:650;line-height:var(--lh-tight)}
+.detail-head .sub{font-size:var(--fs-note);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.detail-head .acts{margin-left:auto;display:flex;gap:8px;flex:none}
+
+/* 信息条：有底色才叫"条" */
+.notice{
+  display:flex;gap:8px;align-items:flex-start;margin:0 16px 10px;
+  padding:8px 10px;border-radius:var(--r-sm);background:var(--blue-bg);border:1px solid #dbe7ff;
+  font-size:var(--fs-note);color:var(--blue-ink);line-height:var(--lh-prose);
+}
+.notice .i{font-size:12px;line-height:1.6}
+
+/* 子表 */
+.subtable th{padding:8px 12px;font-size:var(--fs-micro);letter-spacing:.02em}
+.subtable td{padding:10px 12px}
+.col-check{width:34px}
+.col-num{width:56px}
+.col-mid{width:84px}
+.col-money{width:100px}
+.col-state{width:80px}
+.col-op{width:126px}
+
+/* 行展开：把 3 个输入框从表格里挪出来 */
+.expander{padding:0;border-bottom:1px solid var(--line-soft)}
+.expander-inner{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:12px 14px 14px;background:#fbfcfe}
+.expander-inner label{display:grid;gap:4px;font-size:var(--fs-micro);color:var(--muted)}
+.expander-inner input{height:32px;border:1px solid #d5dde8;border-radius:6px;padding:0 9px;font-size:var(--fs-label);background:var(--surface)}
+.expander-inner .hintline{grid-column:1/-1;font-size:var(--fs-micro);color:var(--faint)}
+.toggle-row{background:none;color:var(--blue-ink);font-size:var(--fs-micro);padding:2px;text-decoration:underline;text-underline-offset:2px}
+tr.is-open{background:#fafcff}
+
+.row-check{width:15px;height:15px;accent-color:var(--blue);vertical-align:middle}
+
+/* 底部操作条 */
+.detail-foot{
+  display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line-soft);
+  background:var(--surface);border-radius:0 0 var(--r-lg) var(--r-lg);margin-top:auto;
+}
+.detail-foot .stat{font-size:var(--fs-note);color:var(--muted)}
+.detail-foot .stat b{color:var(--text);font-variant-numeric:tabular-nums}
+.detail-foot .spacer{margin-left:auto}
+
+@media (max-width:1180px){
+  :root{--side:64px}
+  .brand b,.brand small,.nav-item span:not(.ico),.side-label,.side-foot span{display:none}
+  .nav-item{justify-content:center;padding:11px 0}
+  .search input{width:200px}
+}
+@media (max-width:1000px){
+  .accept{grid-template-columns:1fr}
+  .queue{display:none}
+}
+/* 小屏：页签不折行、工具收起、表格允许横向滚动（不在 390 下逐字换行） */
+@media (max-width:767px){
+  .topbar{padding:0 12px;height:60px;gap:10px}
+  .crumb b{font-size:var(--fs-panel)}
+  .crumb>span:first-child,.crumb .sep{display:none}
+  .who>span:not(.avatar){display:none}
+  .tabsbar{padding:0 12px;overflow-x:auto}
+  .tab{white-space:nowrap;flex:none}
+  .tools{display:none}
+  .content{padding:12px 12px 0}
+  .filters{padding:10px 12px;gap:8px}
+  .filters .field{flex:1 1 100%;min-width:0}
+  .field>label{min-width:3em}
+  .search input{width:100%}
+  .filters .end{margin-left:0;width:100%;justify-content:flex-end}
+  .panel-top{padding:10px 12px;flex-wrap:wrap;gap:8px}
+  .panel-top h2{flex:1 1 100%;min-width:0}
+  .panel-top .spacer{display:none}
+  .panel-top .btn{flex:1 1 0;min-width:0;justify-content:center}
+  .count{display:none}
+  .date-range{width:100%;flex:1 1 auto;min-width:0}
+  .date-range input{flex:1 1 0;width:auto;min-width:0}
+  .table-wrap{overflow-x:auto}
+  table{min-width:600px}
+  tbody td{white-space:nowrap}
+  .detail-head{padding:10px 12px;flex-direction:column;gap:8px}
+  .detail-head .acts{width:100%;flex-wrap:wrap}
+  .notice{margin:0 12px 8px}
+  .expander-inner{grid-template-columns:1fr;padding:10px 12px 12px}
+  .detail-foot{padding:10px 12px;flex-wrap:wrap;gap:8px}
+  .detail-foot .spacer{display:none}
+  .detail-foot .btn{flex:1 1 auto}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- 侧栏：层级只保留两级（模块 → 无二级），当前项才加粗 -->
+  <aside class="side">
+    <div class="brand">
+      <i>L</i>
+      <div><b>LabOS</b><small>实验室综合管理系统</small></div>
+    </div>
+    <div class="side-label">工作区</div>
+    <button class="nav-item"><span class="ico">▦</span><span>工作台</span></button>
+    <button class="nav-item" aria-current="page"><span class="ico">◈</span><span>物资管理</span></button>
+    <div class="side-foot"><i class="dot"></i><span>本地服务运行中</span></div>
+  </aside>
+
+  <div class="main">
+    <!-- 页头：面包屑式单层标题，账号与退出降权 -->
+    <header class="topbar">
+      <div class="crumb">
+        <span>物资管理</span>
+        <span class="sep">/</span>
+        <b>申报与验收</b>
+      </div>
+      <div class="topbar-right">
+        <div class="who">
+          <span class="avatar">李</span>
+          <span>李庆瀚</span>
+          <span class="ver">v0.14.4</span>
+        </div>
+        <button class="btn-logout">退出</button>
+      </div>
+    </header>
+
+    <!-- 页签与工具分离：页签靠左并带下划线，工具靠右并加分隔线 -->
+    <nav class="tabsbar">
+      <button class="tab" role="tab" aria-selected="true" data-tab="list">物资申报</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="accept">验收</button>
+      <button class="tab" role="tab" aria-selected="false">库存</button>
+      <div class="tools">
+        <button class="tool">物资设置</button>
+        <button class="tool">扫码入库</button>
+        <button class="tool">扫码领用</button>
+        <button class="tool">使用说明</button>
+      </div>
+    </nav>
+
+    <main class="content">
+
+      <!-- ==================== 视图一：申报列表 ==================== -->
+      <section class="view is-active" id="view-list">
+        <div class="panel">
+          <div class="panel-top">
+            <h2>申报单</h2>
+            <span class="count">3 条</span>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost">导出 Excel</button>
+            <button class="btn btn-primary">＋ 新建申报单</button>
+          </div>
+
+          <div class="filters">
+            <div class="field search">
+              <span class="mg">⌕</span>
+              <input class="ctrl" placeholder="单号、名称、编码、分类、区域" aria-label="搜索申报单">
+            </div>
+            <div class="field">
+              <label for="f-status">状态</label>
+              <select class="ctrl" id="f-status">
+                <option>全部状态</option><option>已提交</option><option>已验收</option><option>已驳回</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-from">创建</label>
+              <span class="date-range">
+                <input class="ctrl" type="date" id="f-from" aria-label="起始日期">
+                <span class="to">至</span>
+                <input class="ctrl" type="date" aria-label="结束日期">
+              </span>
+            </div>
+            <div class="end">
+              <button class="btn-text">重置</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <colgroup>
+                <col style="width:30%"><col style="width:11%"><col style="width:13%">
+                <col style="width:15%"><col style="width:13%"><col style="width:18%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>申报单 / 单号</th>
+                  <th>创建人</th>
+                  <th>项数</th>
+                  <th>创建时间</th>
+                  <th>状态</th>
+                  <th style="text-align:right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <span class="cell-main">261023</span>
+                    <span class="cell-sub">SB-20261023-0001</span>
+                  </td>
+                  <td>李庆瀚</td>
+                  <td><span class="cell-main" style="font-weight:500">2 项</span><span class="cell-sub" style="color:var(--amber)">待处理 1</span></td>
+                  <td class="num" style="text-align:left">2026-10-23 08:11</td>
+                  <td><span class="pill" data-tone="progress">已提交</span><span class="rev">v1</span></td>
+                  <td>
+                    <div class="ops" style="justify-content:flex-end">
+                      <button class="btn-row">办理验收 →</button>
+                      <button class="more" title="更多操作">⋯</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="cell-main">20261201</span>
+                    <span class="cell-sub">WZ-20261023-B5C2C5552051</span>
+                  </td>
+                  <td>李庆瀚</td>
+                  <td><span class="cell-main" style="font-weight:500">1 项</span><span class="cell-sub" style="color:var(--amber)">待处理 1</span></td>
+                  <td class="num" style="text-align:left">2026-10-23 01:42</td>
+                  <td><span class="pill" data-tone="progress">已提交</span><span class="rev">v1</span></td>
+                  <td>
+                    <div class="ops" style="justify-content:flex-end">
+                      <button class="btn-row">办理验收 →</button>
+                      <button class="more" title="更多操作">⋯</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="cell-main">20261017</span>
+                    <span class="cell-sub">WZ-20261019-74B0FD6F4F45</span>
+                  </td>
+                  <td>李庆瀚</td>
+                  <td><span class="cell-main" style="font-weight:500">1 项</span><span class="cell-sub">待处理 0</span></td>
+                  <td class="num" style="text-align:left">2026-10-19 08:09</td>
+                  <td><span class="pill" data-tone="done">已验收</span><span class="rev">v1</span></td>
+                  <td>
+                    <div class="ops" style="justify-content:flex-end">
+                      <button class="btn-row is-done">查看记录</button>
+                      <button class="more" title="更多操作">⋯</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 单页不显示翻页控件，只留计数（与"单页隐分页"一致） -->
+          <div class="pager">
+            <span>共 3 条 · 已全部显示</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 视图二：验收办理 ==================== -->
+      <section class="view" id="view-accept">
+        <div class="accept">
+          <!-- 左：待办队列。筛选收进图标，列表项一行一个语义块 -->
+          <div class="panel queue">
+            <div class="queue-head">
+              <div class="search">
+                <input class="ctrl" placeholder="搜索单号 / 物资" aria-label="搜索待办">
+              </div>
+              <button class="btn-icon" title="筛选">☰</button>
+            </div>
+            <div class="queue-list">
+              <button class="q-item" aria-current="true">
+                <div class="q-top"><span class="q-no">261023</span><span class="pill" data-tone="progress">待验收</span></div>
+                <div class="q-sub">SB-20261023-0001 · 李庆瀚</div>
+                <div class="q-meta">2 项 · <em>待处理 1</em></div>
+              </button>
+              <button class="q-item">
+                <div class="q-top"><span class="q-no">20261201</span><span class="pill" data-tone="progress">待验收</span></div>
+                <div class="q-sub">WZ-20261023-B5C2C5552051</div>
+                <div class="q-meta">1 项 · <em>待处理 1</em></div>
+              </button>
+              <button class="q-item">
+                <div class="q-top"><span class="q-no">20261017</span><span class="pill" data-tone="done">已完成</span></div>
+                <div class="q-sub">WZ-20261019-74B0FD6F4F45</div>
+                <div class="q-meta">1 项 · 待处理 0</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 右：单据详情 -->
+          <div class="panel detail">
+            <div class="detail-head">
+              <div class="meta">
+                <h2>261023</h2>
+                <div class="sub">SB-20261023-0001 · 已提交 · v1 · 李庆瀚 · 2026-10-23 08:11</div>
+              </div>
+              <div class="acts">
+                <button class="btn btn-ghost btn-sm">查看 / 打印原单</button>
+                <button class="btn btn-ghost btn-sm">附件 2</button>
+                <button class="btn btn-ghost btn-sm">更多</button>
+              </div>
+            </div>
+
+            <div class="notice">
+              <span class="i">ⓘ</span>
+              <span>已提交：物资管理员按说明修订；已验收身份与历史库存保持不变。</span>
+            </div>
+
+            <div class="table-wrap">
+              <table class="subtable">
+                <colgroup>
+                  <col class="col-check"><col><col class="col-num"><col class="col-num">
+                  <col class="col-mid"><col class="col-money"><col class="col-state"><col class="col-op">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th><input class="row-check" type="checkbox" aria-label="全选"></th>
+                    <th>物资 / 规格 · 厂家</th>
+                    <th class="num">申报</th>
+                    <th class="num">剩余</th>
+                    <th class="num">本次合格</th>
+                    <th class="num">实付总额</th>
+                    <th>状态</th>
+                    <th style="text-align:right">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- 展开行：厂家与存放位置在此填写，表格内不再堆输入框 -->
+                  <tr class="is-open">
+                    <td><input class="row-check" type="checkbox" aria-label="选择 磷酸"></td>
+                    <td>
+                      <span class="cell-main">磷酸</span>
+                      <span class="cell-sub">MAT-D9BEDE041471ADAES · HPLC 试剂 · 试剂库</span>
+                    </td>
+                    <td class="num">5</td>
+                    <td class="num" style="color:var(--amber);font-weight:600">5</td>
+                    <td class="num"><input class="ctrl" style="width:72px;height:30px;text-align:right" value="5.000" aria-label="本次合格数量"></td>
+                    <td class="num"><input class="ctrl" style="width:86px;height:30px;text-align:right" value="0.000" aria-label="实付含税总额"></td>
+                    <td><span class="pill" data-tone="warn">未验收</span></td>
+                    <td>
+                      <div class="ops" style="justify-content:flex-end">
+                        <button class="btn-row">验收入库 →</button>
+                        <button class="more" title="更多操作">⋯</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr class="expander">
+                    <td colspan="8">
+                      <div class="expander-inner">
+                        <label>申报厂家<input value="未填写" disabled style="background:var(--subtle);color:var(--muted)"></label>
+                        <label>本次实收厂家<input placeholder="填写实收厂家"></label>
+                        <label>存放位置<input placeholder="如 A-03-02"></label>
+                        <span class="hintline">
+                          申报时未指定厂家与位置，验收时补齐即可；补齐后自动建档并回写库存。
+                          <button class="toggle-row">收起</button>
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td><input class="row-check" type="checkbox" aria-label="选择 乙醇" disabled checked></td>
+                    <td>
+                      <span class="cell-main">乙醇</span>
+                      <span class="cell-sub">MAT-914FC9366C7208B7 · HPLC 试剂 · 试剂库</span>
+                    </td>
+                    <td class="num">4</td>
+                    <td class="num">0</td>
+                    <td class="num" style="color:var(--faint)">—</td>
+                    <td class="num">¥24.00</td>
+                    <td><span class="pill" data-tone="done">已验收</span></td>
+                    <td>
+                      <div class="ops" style="justify-content:flex-end">
+                        <button class="btn-row is-done">验收记录</button>
+                        <button class="more" title="更多操作">⋯</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="detail-foot">
+              <span class="stat">2 项 · 已选 <b>1</b> 项 · 本次合格合计 <b>5.000</b></span>
+              <div class="spacer"></div>
+              <button class="btn btn-ghost">收验整单 / 待验项</button>
+              <button class="btn btn-primary">选中项入库</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+// 页签切换：只切换视图，不改页面结构（单套 DOM）
+function activateTab(target) {
+  document.querySelectorAll('.tab[data-tab]').forEach((tab) => {
+    tab.setAttribute('aria-selected', String(tab.dataset.tab === target));
+  });
+  document.querySelectorAll('.view').forEach((view) => {
+    view.classList.toggle('is-active', view.id === 'view-' + target);
+  });
+}
+document.querySelectorAll('.tab[data-tab]').forEach((tab) => {
+  tab.addEventListener('click', () => activateTab(tab.dataset.tab));
+});
+activateTab(location.hash === '#accept' ? 'accept' : 'list');
+
+// 行展开 / 收起：两个开关保持同步
+const expander = document.querySelector('.expander');
+const expanderRow = expander.previousElementSibling;
+function setOpen(open) {
+  expander.hidden = !open;
+  expanderRow.classList.toggle('is-open', open);
+  document.querySelectorAll('.toggle-row').forEach((btn) => {
+    btn.textContent = open ? '收起' : '＋ 展开「磷酸」的厂家与存放位置';
+  });
+}
+setOpen(true);
+document.querySelectorAll('.toggle-row').forEach((btn) => {
+  btn.addEventListener('click', () => setOpen(expander.hidden));
+});
+
+// 本原型不连接后端：主操作给出本地反馈，避免"点了没反应"
+document.querySelectorAll('.btn-primary, .btn-row').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    btn.animate([{ transform: 'scale(1)' }, { transform: 'scale(.97)' }, { transform: 'scale(1)' }], 160);
+  });
+});
+</script>
+</body>
+</html>

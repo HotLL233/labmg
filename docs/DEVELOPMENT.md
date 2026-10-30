@@ -1,5 +1,13 @@
 # 开发与版本管理
 
+> 2026-10-30 0.14.5候选：`package.json`／`package-lock.json`、两份部署YML与README版本引用已同步0.14.5，CHANGELOG归入本版，源码ZIP经未修改的`scripts/package.ps1`产出。**未产出双架构镜像TAR与GitHub Release**（本机Docker引擎未运行、无`gh` CLI／令牌），未打标签、未推送、未动NAS。完整`npm test`与浏览器专项未跑（无`LABOS_TEST_DATABASE_URL`与PG口令），本轮门禁仅为普通verify与无需数据库的静态测试；下方“当前交付0.14.4”仍指最新公开版本。
+
+> 2026-10-30 NAS独立测试已交付：用户授权打包并在NAS测试，新增`labos-ui-v1-test-20261030`项目，3101／8544端口、独立runtime／https／PG及测试CA，正式labos 0.14.4与labflow不动。本轮应用版本保持0.14.4，唯一测试标签`labos:ui-v1-test-20261030-a9d1effd1700`，未公开发布。交付目录`artifacts/packages/ui-v1-test-20261030-a9d1effd1700/`的README_TEST与DEPLOYMENT记录范围和停止命令；旧版本包、标签和registry未改。NAS38浏览器检查／11图、最终59客户端检查及测试应用重启持久化通过；本地代码摘要仍与前轮完整320项一致，不能冒称本轮又跑了320项。测试数据全合成，同IP不同端口共享Cookie风险须用无痕窗口／独立浏览器配置规避，未改正式认证合同或设备信任。
+
+> 2026-10-30本地UI交付：用户批准布局V1后已实施并完成隔离PG18.4＋Edge和完整串行回归320项／319通过／1Docker条件跳过，当前仍为未发布源码，版本／NAS保持0.14.4。最新范围及未验边界见MEMORY顶部与UI_LAYOUT_BALANCE_PLAN第10节。合成数据预览以`npm run dev`运行在`http://localhost:3001`，独立数据库与runtime在`artifacts/cache/ui-layout-v1-20261029/`，不接日常库；不在文档记录演示凭据。使用完先在pwsh7运行`./artifacts/cache/ui-layout-v1-20261029/stop-preview.ps1`，再运行同目录`stop-postgres.ps1`，两者核对各自身份后仅停止本轮进程／专用PG，不删除数据、不停止其他项目。
+
+> 2026-10-28后续运维：用户另行授权后，原NAS labos项目已从0.14.3升级0.14.4；停写逻辑备份、停PG完整归档、独立PG18逻辑恢复及33表内容摘要、56项匿名HTTP／原CA无SNI HTTPS和单一登录页加载检查通过。详细证据、首次失败重跑及未验边界见[项目记忆](MEMORY.md)顶部。下文“本轮未升级NAS”仅保留发布阶段范围，冻结源码／标签／附件不因部署文档变化。
+
 ## 当前交付：0.14.4（2026-10-28，已公开预发布）
 
 [0.14.4 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.4)（426337979）已公开，prerelease=true／make_latest=false；业务冻结0d51684f6241aed4fe0c542cd613fb2eec513b27及新tag不变。当前完整交付位于artifacts/releases/0.14.4/，恰12件489616842字节，11摘要、五份冻结附件、两份完整TAR各三镜像及六Linux config核对通过。后补文档不重打包，继续0006/schema8，无新依赖或迁移。

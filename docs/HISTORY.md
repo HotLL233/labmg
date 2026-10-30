@@ -1,5 +1,7 @@
 # 开发历程
 
+> 2026-10-28 群晖部署完成（此前“未操作NAS”仅为发布阶段边界）：用户本次另行授权部署，最终纠正SSH端口为2212并以既有known_hosts严格核验。172.28.10.200 x86_64原labos项目／volume1/docker/labos由0.14.2原地升级0.14.3，仅改两处应用image；保留runtime／https、1000:1000、3000／8443端口及原CA。起始四容器已停止，先完整停机归档到/volume1/docker/labos-backups/pre-0.14.3-20261028-0910（247067057字节／SHA256 5278a791b0466d28479c636f6bc12b869f433b03010a04b10cd8fdeaa81e1ec4）；再启动原PG18.6生成147268字节逻辑dump，并在无网络tmpfs独立PG18恢复，33表计数相同，临时容器已清理。升级后33表计数仍相同，原CA摘要7593d8aa4e02b7898ccd5580b7d1fbfe8f02d4a0fb968f7e75a9365c726ac2ca不变；应用和PG健康，init退出0，重启计数0。独立客户端HTTP3000与严格原CA／空SNI的HTTPS8443均200，auth/me版本0.14.3、setupRequired=false。未动labflow项目；未验证原应用账号登录、完整单元格内容／附件下载、手机或USB，备份仍在NAS并非异地副本。证据artifacts/cache/0.14.3/nas-deployment-result.json；不记录凭据，不移动冻结标签或重打包。
+
 本文件按时间记录项目的重要需求、决策、实施与验证结果。后续继续追加；版本更新说明统一维护在 [CHANGELOG.md](CHANGELOG.md)，开发操作约定见 [DEVELOPMENT.md](DEVELOPMENT.md)。计划与未解决问题不代表已经实现。
 
 ## 2026-10-16
@@ -1181,3 +1183,109 @@ publisher本地、草稿及最终公开模式依次通过；Release426337979于U
 后补文档阶段普通npm run verify退出0，原输出PASS5.6s（JS5.3s、UI0.2s）；严格verify退出0，PASS5.5s（JS5.2s、普通UI0.2s、严格UI0.2s）；独立node scripts/ui-audit.js为9通过／0警告／0失败，git diff --check退出0。本阶段未重新启动已停的专用PG或重跑全量，不将verify环境提示中的未配置数据库与前述真实整轮验收混淆。
 
 八份后补文档新增的5个本地相对链接存在，未将此检查扩大为所有外部链接可用。打包managed worktree源码干净；归档工具将其识别为任务主checkout而拒绝移除，因此保留，未手工删除。需要的冻结交付已完整保存在C:/labmg/artifacts/releases/0.14.4/，后续操作仍显式使用C:/labmg。
+
+## 2026-10-28：0.14.4群晖原地部署与只读联机检查
+
+用户在公开预发布后要求“在nas上部署最新版测试一下”，并在旧SSH环境凭据不可用后重新提供认证；凭据仅传入临时进程环境，不保存到文件、证据或文档。Get-Command确认实际pwsh7.6.5；用既有known_hosts和RejectPolicy连接172.28.10.200:2212，先核实原labos项目、/volume1/docker/labos真实路径、挂载、1000:1000、3000／8443、原CA及PG18.6。旧0.14.3应用和PG healthy；另项目labflow保持停止，后续对其ID／镜像／状态／时间戳／重启数做前后比较。
+
+本机正式amd64 TAR整包SHA256 f7536939c1f090d3f0b957ad644094c90c173b40e2210be185edb8c1081f0d3e通过，使用标准tar结构提取单应用镜像，15个config／layer blob全部按内容地址核验；派生包85237760字节／SHA256 bfdbaec149321f29f4535e988405f60ae3f024cad2a1aed26e6c1d774753b19e，不修改正式TAR或其他交付。下载原YML核对e5ba47b2efb5ab445e7e9a08bac8f7f3b4225c6b06df728d3810f0ebf3179505，仅将两处labos:0.14.3改为0.14.4；规范化Compose结构除这两处完全相同。新配置1034acecc3576eff9f3d1c0075272551c3ebf9ae11d65534d9768c6fc8c27c2d。新镜像导入后，原PG／Caddy标签未变，避免三镜像全量load意外更新可变PG标签。
+
+先停HTTPS和应用，取得逻辑dump与33表行数／规范化JSON行内容MD5摘要，再停PG完整归档。第一次独立恢复因PG初始化临时Unix服务已接受连接但labos库尚未创建而失败；trap恢复原0.14.3服务，独立复核app／PG healthy、代理running、重启数0，临时恢复容器已删。失败目录/volume1/docker/labos-backups/pre-0.14.4-20261028与INCOMPLETE保留，不能称该目录通过恢复验收。仅修运维helper的就绪判断为最终TCP监听和labos实际SELECT 1，再使用全新retry1目录，不改产品或删除失败证据。
+
+成功备份/volume1/docker/labos-backups/pre-0.14.4-20261028-retry1在北京时间16:01:42验证通过：project.tar.gz为247149944字节／SHA256 f38d1cbf36cc9add0277a4fb99d57b93fc919c5414e9fa91ae67ec2c8b97c1ff；database.dump为147309字节／SHA256 947f954552530ee40e5f49c1addb76b0c213b23b1e051fdcd43aeca6a8043ad0。使用原PG镜像、network none、两个tmpfs、无生产挂载的全新临时PG18，先确认空库后pg_restore --single-transaction，33表行数及全部规范化行内容摘要一致；原PG容器重启后的摘要也一致，临时容器清理通过。完整物理归档只校验可列举和摘要，未执行物理恢复；附件清单0文件，后续Python遍历再次确认空目录，不能扩展为真实附件下载／恢复验收。
+
+原配置完整保留，原地原子替换新YML，仅以--no-deps／--pull never重建labos-init及labos；PG及HTTPS保留原容器，备份期间的停启不等于重建。16:04:40 app／PG健康、init退出0、四容器重启数0，应用config sha256:5b54df80a70ee948122f5b9be8027f39df9af51b783631dd295567f05fde72fe及冻结revision0d51684f6241aed4fe0c542cd613fb2eec513b27匹配。33表内容摘要、原口令文件、CA、空附件目录及labflow状态前后一致，保留0006/schema8。静态交叉审查提示回退失败不得继续开放服务与文件哈希管道可能吞错，执行前将回退改为先停写、恢复旧配置／init成功后才启动，并将附件后校验改为传播I/O错误的Python遍历；本轮未真实触发或演练回退，不恢复或覆盖生产数据库。
+
+独立Windows局域网客户端首次因LF工作树锁文件与CRLF冻结ZIP原字节清单比较失败，未发出请求；另读冻结ZIP及Git确认仅289处行尾差异。改为用固定冻结Git blob原字节比较Linux响应，并核对原清单只允许LF／CRLF checkout差异，不归一化NAS响应、不改发布资产。第二次因Node24在end前释放IncomingMessage.socket，使辅助脚本读取TLS属性报错；改为在response回调捕获授权／SNI属性，两次失败记录均保留，不作NAS故障或通过计数。
+
+最终16:11:09客户端56个协议＋路径请求全部符合预期：HTTP／HTTPS各28项，包括根页、23个CSS／JS直接引用、2个扫码依赖和2个匿名API，各27个200、1个/dashboard预期401；24份冻结源静态字节摘要相同，扫码包另与冻结锁版本3.1.5的本地安装文件核对。严格HTTPS使用原CA、rejectUnauthorized=true、空SNI并确认TLS authorized；原CA SHA256为7593d8aa4e02b7898ccd5580b7d1fbfe8f02d4a0fb968f7e75a9365c726ac2ca。两入口auth/me均返回appVersion0.14.4、user:null、setupRequired:false且无新Cookie。另一只读审查复算静态摘要与56项数量一致，不冒充远端再测或叠加请求数量。
+
+用户续令“继续”后未重复部署。16:26:40以内置浏览器只读观察HTTP登录页，1280×720显示“登录 LabOS”、登录按钮可用，当前警告／错误日志为空，未输入密码、提交表单或使用NAS口令尝试网页账号；截图真实格式经System.Drawing识别为JPEG后按.jpg保存，元数据为1280×720。证据为artifacts/cache/0.14.4/nas-browser-verification.json及nas-login.jpg；这一单页检查不等同五档布局、HTTPS浏览器信任、真实账号权限或完整业务验收。
+
+汇总证据位于本版cache的nas-backup-first-attempt.json、nas-backup-verification.json、nas-upgrade-verification.json、nas-client-first-attempt.json、nas-client-second-attempt.json及nas-client-acceptance.json。后补MEMORY当前NAS状态、DEVELOPMENT阶段范围与CHANGELOG未发布维护项，不提升业务版本，不移动标签、不重打产物，不纳入artifacts、业务数据或外部维护草稿。未验真实应用账号／业务写入、附件下载、手机相机、USB／打印、长时负载、完整物理归档恢复或真实回退；备份在NAS同盘，未建立异地副本。
+
+北京时间16:30:48最终只读健康复核通过：0.14.4 app及原PG18.6 healthy、代理running、init已退出，四容器重启0，临时恢复容器余量0，备份完整且labflow未变；原始证据nas-final-health-verification.json。续轮只核对既有证据和补记录，未再次连接或部署；本机npm run verify:strict退出0、PASS3.1s，独立UI审计9通过／0警告／0失败。未配置测试库、未重跑npm test，不把静态检查称为新增全量业务验收。
+
+## 2026-10-29：布局密度评审与离线HTML参考（待确认，非正式改版）
+
+用户指出页面仍存在局部拥挤、局部空旷，要求检查、方案及UI变动HTML参考。沿用维护分支feature/ui-shell-single-account，在C:\labmg完成评审；冻结release-0-14-4工作树不动。读取维护约定、速查卡及相关施工卡，核对现有前端与v0.14.4无差异；采用此前真实PG＋Edge的合成数据截图观察，不冒充本轮NAS登录或业务实测。
+
+确认六类布局问题：手机顶部多层堆叠；申报创建人／操作列宽失衡与档案操作竖排；验收220px选单栏与930px编辑表争宽；手机通用首列强调错误地突出日期；短设置横向拉满；表单／详情信息分组不清。新增docs/UI_LAYOUT_BALANCE_PLAN.md和docs/prototypes/ui-layout-balance.html，保留现有品牌、字号和触控下限，以结构和字段优先级分配空间，不用全站压字号或装饰卡片填空白。新决策明确待批准，确认后才追加施工卡并实施；不删导航模块，不称旧R3/R4全部完成。
+
+HTML可离线直接打开，覆盖六主场景及表单／详情、切单、差异展开、历史资料和编号编辑；筛选分页、保存、脏输入保护均用内存合成数据，打印／导出／扫码仅打开模拟预览。图标取自已安装Lucide库，共24个内嵌图标并附Lucide／Feather许可，无新增依赖或网络请求。
+
+最终HTML SHA256为56a34a455c04e9be8cea40386767f18d5471377a5420916b20580911a0d7f85f，北京时间15:12:59离线Edge复核72图／324检查通过、0脚本异常／业务或互联网请求，覆盖9档视口与8场景及实际交互。目视复核1366验收、390库存、1920设置等关键图；参考390库存首条约260px，旧截图约650px，但数据／工具布局不同，不作为生产保证。最终报告及图在artifacts/cache/ui-layout-20261029/final-with-notices/，不提交生成物。
+
+早期并行检查出现Node／内存环境异常，一轮Edge启动超时0截图；失败证据原位保留。关闭探索浏览器后串行普通verify与严格verify均通过，独立UI审计9通过／0警告／0失败；不将环境失败写成产品修复，不累计重复轮次。未配置LABOS_TEST_DATABASE_URL，本轮不运行npm test。
+
+本轮只交付方案、参考与维护记录；未改正式前端、业务逻辑、数据库、依赖、版本、标签、Release、资产或NAS。未重新验正式UI／API／数据库、原生125%缩放、实体手机／键盘／相机及USB打印，不能替代实施后的功能与设备回归。
+
+## 2026-10-29：补充官方排版与业务布局网络参考
+
+用户追加要求搜索网络上可借鉴的排版设计。联网阅读IBM Carbon Data Table、SAP Fiori Responsive Table／Flexible Column Layout、Ant整体布局、Microsoft Fluent 2 Typography／Layout及USWDS Text Input的官方页面，补入docs/UI_LAYOUT_BALANCE_PLAN.md第9节，逐项区分来源原则和本项目取舍，不将外部规范写成已采纳决策。
+
+建议以Carbon的信息密度、工具栏和行操作，加SAP的任务空间和窄屏字段优先级为主要参考；Ant用于区分导航层级，Fluent与USWDS用于校准字阶、分组间距及语义输入宽度。保留现有设计令牌和原生前端，不引入组件依赖、不混搭五套视觉皮肤。此次只补文档与维护记录，既有HTML字节不变，其原验证摘要和范围保持；未修改正式UI、版本或NAS，实施仍待用户确认并先补施工卡。
+
+## 2026-10-29：收敛布局优化方案V1（待确认）
+
+用户要求出一版优化方案，在原docs/UI_LAYOUT_BALANCE_PLAN.md新增第0节V1评审稿，不另建重复方案。保留第1至9节全部历史证据与来源，将推荐方向落实为统一排版、七类页面布局、语义列宽起始值、内容限宽和窄屏规则；A列表及基础层级／B验收／C手机及表单详情三批细化既有顺序，并列出共享影响与状态保护风险。确认前不改施工卡，确认后先追加精确施工指令再实施。
+
+验收拟议包含1366标准验收样本无需横向滚动操作常驻字段，390默认无错误库存样本首条目标320px内开始，设置1040px／短表单760px限宽，低高度及手机可达和权限／草稿／忙态／未知结果回归；这些均为待实施验收条件，不记录成生产已达成。既有HTML未修改，SHA256仍为56a34a455c04e9be8cea40386767f18d5471377a5420916b20580911a0d7f85f，旧72图／324项仅对应原参考，不充当本轮新测试。
+
+本轮npm run verify通过，独立node scripts/ui-audit.js为9通过／0警告／0失败；前端与v0.14.4差异仍为空。未配置测试库，未运行npm test或重跑浏览器，不再搜索或更换外部参考。仅更新方案与维护记录，未改业务、源码、依赖、版本、冻结工作树或NAS；正式UI、API、原生缩放、手机键盘／设备及打印仍须实施后另验。
+
+## 2026-10-29至30：按布局V1实施并完成本地验收（未发布）
+
+用户明确“按此方案优化一版”，先向UI_施工卡追加第14节文件／选择器级替代范围，在C:\labmg维护分支feature/ui-shell-single-account实施，冻结发布树不动。修改8份正式前端文件及4份测试，保留旧类名、压缩前缀、依赖和服务端事务／接口。列表语义列宽、搜索与高级筛选、低频更多、固定服务端分页、档案分区筛选及图标动作、设置1040／176／72限宽落地；验收按需选单与1100以下同DOM网格、库存手机语义优先级和短表单／详情限宽同时集成，不记成三次独立发布。9个Lucide静态图标复用已验证参考节点并附完整ISC／Feather MIT许可。
+
+审查发现并修复恢复回调未消费离开许可、候选搜索隐式换单、重绘后焦点丢失和背景菜单抢Escape。后续补齐外部作废当前单据保留草稿但禁新验收／结案，未知结果只允许原正文／原幂等键重试，未修改服务端记账逻辑。新增VM检查覆盖固定派生分页原DOM、安全图标、开关选单、条数保留草稿与许可、无候选返回及作废只读；VM92/92通过。
+
+专用PG18.4新建于artifacts/cache/ui-layout-v1-20261029/postgres/data，只监听127.0.0.1:50065，身份与精确data目录核验；完整33文件测试按原集合串行执行node --test --test-reporter=tap --test-concurrency=1 tests/*.test.js，为320项319通过、0失败取消、1Docker镜像条件跳过，465642.1711ms。79份纳入摘要的源码／测试文件前后相同，原TAP和full-regression-summary.json保存。不把串行命令冒充直接npm test，不借用旧版结果或累计专项轮次。
+
+同轮实际执行三个Edge测试：工作区4750检查／146图（workspace-layout-95flKz）、真实流程118检查／28图（material-workflow-ohzJji）、窄屏21图（mobile-layout-tkj1Sv），均通过、0脚本异常。覆盖9档工作区尺寸及低高度、长值／空态、权限、更多菜单、固定分页与实际退出、页内领用保留草稿／忙态／结果丢失、三级返回、验收整批重试、到货资料版本、固定原单二维码解码／下载／A4横向PDF及库存七列打印。1093等仅等效CSS尺寸，不称原生缩放；手机原七列DOM读取顺序保留，不冒充原生读屏实测。
+
+早期workspace-first及retry1至5和material-workflow-first保留各自失败TAP／截图。包括旧常驻选单路径、模拟事件对象、旧按高度分页／整行同屏断言以及未先滚到真实点击原点等适配问题，逐项对齐新交互后重新整轮验证；390首条目标首次用到上轮保留的活动筛选，改为真实点击清除后测默认态，两种手机均308px，活动条件不强压高度。辅助失败不写成产品故障或通过计数。普通verify3.3s（JS3.1／UI0.1）、严格2.8s（JS2.6／普通0.1／严格0.1）及独立UI9/0/0通过。
+
+本地预览另建labos_ui_v1_preview数据库和preview-runtime，以npm run dev运行localhost:3001，含合成账号、6物资、4库存行、1待验单和6档案，不接日常库。首次辅助校验误断言auth/me.user.username（该字段未公开），只修忽略的预览helper，改为真实登录／display_name及只读总数核验；没有重复写入样例或改正式API。最终浏览器6项／3图通过：1366三条标准验收1079宽无横滚，390首条308，1920设置1040。凭据及会话不记入文档；完整测试库remaining0，专用PG因预览保留运行，精确身份停止脚本在同目录，未删除运行数据。
+
+MEMORY／DEVELOPMENT及CHANGELOG未发布同步本轮范围，旧方案／原型和发布记录保留。未改package版本、迁移、标签、Release、镜像、冻结附件或NAS；未做本机Docker镜像门禁、原生缩放、实体手机／键盘／读屏／相机、USB／实际打印及长期负载。源码验收和合成预览不等于发布或生产验收，后续发布部署仍需另行授权。
+
+## 2026-10-30：打包UI V1并部署NAS隔离测试站
+
+用户要求“打包，然后部署在nas上测试”。按测试授权新建独立项目，不将测试请求扩大成生产升级：172.28.10.200:2212使用原known_hosts严格核验并复用授权SSH认证，凭据只在会话内存；项目labos-ui-v1-test-20261030位于/volume1/docker同名目录，3101／8544端口，新PG、运行目录和CA，不复制本地预览或生产数据。开始只读检查NAS为x86_64、Docker24.0.2／Compose2.20.1，正式app／PG healthy，6个既有容器（含此前已退出的labflow）基线保存；全程未停止、重启或升级正式服务，也未读取生产库表、备份或恢复生产数据库。
+
+本机Docker引擎未运行，故先在受限快照调用原package.ps1，不改版本或打包脚本。仅覆盖已批准的tracked UI／测试／维护变更及方案和参考，排除本地AGENTS维护改动、外部草稿、.workbuddy、var／runtime和凭据。首次Windows tar无法提取中文文件名，保留失败目录改.NET ZIP；Git archive受core.autocrlf转换导致33份未改运行文件与NAS旧镜像原字节不同，逐一确认仅CRLF／LF，不修改NAS响应凑摘要。改用命令级core.autocrlf=false的新LF快照，不改全局Git设置；新源码包sourceSHA a9d1effd1700027ab8ac7709949c814e9ec2f7bc3939acedeb3d7247e373fa18，161源项加启动器162项，1255400字节／ZIP SHA fde69dc458758d79fecd4712cd6e0a2d9e6221cb9ba16f9c27f46c8415dddcf6。旧候选1754e3ea273f及各失败日志保留且未部署；完成包的15份与工作树行尾差异均独立核对，79份本地代码仍与前轮320项测试一致，本轮不冒称重新跑全量。
+
+NAS基于固定旧应用config 5b54df80…72fe无网络构建，只覆盖8份UI及第三方许可；33份未改文件与基底原字节相同，新镜像42运行文件与冻结包逐字节相同。新tag labos:ui-v1-test-20261030-a9d1effd1700，image config为sha256:1a3ce0429f673d98e40d6f3a4998ec6d2513ffd69b6b6acf9452ad49c43c4fcc。单应用TAR251143168字节，SHA672717cc075aab0265e198b507815ca4f0143933eee5041e6977b90382e95221；回传后验证整包、config和16层diff-id，归档唯一tag不是正式0.14.4，不改旧标签。PG18.6、Caddy复用既有imageID，所有bind位于新测试目录，PG不暴露宿主端口，四服务独立网络并有限内存；没有公开registry或GitHub操作。
+
+初次启动因NAS不自动创建JSON长语法的runtime/postgres bind源失败，当时只有本轮init处于Created、未运行。保留失败证据，验证其项目、源码标签、镜像和空目录后仅预建测试postgres／secrets／https-config父目录继续，不删除容器或数据。先启动测试init与PG，确认最终TCP和目标labos库SELECT1，再以--no-deps启动测试app及代理；init退出0、app／PG healthy、代理running、重启计数0。匿名接口证明初始无账号，测试CA SHA007fe4e0af820444d8b73d10c1287087fc6a31ed1dc7da3f7ab90675ffd3e777与正式CA不同；未触碰NAS、电脑或手机全局信任库。
+
+严格新CA／IP身份／空SNI HTTPS和HTTP两协议56资源及匿名请求通过，24源文件按新包精确字节比较、两个扫码依赖另核验；不对响应做换行归一化。初始空库后只在测试HTTPS端口初始化账号并写合成物资、库存、申报及档案；账号与口令不记入文档，不复用SSH或正式站网页密码。真实Edge在1366／900／390／1920共38检查／11图、0脚本异常／0越出测试origin请求，验证同DOM网格、选单无匹配保留草稿和焦点、实际部分验收、HTTP响应丢失后的相同正文／幂等键重试、附件上传与严格TLS原字节下载、菜单、未保存Escape及退出。实际3条新验收只生成一次到货，文件保存不重复入库。
+
+仅手动重启测试app1次，测试PG／CA不重启或重建；随后59项最终客户端检查通过，账号、6物资／4库存行／7验收事件／1资料文件持久化。6个既有容器ID、image、状态、启停时间、重启数、挂载和端口与基线一致；正式Compose与原CA SHA7593…ca不变，8份受影响正式静态源既匹配只读基线也匹配冻结v0.14.4。原labflow已退出状态保留，不将其旧unhealthy当成本轮故障或擅自启动修复。
+
+测试交付在artifacts/packages/ui-v1-test-20261030-a9d1effd1700，共10件，含原脚本生成ZIP、单应用amd64 TAR、源码清单、测试Compose、公开CA、层验证及部署报告／说明／摘要。冻结源码和镜像不因后补维护记录重打；test-build中的打包时状态保留，以DEPLOYMENT为当前测试结果。MEMORY／DEVELOPMENT／SYNOLOGY及CHANGELOG未发布补充；源码版本仍0.14.4，旧标签／Release／冻结资产不变，未公开新版本。
+
+同IP不同端口会共享既有labos_session Cookie，本轮不为测试引入新的生产认证功能，交付明确要求无痕窗口或独立浏览器配置，浏览器自动检查本身用新隔离context。HTTPS客户端严格校验不代表浏览器／实体设备已安装信任CA。未验ARM64、真实数据迁移恢复、实体手机／键盘／读屏／相机、USB／打印、原生缩放或长期负载；此次新项目测试不能当作正式升级、生产账号／业务验收或旧版全部容器发行门禁补证。
+
+## 2026-10-30：iLabPlus公开界面布局借鉴评审
+
+用户要求分析iLab可借鉴的排版与UI，并明确为www.ilab.cn。只在C:\labmg维护分支继续，未操作冻结worktree或NAS。先阅读速查卡、MEMORY／DEVELOPMENT当前段及UI施工卡，确认V1已完成而不是沿用旧“待确认”的历史状态；本轮没有新实施授权。
+
+直接抓取先遇站点访问校验；Computer Use原生管道不可用，按规定重试及重置后仍失败，改用已有CommonJS Playwright／独立Edge正常访问公开页面，不处理验证码或登录。实际查看官网、教程、详细手册、产品档案及公开登录页，重点目视库存工具栏、详情／批次／记录、历史、设置、申购转订单及表单截图。手册IE8／V3.0及2016图片、档案时间线止于2016说明公开资料具有历史性，不能推断当前登录后后台相同；部分手机图片不可用，不据此给移动端结论。未注册、提交凭据或操作对方业务。
+
+对照V1既有合成截图，向UI_LAYOUT_BALANCE_PLAN追加第11节，区分已落实的筛选／选单／限宽与待评审的新方向。优先建议列表顶部及两处更多归属，其后是对象内详情上下文、长备注展开与视觉层级；不照搬营销大留白、旧式小字、常驻双栏或直接累加领用的业务方式。新布局必须先出HTML、用户确认并补施工卡，既有HTML未修改，不将其称为iLab版。
+
+证据在artifacts/cache/ilab-layout-study-20261030：实际保存库存和详情两张公开局部截图及observations.json；后续第三图等待元素稳定超时，失败如实保留在范围记录，不扩大保存数量或算产品故障。调研浏览器已关闭，原本地预览及NAS服务保留。本轮只补方案、MEMORY、HISTORY与CHANGELOG未发布，不改源码、测试、依赖、版本、发布或数据。普通verify退出0：PASS9.0s（JS8.5s／UI0.5s），文档diff检查退出0，仅既有行尾提示；未设LABOS_TEST_DATABASE_URL，不跑完整测试，未新增真实业务、响应式或设备验收。
+
+2026-10-30 布局可读性小批（用户"结合本方案开始优化布局 UI"）：动手前先核实施工卡已到第 14 节 V1、代码中语义表类与列宽已落地，判定用户三张截图是 V1 前旧图，仅修 V1 未覆盖的 4 项 —— `material.js:28` `timestamp` 加短格式参数（申报列表创建时间到分钟，默认行为不变）、申报详情与验收待办两处三值斜杠列拆为主值加副行（表头去三值拼接）、`tokens.css` 末尾给 `.mw-record-note` 补浅底边框内边距、表格勾选行浅蓝高亮。verify PASS 3.3s（JS 语法 + UI 审计 0/0/0）；`timestamp` 短式用纯函数反向验证（完整 19 字符／短式 16 字符／空值 `—`）；斜杠数字列与三值表头残留 grep 均 0。未起服务做视觉截图（缺 `LABOS_TEST_DATABASE_URL` 与 PG 连接），未改版本、依赖、压缩前缀、打印样式、打包方式。
+
+2026-10-30 0.14.5 源码候选打包（用户选 A 方案并明确"需包含本次优化"）：先核查确认 0.14.4 为最新公开预发布、10-30 之后全部改动未提交未打包；再升版本——`package.json`／`package-lock.json` 两处 version、`deploy/docker-compose.yml` 注释与两处 image、`deploy/docker-compose.local.yml` 两处 image 全部 0.14.5，README 的开发目录与测试缓存路径、部署章节镜像指向同步，DEVELOPMENT 顶部补候选状态说明。
+
+CHANGELOG 新建 0.14.5 段，用脚本按精确行把「UI布局V1实施」「布局可读性小批」两条代码改动从未发布移出并移入本版（校验未发布段内该两条命中数为 0），纯文档条目仍留在未发布。
+
+门禁与替代核验：普通 verify PASS 3.4s；`ui-audit --strict` 9 通过／0 警告／0 失败；frontend 与 ui-audit 测试通过。`compose.test.js` 因本机无 `docker compose` 被跳过，未把跳过当通过，另写文本核验断言两份 YML 各 2 处应用镜像且全为 0.14.5（PASS，其它镜像仍为 postgres:18-bookworm 与 caddy:2.11.7-alpine）。`package.test.js` 失败：`spawnSync pwsh ENOENT`，本机只装 Windows PowerShell 5.1，属环境缺失而非代码问题。
+
+未产出双架构镜像 TAR 与 GitHub Release：Docker 引擎未运行（npipe dockerDesktopLinuxEngine 不存在），且无 `gh` CLI／无 `GH_TOKEN`；`git ls-remote` 只读认证可用，说明推送通道本身正常。未打标签、未推送、未动 NAS、未跑完整 npm test 与浏览器专项（无 `LABOS_TEST_DATABASE_URL` 与 PG 口令）。
+
+打包顺序上先落文档再打包并提交：`scripts/package.ps1` 把 `docs/`、根文件一并计入 sourceSha256，打包后再改文档会让随后的 `package-docker.ps1` 走到"源码已变"分支而拒绝续做，故发布证据留到镜像 TAR 补齐后再补记。
