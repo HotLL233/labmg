@@ -83,12 +83,11 @@ jobs:
       - name: Report test failures
         if: failure()
         run: |
-          {
-            echo '### npm test failures'
-            echo '```'
-            grep -E "^not ok|# fail|AssertionError|ENOENT|Error:" "$RUNNER_TEMP/test.log" | head -60 || tail -n 60 "$RUNNER_TEMP/test.log"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -qE "^not ok|# fail" "$RUNNER_TEMP/test.log"; then
+            grep -E "^not ok|# fail" "$RUNNER_TEMP/test.log" | head -6 | sed 's/^/::error::/'
+          else
+            tail -n 6 "$RUNNER_TEMP/test.log" | sed 's/^/::error::/'
+          fi
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -204,12 +203,11 @@ jobs:
       - name: Report packaging failure
         if: failure()
         run: |
-          {
-            echo '### Packaging failed'
-            echo '```'
-            if [ -s "$RUNNER_TEMP/package.log" ]; then tail -n 120 "$RUNNER_TEMP/package.log"; else echo 'no package.log content'; fi
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$RUNNER_TEMP/package.log" ]; then
+            tail -n 6 "$RUNNER_TEMP/package.log" | sed 's/^/::error::/'
+          else
+            echo '::error::package.log is empty'
+          fi
 
       - name: Write checksums
         run: |
