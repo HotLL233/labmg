@@ -1,12 +1,14 @@
 # 项目记忆
 
-## 当前状态：0.14.5 源码候选（2026-10-30，未发布）
+## 当前状态：0.14.6 远端打包（2026-10-30）
 
-用户确认按 A 方案推进并明确「需包含本次优化」。`package.json`／`package-lock.json`、`deploy/docker-compose.yml`、`deploy/docker-compose.local.yml`、README 与 DEVELOPMENT 的版本引用全部同步 0.14.5；CHANGELOG 新建 0.14.5 段，把「UI布局V1实施」与「布局可读性小批」两条代码改动从未发布移入本版，纯文档类条目（iLabPlus调研、NAS隔离测试、方案V1、网络参考、布局评审资料、NAS部署记录）仍留在未发布。
+用户确认「A，需包含本次优化」后按 A 推进，随后批准改用远端打包。0.14.5（本机源码候选，未发布）因首次远端构建失败被 0.14.6 取代：run 40998007945 两个 job 同时失败，`package` 卡在「Build frozen source package and both image archives」、`publish` 卡在「Run npm test」，同源于 `scripts/package.ps1` 的 `'config\label-templates'` 与 `'config\.env.example'`——反斜杠在 POSIX 上是普通文件名字符，`Get-ChildItem -LiteralPath` 找不到即抛错，脚本以 1 退出。已改为 `Join-Path` 分段拼接（提交 `90a09c5`），Windows 行为不变。
 
-门禁：普通 verify PASS 3.4s（JS 语法 + UI 审计）；`ui-audit --strict` 9 通过／0 警告／0 失败；frontend／ui-audit 通过。`compose.test.js` 因本机无 `docker compose` 被**跳过**，其「应用镜像版本须等于 package.version」断言改用独立文本核验（两份 YML 各 2 处应用镜像、全部 0.14.5）。`package.test.js` 因**未安装 pwsh** 失败（spawnSync pwsh ENOENT），属环境缺失。
+发布路径：`publish-image.yml` 新增 `package` job —— 检出冻结标签 → `pwsh scripts/package-docker.ps1` 产源码 ZIP／双架构 TAR／元数据／5 份部署附件 → 写 `SHA256SUMS` → `gh release create --prerelease --latest=false`；原 `publish` job 保留（`verify:strict`、全量 `npm test`、推 GHCR）。版本引用已全部同步 0.14.6（package.json／lock、两份部署 YML、README、DEVELOPMENT）。
 
-未产出：双架构镜像 TAR、GitHub Release。原因：Docker 引擎未运行（npipe dockerDesktopLinuxEngine 不存在）、无 `gh` CLI 与令牌。未打 Git 标签、未推送、未动 NAS、未跑完整 npm test 与浏览器专项。**打包后不可再改 `docs/` 与根文件**，否则 `scripts/package.ps1` 的 sourceSha256 校验会让后续 `package-docker.ps1` 判「源码已变」而拒绝续做，须等镜像 TAR 补齐后再补发布记录。
+本机环境边界：Docker 引擎无法启动（Docker 自报 unable to start，日志显示 `wsl.exe` 执行失败）；PowerShell 只执行 .NET 内部操作，外部程序一律空输出；无 `gh` 与令牌；`wsl.exe` 在安全中心程序黑名单内，不可绕过。故打包只能在远端做。远端日志需登录态，公开 API 限流 403，只能靠 Actions 页面的步骤结论与时间戳定位失败点。
+
+未完成：0.14.6 的镜像 TAR 与 Release 取决于远端 run；未动 NAS；本机未跑完整 `npm test` 与浏览器专项。
 
 ## 当前设计调研：iLabPlus借鉴评审（2026-10-30，仅分析）
 

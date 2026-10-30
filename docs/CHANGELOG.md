@@ -16,7 +16,11 @@
 - 2026-10-28 NAS部署维护记录：经用户另行授权，172.28.10.200原labos项目由0.14.3原地升级0.14.4，仅更新应用／初始化镜像，保留原PG18.6、代理、runtime／https、UID/GID、端口和CA；未动labflow，不新增业务版本或修改冻结标签／资产。发布阶段“未升级NAS”保留为历史边界，以本条及MEMORY当前状态补充。
 - 新备份/volume1/docker/labos-backups/pre-0.14.4-20261028-retry1：停PG完整归档247149944字节、停写逻辑dump147309字节；无网络tmpfs独立PG恢复及升级前后33表行数／规范化内容摘要一致。原服务健康，独立局域网HTTP及严格原CA无SNI HTTPS共56请求、单一1280×720登录页加载通过。首次演练及客户端辅助检查失败已保留、更正后重跑；附件实际0文件，未验应用账号、完整业务、附件下载、物理归档恢复及实体设备，备份非异地副本。详见MEMORY／HISTORY及artifacts/cache/0.14.4/nas-*.json。
 
-## 0.14.5（2026-10-30，远端打包）
+## 0.14.6（2026-10-30，远端打包）
+
+> 0.14.5 标签的首次远端构建失败（run 40998007945，总时长 1 分 55 秒）：`package` job 卡在「Build frozen source package and both image archives」，`publish` job 卡在「Run npm test」，两者同源。根因是 `scripts/package.ps1` 用 `Join-Path $root 'config\label-templates'` 与字面量 `'config\.env.example'`——反斜杠在 POSIX 上是普通文件名字符，`Get-ChildItem -LiteralPath` 找不到即抛错，而脚本开头设了 `$ErrorActionPreference='Stop'`，于是以 1 退出；`tests/package.test.js` 调用同一脚本，Linux 上的 `npm test` 随之失败。本版把两处改为 `Join-Path` 分段拼接，Windows 行为不变（已验证解析到 2 个标签模板与 `config/.env.example`）。失败发生在任何镜像或资产产出之前，按「不移动冻结标签」惯例升版本重发，`v0.14.5` 保留为失败尝试记录。功能内容与 0.14.5 相同，未新增接口、迁移、依赖或备份格式。
+
+## 0.14.5（2026-10-30，远端打包失败，由 0.14.6 取代）
 
 > 状态：本机缺少可用的 Docker 引擎与 `gh`，且当前 PowerShell 只能执行 .NET 内部操作（外部程序一律空输出），因此镜像 TAR 与 Release 不再本地产出，改由 **tag 推送触发 `.github/workflows/publish-image.yml` 的 `package` job** 在 ubuntu runner 上完成：检出冻结标签 → `pwsh scripts/package-docker.ps1` 产源码 ZIP、双架构 TAR、元数据与 5 份部署附件 → 生成 SHA256SUMS → `gh release create --prerelease --latest=false` 公开。另一 `publish` job 并行跑 `verify:strict`、全量 `npm test` 并推送 amd64／arm64 到 GHCR。本机只完成源码侧准备：`package.json`／`package-lock.json`、两份部署 YML、README 与 DEVELOPMENT 的版本引用同步 0.14.5，CHANGELOG 归入本版。`compose.test.js` 因缺 `docker compose` 被跳过，其镜像版本断言已用独立文本核验替代（两份 YML 各 2 处应用镜像均指向 0.14.5）；`package.test.js` 因缺 `pwsh` 失败；完整回归与浏览器专项改由 runner 承担。未动 NAS。
 
