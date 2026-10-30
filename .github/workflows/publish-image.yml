@@ -75,7 +75,20 @@ jobs:
       - uses: docker/setup-compose-action@v1
         with:
           version: v5.5.1
-      - run: npm test
+      - name: Run npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      - name: Report test failures
+        if: failure()
+        run: |
+          {
+            echo '### npm test failures'
+            echo '```'
+            grep -E "^not ok|# fail|AssertionError|ENOENT|Error:" "$RUNNER_TEMP/test.log" | head -60 || tail -n 60 "$RUNNER_TEMP/test.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -182,7 +195,21 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build frozen source package and both image archives
-        run: pwsh -NoProfile -File ./scripts/package-docker.ps1
+        run: |
+          set -o pipefail
+          { command -v pwsh || echo 'pwsh NOT FOUND on PATH'; } 2>&1 | tee "$RUNNER_TEMP/package.log"
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>&1 | tee -a "$RUNNER_TEMP/package.log"
+          pwsh -NoProfile -File ./scripts/package-docker.ps1 2>&1 | tee -a "$RUNNER_TEMP/package.log"
+
+      - name: Report packaging failure
+        if: failure()
+        run: |
+          {
+            echo '### Packaging failed'
+            echo '```'
+            if [ -s "$RUNNER_TEMP/package.log" ]; then tail -n 120 "$RUNNER_TEMP/package.log"; else echo 'no package.log content'; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Write checksums
         run: |
