@@ -16,9 +16,9 @@
 - 2026-10-28 NAS部署维护记录：经用户另行授权，172.28.10.200原labos项目由0.14.3原地升级0.14.4，仅更新应用／初始化镜像，保留原PG18.6、代理、runtime／https、UID/GID、端口和CA；未动labflow，不新增业务版本或修改冻结标签／资产。发布阶段“未升级NAS”保留为历史边界，以本条及MEMORY当前状态补充。
 - 新备份/volume1/docker/labos-backups/pre-0.14.4-20261028-retry1：停PG完整归档247149944字节、停写逻辑dump147309字节；无网络tmpfs独立PG恢复及升级前后33表行数／规范化内容摘要一致。原服务健康，独立局域网HTTP及严格原CA无SNI HTTPS共56请求、单一1280×720登录页加载通过。首次演练及客户端辅助检查失败已保留、更正后重跑；附件实际0文件，未验应用账号、完整业务、附件下载、物理归档恢复及实体设备，备份非异地副本。详见MEMORY／HISTORY及artifacts/cache/0.14.4/nas-*.json。
 
-## 0.14.5（2026-10-30，源码候选已打包，镜像与 Release 未产出）
+## 0.14.5（2026-10-30，远端打包）
 
-> 状态：完成源码侧发布准备——`package.json`／`package-lock.json`、两份部署 YML、README 与 DEVELOPMENT 的版本引用同步 0.14.5；CHANGELOG 归入本版；源码 ZIP 由未修改的 `scripts/package.ps1` 产出，明细见 `artifacts/releases/0.14.5/manifest.json`。**双架构镜像 TAR 与 GitHub Release 尚未产出**：本机 Docker 引擎未运行、且无 `gh` CLI／令牌；`compose.test.js` 因缺 `docker compose` 被跳过，其镜像版本断言已用独立文本核验替代（两份 YML 各 2 处应用镜像均指向 0.14.5）。未打 Git 标签、未推送、未动 NAS。完整 `npm test` 与浏览器专项未跑（无 `LABOS_TEST_DATABASE_URL` 与 PG 口令），`package.test.js` 因缺 `pwsh` 失败。
+> 状态：本机缺少可用的 Docker 引擎与 `gh`，且当前 PowerShell 只能执行 .NET 内部操作（外部程序一律空输出），因此镜像 TAR 与 Release 不再本地产出，改由 **tag 推送触发 `.github/workflows/publish-image.yml` 的 `package` job** 在 ubuntu runner 上完成：检出冻结标签 → `pwsh scripts/package-docker.ps1` 产源码 ZIP、双架构 TAR、元数据与 5 份部署附件 → 生成 SHA256SUMS → `gh release create --prerelease --latest=false` 公开。另一 `publish` job 并行跑 `verify:strict`、全量 `npm test` 并推送 amd64／arm64 到 GHCR。本机只完成源码侧准备：`package.json`／`package-lock.json`、两份部署 YML、README 与 DEVELOPMENT 的版本引用同步 0.14.5，CHANGELOG 归入本版。`compose.test.js` 因缺 `docker compose` 被跳过，其镜像版本断言已用独立文本核验替代（两份 YML 各 2 处应用镜像均指向 0.14.5）；`package.test.js` 因缺 `pwsh` 失败；完整回归与浏览器专项改由 runner 承担。未动 NAS。
 
 - 2026-10-30 UI布局V1实施：按用户2026-10-29授权完成列表列宽与工具区、固定10／20／50分页、档案筛选和设置限宽、按需选单与全宽验收、手机库存字段优先级及短表单／详情排版；保留原接口、权限、事务、未知结果重试和打印列。补齐候选搜索、焦点、恢复许可、Escape及外部作废只读保护。完整现有测试320项／319通过／0失败取消／1Docker条件跳过，真实Edge及普通／严格审计通过，详见[方案第10节](UI_LAYOUT_BALANCE_PLAN.md#10-v1实施与本地验收2026-10-29至30)。仅本地未发布源码及隔离合成预览，版本／NAS／发布资产不变；本条取代下方方案轮“待确认／未改UI”的当前状态，历史记录保留。实体设备、原生缩放和Docker镜像门禁未验。
 
