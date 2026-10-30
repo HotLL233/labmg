@@ -1,5 +1,7 @@
 # 开发与版本管理
 
+> 2026-10-30当前候选0.14.9：0.14.8的官方run41027559390在npm test出现343／337通过／1失败／5条件跳过，唯一失败是package.test匹配完整提示末句，而Linux PowerShell把ANSI及换行／诊断前缀插入“new package version”；实际脚本正确拒绝改源复用，镜像及package job均未执行，Release不存在。测试改为匹配稳定的“Release source differs or cache is damaged”前缀，仍断言非零退出、旧ZIP与manifest不变。UI／业务源码相对冻结0.14.8不变，保留下方本机验收及独立浏览器证据，不称为本机重新全跑；新版本须在云端再跑完整回归和部署门禁。package／lock／YML／README同步0.14.9，旧标签／资产不改，NAS不升级。
+
 > 2026-10-30候选本机验收完成：0.14.8综合UI V2最终37文件串行343项／342通过／0失败取消／1本机Docker条件跳过，四份Edge实际执行，102份受控摘要一致；原命令及边界见UI_CONSOLIDATED_PLAN第10节。本地新合成预览由npm run dev运行localhost:3002（数据库labos_ui_v2_preview、专用PG55516及ui-v2-20261030/preview-runtime），旧3001和NAS保留；同hostname端口共享Cookie，请使用独立／无痕窗口，凭据仅在private配置。先运行pwsh7下`./artifacts/cache/ui-v2-20261030/stop-preview.ps1`再运行同目录`stop-postgres.ps1`可按身份停止本轮服务；本轮保留预览，未执行停止链，不删除数据。云端先测试／镜像，再创建7件私有草稿，经四门禁及完整恢复补为12件仍保持draft，最后独立核对才显式公开；本条不表示云端已运行或NAS已升级。
 
 > 2026-10-30当前开发：用户已授权综合UI V2下一版开发及打包发布，候选版本0.14.8，分支feature/ui-v2-next，施工范围见UI_施工卡第15节；旧“仅方案”描述保留原阶段，不表示本轮已验收。新专用PG18.4位于artifacts/cache/ui-v2-20261030/postgres/data，仅本机55516端口，临时测试库／运行目录与日常库及NAS隔离，凭据不记文档。首轮VM及真实丢响应专项已执行，完整回归／最终原型／云端门禁／公开发布仍待后补。此轮实际pwsh7.6.5、Node命令正常；旧“外部程序空输出／无PS7”仅是此前阶段记录，不适用于本轮工具环境。0.14.7已从原始日志证实失败于隐藏.github父目录Get-Item缺-Force，已补修及回归，不再把Add-Type猜测写成已证根因。版本／部署YML为候选0.14.8，尚无新标签或公开资产；旧标签保留，不自动升级NAS。

@@ -116,13 +116,13 @@ test('versioned packages are isolated, verified, reusable and never overwritten'
   const readme = path.join(fixture, 'README.md');
   const originalReadme = fs.readFileSync(readme);
   fs.appendFileSync(readme, '\nChanged source\n');
-  assert.match(build(1), /use a new package version/);
+  assert.match(build(1), /Release source differs or cache is damaged/);
   assert.equal(digest(archive), zipHash);
   assert.equal(fs.readFileSync(manifestPath, 'utf8'), manifestText);
   fs.writeFileSync(readme, originalReadme);
   fs.appendFileSync(archive, 'damaged');
   const damagedHash = digest(archive);
-  assert.match(build(1), /use a new package version/);
+  assert.match(build(1), /Release source differs or cache is damaged/);
   assert.equal(digest(archive), damagedHash);
   assert.equal(fs.readFileSync(manifestPath, 'utf8'), manifestText);
   assert.ok(fs.readdirSync(path.join(fixture, 'artifacts/cache', version)).every(name => !name.startsWith('build-')));
