@@ -81,6 +81,7 @@ async function go(module){
   items=[];
   document.querySelectorAll('[data-nav]').forEach(x=>x.classList.toggle('active',x.dataset.nav===module));
   const d=menuDef(module);$('#title').textContent=d[0];$('#subtitle').textContent=d[2];
+  $('#subtitle').removeAttribute('data-material-context');
   $('#search').style.display=module!=='materials'&&C[module]?'':'none';
   $('.header-tools').hidden=module==='materials'||!C[module];
   $('#add').onclick=()=>openEditor();

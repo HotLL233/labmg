@@ -1,5 +1,11 @@
 # 开发与版本管理
 
+> 2026-11-01候选0.14.10本机验收完成：最终37文件串行349项／348通过／0失败取消／1 Docker条件跳过，四份Edge均实跑，102份受控输入摘要前后相同。最新范围与证据见UI_ART_MALL_ADOPTION_PLAN第10节及ui-material-20261101/local-final-verification.json。当前仍是开发候选，未创建发布tag／Release、源码ZIP、镜像TAR或升级NAS；正式部署继续使用0.14.9公开包。最终普通／严格verify分别PASS4.6s／4.9s，静态检查本身不跑测试。
+
+> 本轮预览由npm run dev运行localhost:3003，使用新专用PG18.4的60884端口、独立labos_ui_material_preview库及ui-material-20261101/preview-runtime；账号凭据仅在忽略的private配置，不写文档。应用保持原开发监听方式，不应暴露公网；不同localhost端口Cookie共享，建议独立会话。结束时先在pwsh7运行`./artifacts/cache/ui-material-20261101/stop-preview.ps1`，再运行同目录`stop-postgres.ps1`，两者核验身份，只停止本轮服务，不删除数据。当前保留预览和PG，未执行停止链。
+
+> 2026-11-01开发候选0.14.10：用户批准借鉴预案，按施工卡16执行独立参考与物资主路径。新增状态快捷筛选、库存同行操作、验收进度层级及当前位置，不改API、权限合同、依赖、迁移或schema8。使用新专用PG18.4，仅127.0.0.1:60884、ui-material-20261101/postgres/data，凭据只在忽略的private配置；不能把旧V2失联实例或日常库当测试库。当前仅专项通过，完整回归和最终交付状态后补；两候选YML尚无对应公开镜像/TAR，不用于NAS升级。此请求为下一版本开发，不自动创建发布tag、公开Release或升级NAS；旧0.14.9交付保持。
+
 > 2026-10-30当前已公开交付0.14.9：[Release428821174](https://github.com/HotLL233/labmg/releases/tag/v0.14.9)，冻结b57a73032ded3caf9d9401706897d0a176850a20。构建41029744353真实PG18.6为343项／338通过／0失败取消／5条件跳过，双架构镜像及源码打包成功；验证41030397629四门禁、HTTPS8项及完整恢复12项／33表通过，三容器TAP各1/1。四浏览器采用0.14.8同前端源码的本机实际证据，不冒称Linux跳过已执行。完整12件489903331字节、11摘要、五冻结附件、182源／183ZIP条目及双TAR六config本机核验通过；匿名API和10非TAR附件1614051字节公开下载通过。首次大artifact超时保留，实际两TAR以重新核验旧blob及官方Range补齐并通过整包SHA；不是匿名全量TAR下载。后补记录不移动标签／重打包，保留main及旧资产，记录提交后快进同步develop。本轮未升级NAS，ARM64仅QEMU，设备／原生缩放未验；升级先完整备份并保留runtime/、https/和UID/GID。下方候选及旧“当前交付”保留历史，实际状态以本条和CHANGELOG为准。
 
 > 2026-10-30当前候选0.14.9：0.14.8的官方run41027559390在npm test出现343／337通过／1失败／5条件跳过，唯一失败是package.test匹配完整提示末句，而Linux PowerShell把ANSI及换行／诊断前缀插入“new package version”；实际脚本正确拒绝改源复用，镜像及package job均未执行，Release不存在。测试改为匹配稳定的“Release source differs or cache is damaged”前缀，仍断言非零退出、旧ZIP与manifest不变。UI／业务源码相对冻结0.14.8不变，保留下方本机验收及独立浏览器证据，不称为本机重新全跑；新版本须在云端再跑完整回归和部署门禁。package／lock／YML／README同步0.14.9，旧标签／资产不改，NAS不升级。

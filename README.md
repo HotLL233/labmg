@@ -1,5 +1,7 @@
 # LabOS 实验室综合管理系统
 
+当前源码候选：**0.14.10／物资工作区整理（2026-11-01，本机验收完成，尚未公开发布）**。按已确认的借鉴预案优化物资列表、筛选、同行领用、验收进度，并纠正单对象详情被拆页造成的留白；不是Art Design Pro商城页面还原，不新增框架或业务接口。本机专用PG18.4＋Edge完整回归349项、348通过、0失败、1 Docker条件跳过。[新版HTML参考](docs/prototypes/ui-material-operations.html)与旧稿分开保留。候选两份YML尚无对应镜像／TAR，正式部署仍使用下方0.14.9公开包；本轮不自动发布或升级NAS。
+
 当前交付：**0.14.9／综合UI V2（2026-10-30，已公开预发布）**。[0.14.9 Release](https://github.com/HotLL233/labmg/releases/tag/v0.14.9)提供在线／本地两份YML、双架构三镜像离线包和源码等12件附件。冻结构建的PG18.6回归343项、338通过、0失败、5条件跳过；四部署门禁及完整备份恢复12项／33表通过。本机12件489903331字节、11摘要和六份Linux镜像config已核对，匿名API元数据及10个非TAR公开附件完整下载通过。详细证据见[版本说明](docs/CHANGELOG.md)。
 
 本版优化列表、全宽验收、详情、设置和手机排版，补充日期／状态／空态及未知提交结果保护。前端与0.14.8本机最终验收源码相同，沿用其实际Edge证据，不把云端跳过的四浏览器项目称为新跑；ARM64容器用QEMU。本轮不自动升级NAS，未验实体设备或原生缩放；升级须先完整备份并保留`runtime/`、`https/`和UID/GID。无新运行依赖、SQL迁移或备份格式，继续0006/schema8；旧标签和附件不变。
@@ -77,7 +79,7 @@ npm run dev
 
 连接地址须替换为自己创建的开发数据库，并按该 PostgreSQL 实例的认证配置提供凭据。不要把真实连接口令提交到 Git。`config/.env.example` 只供参考，普通 Node 启动不会自动加载它。连接未配置或不可用时应用报错，不回退为新的 SQLite 空库。
 
-开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.9/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
+开发默认地址为 `http://127.0.0.1:3001`，附件和日志放在 `var/development/<package.version>/`，本版为 `var/development/0.14.10/`；数据库位置由 `DATABASE_URL` 决定。Git 分支或运行目录不会自动隔离 PostgreSQL，开发、测试和日常使用必须连接不同数据库。`npm start` 默认端口 3000，附件和日志默认放在 `var/`。
 
 空数据库首次打开网页时设置管理员账号和密码，密码至少 8 位且需确认；没有默认密码。已有用户时不会开放首次设置。
 
@@ -88,7 +90,7 @@ $env:LABOS_TEST_DATABASE_URL = 'postgresql://labos_test@127.0.0.1:5432/postgres'
 npm test
 ```
 
-测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.9/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
+测试按用例创建和清理隔离数据库，缓存放在 `artifacts/cache/<package.version>/`，本版为 `artifacts/cache/0.14.10/`。该变量必须指向专用测试实例；不得填日常业务数据库。测试与容器、真实浏览器及群晖验收的边界见[开发说明](docs/DEVELOPMENT.md)和[版本说明](docs/CHANGELOG.md)。
 
 ## 物资信息与库存
 
@@ -112,7 +114,7 @@ npm test
 
 ## Docker 与群晖
 
-两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。本版配置指向 `ghcr.io/hotll233/labmg:0.14.9`，本地三镜像包使用 `labos:0.14.9`；仅在测试、镜像和部署门禁核验后公开对应预发布资产，草稿或失败任务不表示可交付。下载前请核对[版本说明](docs/CHANGELOG.md)的实际状态，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
+已公开0.14.9的两份 YML **任选一份**，都包含初始化、PostgreSQL 18、应用和 HTTPS 代理四个服务，无需另外准备 `.env` 或 `Caddyfile`。公开包配置指向 `ghcr.io/hotll233/labmg:0.14.9`，本地三镜像包使用 `labos:0.14.9`。当前源码中的0.14.10候选YML尚无对应镜像／TAR，不能直接用于正式部署。仅在测试、镜像和部署门禁核验后公开对应预发布资产，草稿或失败任务不表示可交付。下载前请核对[版本说明](docs/CHANGELOG.md)的实际状态，不混用新旧镜像与YML。升级前备份原PostgreSQL、附件及证书，保留原项目的`runtime/`、`https/`和UID/GID；本轮没有自动升级NAS。
 
 | 部署方式 | 文件 | 镜像来源 |
 | --- | --- | --- |

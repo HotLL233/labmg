@@ -1361,3 +1361,35 @@ CHANGELOG将本批源码变更归入0.14.8真实候选号及日期，保留旧�
 root核对官方同run证据、原7资产ID／字节不变、四门禁及完整恢复、81旧tag引用、main及34旧Release／382资产未变后，于UTC09:20:42／北京时间17:20:42显式公开Release428821174，prerelease=true／make_latest=false。随后匿名官方API核对仓库、tag peeled、正文及12资产；10非TAR1614051字节公开直链匿名完整下载通过，未匿名下载全量TAR或浏览器验Release UI。完整证据在artifacts/cache/0.14.9/，包在artifacts/releases/0.14.9/；后补维护记录不移动tag或重打包，记录提交后以非强制快进方式同步develop。
 
 本轮不接NAS或日常库，不自动升级；未验实体手机／相机、USB／原生打印、原生缩放、物理ARM64及长期负载。继续0006/schema8，无新运行依赖或迁移；升级保留runtime／https／UID/GID并先完整备份，未知通用提交仍人工核实。旧失败候选、历史标签和资产全部保留。
+
+## 2026-11-01：离线参考与商城UI借鉴研究
+
+用户先要求shadcn组件参考HTML，在feature/ui-shadcn-reference新增独立HTML和说明，复用原V2离线交互及Lucide许可，采用浅色侧栏、紧凑筛选、七字段库存／八列验收、详情和设置限宽。补快捷筛选、当前页CSV下载及公式前缀保护；不引入React／外部组件库，不改原V2文件或正式src/public。首轮428检查／77图通过后目视收紧名称旁操作及进度文案；新增手机380px高度预算时测得382px而失败，prototype-2ftEN7保留。调整库存卡片上下留白后442／78通过，最后补统计标签不拆字，最终prototype-tDxmTQ为451检查／78图、0脚本异常及业务／外网请求，SHA256 f16b838e7d4f835728d9b6360518a2ecd03ae0a88348c70a3f1dc15375298413。计数不累加；此前普通verify5.1s、strict5.5s通过，NAS、真实业务及实体设备未验。该轮收尾记录曾被用户新研究请求打断，本次补齐来源边界，不冒称本次重新执行浏览器。
+
+用户随后指定Daymychen/art-design-pro并强调商城入库URL，转为分析与方案任务。公开GitHub API两路403后用匿名只读Git对象取得固定f3aaf58eec1a0e988f162352c33862327a484f95（2026-06-01提交），保存20份选定源码及SHA；没有安装依赖、检出运行上游或构建。核对搜索、表格工具栏、分页、侧栏、工作区缓存和示例页；公开树无商城／入库模块，在线专业版说明与基础仓库分开处理。
+
+商城独立浏览器首次阻断全部POST，连正常认证刷新也被阻断而出现空白，仅为辅助读取策略，不归为产品故障。随后只允许正常认证刷新，实际返回401并跳登录页、出现验证码；没有读取或填写账号密码、处理验证码、登录或业务写入，浏览器已关闭。请求用户提供登录后全屏、展开筛选和详情截图；不绕过访问控制。记录access-observation.json明确protectedMallPageViewed=false。
+
+新增UI_ART_MALL_ADOPTION_PLAN，按已核实的基础组件及官方公开表格规范给出LabOS入库映射、页面骨架、取舍、分批实施和验收要求；页面级度量仍待截图，不把现有shadcn稿冒称商城还原。本次重核原HTML摘要及451／78报告一致，说明文档补实测记录和商城预案入口。MEMORY与CHANGELOG未发布同步；正式代码、版本、标签、冻结附件、数据库和NAS均未改，新Art风格HTML与正式施工仍待确认。
+
+官方另列纯前端站点独立只读观察也跳登录／滑块验证，未操作或提交，浏览器关闭，frontend-access-observation.json单独记范围。HTTP核对官方专业版说明／表格规范均200，所读公共树368份src路径无mall或inbound匹配，reviewed-tree-scope.json留证；不将基础示例数据或另一版本文档扩写为在线商城后端评测。普通verify PASS3.9s（JS3.7／UI0.2）、strict PASS4.1s（JS3.8／UI0.2／严格0.1）及diff检查通过；无专用测试库配置，未跑完整npm test，未进入业务页或执行上游构建。
+
+## 2026-11-01：启动0.14.10物资工作区开发
+
+用户明确按预案开发下一版，从60ef944建立feature/v0.14.10-material-workspace，保留全部上轮未提交研究和HTML。先追加施工卡16，再制作独立ui-material-operations.html，复用已验证合成交互但使用既有蓝色主操作，原shadcn和V2参考不变；九档451检查／78图通过。仅实现B/C明确增量，D跨模块推广与E真实工作台／搜索数据另期，商城精确还原仍缺截图。不自动打tag、发布或接NAS。
+
+新增四个VM用例在旧实现4/4失败，随后正式物资代码增加状态快捷筛选、同行库存操作、进度和副标题；PackageOpen取原参考Lucide节点。相关111项通过后，又用受控慢响应复现跨页抢焦点，增加原ticket及页面检查；新增五用例最终5/5通过。业务写入、原批次、cap和未知结果保护不改，补状态入口不能绕过未知锁的断言。远端核对0.14.10 tag未占用，package／lock／两YML同步候选并明确未交付，不覆盖旧版。
+
+旧V2测试实例实查ECONNREFUSED，新建PG18.4仅127.0.0.1:60884，精确ui-material-20261101/postgres/data，初始remaining0。真实Workspace首轮在1366库存捕获旧stock-name mw-actions absolute定位仍作用，按新类补position:static，失败workspace-layout-6Oh7bn保留。第二轮走到390，新增高级重置令旧测试locator匹配两个按钮，改为明确form直接子级清除条件；workspace-layout-M4mlrD失败证据保留，后续重验。当前不是整轮验收完成，最终结果另补。
+
+## 2026-11-01：0.14.10本机最终验收与候选源码交付
+
+桌面当前位置原被已有CSS隐藏，补物资专用data-material-context标记与桌面显示，app.go在成功离开后清除，手机不增加顶栏高度。首完整348项为346通过／1新增夹具失败／1 Docker条件跳过，630700.9553ms，102摘要一致；失败原因是MATERIAL夹具没有archives.read，go按原权限拒绝进入档案。补先断言拒绝，再给测试账号显式档案读权，不改产品权限。随后第二完整348项／347通过／0失败／1跳过，673291.5022ms，四浏览器实际执行，原失败保留。
+
+独立预览目视又确认物资详情只显示一字段行、页码1/6且大片留白。跟踪recordFields六个单对象调用方，新增回归先在旧实现失败；只在统一渲染器使用既有data-ws-skip并标mw-record-fields，全部字段连续显示，批次／逐件／流水分页不改。七项相关专项通过，最终预览preview-browser-g1kkVx36检查／6图、0脚本异常或跨源／业务写入，确认证据不沿用补修前截图。
+
+最终第三轮完整执行`node --test --test-reporter=tap --test-concurrency=1 tests/*.test.js`，349项／348通过／0失败取消／1 Docker条件跳过，665048.1254ms；102份受控输入前后相同，PG临时库remaining0。Workspace为4791检查／146图，物资流程133／28图／1PDF，通用网络结果21／3图，手机21图；具体目录由local-final-verification.json精确记录，不将这些检查或各轮次数相加。最终source为包含详情补修的版本，不以第二轮结果代替。
+
+新参考ui-material-operations.html九档451检查／78图、SHA2567543811719b5aee4090fb3728a66b4533bf099aebc52cbac3e7fe68521badc6c。原shadcn稿f16b838e…98413字节未变。新合成预览localhost:3003、labos_ui_material_preview和独立runtime已启动，PG仅127.0.0.1:60884；既有服务和NAS不动。只读预览正常登录／注销，未写业务；凭据不入文档。保留服务，停止脚本核验进程与PG身份，不删除数据。
+
+最后普通verify PASS4.6s（JS4.5／UI0.2）、strict PASS4.9s（JS4.5／UI0.2／严格0.2）及diff检查通过。源码交付使用feature/v0.14.10-material-workspace，不创建tag／Release或合入发布基线；正式源码ZIP、双架构镜像／TAR和容器／云端门禁未执行。本轮为候选开发，继续0006/schema8及4直接依赖；未接日常数据、NAS、实体设备、原生缩放或生产升级。最终源码／远端以Git收尾核对为准。

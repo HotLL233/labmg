@@ -68,6 +68,8 @@ zxing-wasm 的[官方许可清单](https://github.com/Sec-ant/zxing-wasm/blob/v3
 
 ## 布局V1的静态Lucide图标（2026-10-29）
 
+2026-11-01增补：物资工作区使用同一既有参考中的PackageOpen静态节点，用于库存行的领用入口；仍由`Workspace.icon()`白名单返回，无新增依赖。下方原许可声明继续适用。
+
 `src/public/workspace.js`内嵌Eye、SquarePen、Ellipsis、Download、Search、ListFilter、SlidersHorizontal、ClipboardCheck、Printer九个图标的静态几何节点，取自已验证的`docs/prototypes/ui-layout-balance.html`同名Lucide图标；原型取自本机已有库。仅复制实际使用节点，不新增npm运行依赖、外网图标服务或字体。下面保留原型随附的Lucide ISC及Feather衍生图标MIT声明。
 
 ### Lucide

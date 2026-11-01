@@ -2366,6 +2366,9 @@ test('order receipt retries retain the exact body and key, block switching and r
   const pending=click('[data-mw=wf-receive-all]');await new Promise(setImmediate);await click('[data-mw=wf-receive-all]');assert.equal(writes.length,1);
   await click({dataset:{mw:'page',page:'inventory'}});assert.ok(app.$('#mw-order-workspace'));assert.equal(app.context.MaterialWorkflow.hasPending(),true);
   release();await pending;assert.equal(acceptanceField(app,'amount').disabled,true);await fillAcceptance(app,{amount:'999'});
+  const reads=app.requests.length;await click({dataset:{mw:'filter-status',status:'draft'}});
+  assert.equal(app.requests.length,reads,'a status shortcut cannot query or navigate while a receipt result is unknown');
+  assert.ok(app.$('#mw-order-workspace'));
   await click('[data-mw=wf-retry]');assert.deepEqual(writes[1],writes[0]);assert.equal(writes[1].items[0].amount,'20');
   assert.equal(app.context.MaterialWorkflow.hasPending(),false);assert.match(app.$('#mw-order-picker').textContent,/待处理 0 项/);
   assert.equal(app.$('[data-mw=wf-receive-all]').disabled,true);assert.match(app.$('#page').textContent,/到货 #71/);
@@ -2467,4 +2470,113 @@ test('a preserved current order that was cancelled externally retains its draft 
   await click({dataset:{mw:'wf-receive-selected'}});
   assert.equal(app.requests.some(entry=>entry.method==='POST'),false,'even a stale receipt action cannot create a fresh request');
   assert.ok(app.$('#mw-order-picker-toggle'));
+});
+
+test('material workbench status shortcuts preserve committed filters and reset server pagination',async()=>{
+  const {app,click}=await materialApp();
+  app.state.materialResponse=({url,method})=>{
+    if(url.pathname==='/api/materials/requests'&&method==='GET')return {body:{items:app.state.materialRequests,total:51,page:Number(url.searchParams.get('page')),pageSize:Number(url.searchParams.get('pageSize'))}};
+  };
+  const form=app.$('#mw-filters');
+  form.querySelector('[name=q]').value='保留的查询';
+  form.querySelector('[name=from]').value='2026-10-01';
+  form.querySelector('[name=to]').value='2026-11-01';
+  await form.listeners.submit({target:form,preventDefault(){}});
+  const capacity=app.$('[data-mw-page-size]');capacity.value='20';
+  await app.document.listeners.change({target:capacity});
+  await click('[data-mw=next]');
+  const shortcuts=()=>app.document.querySelectorAll('[data-mw=filter-status]');
+  assert.deepEqual(shortcuts().map(node=>node.dataset.status),['','draft','submitted','cancelled']);
+  await click(shortcuts().find(node=>node.dataset.status==='submitted'));
+  const query=app.requests.filter(entry=>entry.url.pathname==='/api/materials/requests').at(-1).url.searchParams;
+  assert.equal(query.get('status'),'submitted');assert.equal(query.get('page'),'1');assert.equal(query.get('pageSize'),'20');
+  assert.equal(query.get('q'),'保留的查询');assert.equal(query.get('from'),'2026-10-01');assert.equal(query.get('to'),'2026-11-01');
+  const selected=shortcuts().find(node=>node.dataset.status==='submitted');
+  assert.equal(selected.getAttribute('aria-pressed'),'true');assert.equal(app.document.activeElement,selected);
+  const before=app.requests.length;
+  await click({dataset:{mw:'filter-status',status:'not-a-status'}});
+  assert.equal(app.requests.length,before,'unknown status values must not initiate a query');
+  await click(shortcuts().find(node=>node.dataset.status===''));
+  assert.equal(app.requests.filter(entry=>entry.url.pathname==='/api/materials/requests').at(-1).url.searchParams.has('status'),false);
+  assert.equal(app.requests.some(entry=>entry.method==='POST'),false);
+  assert.equal(app.$('#subtitle').getAttribute('data-material-context'),'true');
+  assert.equal(await app.run("go('archives')"),false,'the original account is not allowed to enter archives');
+  await app.run("currentUser.permissions.push('archives.read'); go('archives')");
+  assert.equal(app.$('#subtitle').hasAttribute('data-material-context'),false);
+});
+
+test('material workbench issue shortcuts use existing state values and never appear on stock or catalog',async()=>{
+  const {app,click}=await materialApp(false);
+  await click({dataset:{mw:'page',page:'issues'}});
+  const shortcuts=app.document.querySelectorAll('[data-mw=filter-status]');
+  assert.deepEqual(shortcuts.map(node=>node.dataset.status),['','pending','issued','rejected','cancelled']);
+  await click(shortcuts.find(node=>node.dataset.status==='pending'));
+  assert.equal(app.requests.filter(entry=>entry.url.pathname==='/api/materials/issues').at(-1).url.searchParams.get('status'),'pending');
+  await click({dataset:{mw:'page',page:'inventory'}});
+  assert.equal(app.document.querySelectorAll('[data-mw=filter-status]').length,0);
+  await click({dataset:{mw:'filter-status',status:'pending'}});
+  assert.equal(app.requests.filter(entry=>entry.url.pathname==='/api/materials/stock/batches').at(-1).url.searchParams.has('status'),false);
+  await click({dataset:{mw:'page',page:'catalog'}});
+  assert.equal(app.document.querySelectorAll('[data-mw=filter-status]').length,0);
+});
+
+test('material workbench stock identity keeps the true-batch issue action beside a named detail entry',async()=>{
+  const {app,row,click}=await materialApp();
+  row.name='<img src=x onerror=alert(1)>';
+  row.batch='批次乙';row.expiryDate='2028-11-01';
+  await click({dataset:{mw:'page',page:'inventory'}});
+  const identity=app.$('.mw-stock-identity');
+  assert.ok(identity);assert.equal(identity.querySelector('img'),null);
+  assert.match(identity.querySelector('[data-mw=stock-detail]').textContent,/<img src=x onerror=alert\(1\)>/);
+  const issue=identity.querySelector('[data-mw=stock-issue]');
+  assert.equal(issue.dataset.batch,'批次乙');assert.equal(issue.dataset.expiryDate,'2028-11-01');
+  assert.equal(issue.dataset.catalog,'5');assert.equal(issue.dataset.region,'2');assert.equal(issue.dataset.warehouse,'MAIN');
+  assert.equal(issue.getAttribute('aria-label'),'申请领用');assert.equal(issue.getAttribute('title'),'申请领用');
+  assert.equal(app.$('.mw-stock-table').querySelectorAll('thead th').length,7);
+  app.state.materialCapabilities.createIssue=false;
+  await app.run('renderMaterials()');
+  assert.equal(app.$('[data-mw=stock-issue]'),null);assert.ok(app.$('.mw-stock-identity [data-mw=stock-detail]'));
+});
+
+test('material workbench receipt progress keeps the remaining quantity and each original total labeled',async()=>{
+  const {app,request,item,click}=await materialApp();
+  request.status='submitted';Object.assign(item,{acceptedQtyM:3000,closedQtyM:1000,remainingQtyM:6000,receiptStatus:'partial'});
+  await click({dataset:{mw:'page',page:'acceptance'}});
+  const cell=app.document.querySelectorAll('.mw-order-progress').find(node=>node.tagName==='td');
+  assert.match(cell.querySelector('.mw-progress-main').textContent,/剩余 6 件/);
+  assert.deepEqual(cell.querySelectorAll('.mw-progress-total').map(node=>node.textContent),['申报 10','已验 3','结案 1']);
+  assert.equal(app.$('.mw-order-receive-table').querySelectorAll('thead th').length,8);
+  assert.equal(app.requests.some(entry=>entry.method==='POST'),false);
+});
+
+test('material workbench stale status responses cannot steal focus from a newer page',async()=>{
+  const {app,click}=await materialApp();
+  let release,started;
+  const waiting=new Promise(resolve=>{started=resolve;});
+  app.state.materialResponse=async({url,method})=>{
+    if(url.pathname==='/api/materials/requests'&&method==='GET'&&url.searchParams.get('status')==='submitted'){
+      started();await new Promise(resolve=>{release=resolve;});
+      return {body:{items:app.state.materialRequests,total:1,page:1,pageSize:10}};
+    }
+  };
+  const shortcut=app.document.querySelectorAll('[data-mw=filter-status]').find(node=>node.dataset.status==='submitted');
+  const pending=click(shortcut);await waiting;
+  await click({dataset:{mw:'page',page:'issues'}});
+  const search=app.$('#mw-filters [name=q]');search.focus();
+  release();await pending;
+  assert.ok(app.document.activeElement===search,'stale status response must leave focus in the newer search field');
+  assert.match(app.$('#subtitle').textContent,/领用申请与发放/);
+});
+
+test('material workbench object fields do not become a paginated record list',async()=>{
+  const {app,click}=await materialApp();
+  await click({dataset:{mw:'page',page:'inventory'}});
+  await click('[data-mw=stock-detail]');
+  assert.equal(app.$('#mw-view-body .mw-table').getAttribute('data-ws-skip'),'true');
+  assert.equal(app.$('#mw-view-body tbody').children.length,6);
+  assert.equal(app.$('#mw-view-body .ws-pagination'),null);
+  await click({dataset:{mw:'page',page:'catalog'}});
+  await click('[data-mw=catalog-detail]');
+  assert.equal(app.$('#mw-view-body .mw-table').getAttribute('data-ws-skip'),'true');
+  assert.equal(app.$('#mw-view-body tbody').children.length,6);
 });

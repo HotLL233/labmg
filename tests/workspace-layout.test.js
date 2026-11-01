@@ -329,15 +329,20 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     check(!(await noteRow.locator('.mw-text-details').evaluate(node => node.open)), label + ': the full note can close and reopen');
     if (page.viewportSize().width >= 768) {
       const actions = await noteRow.locator('.stock-name').evaluate(cell => {
-        const tools = cell.querySelector('.mw-actions'), code = cell.querySelector('small');
-        return { position: getComputedStyle(tools).position, gap: tools.getBoundingClientRect().top - code.getBoundingClientRect().bottom };
+        const tools = cell.querySelector('.mw-stock-row-actions'), identity = cell.querySelector('.mw-stock-description');
+        const action = tools.getBoundingClientRect(), name = identity.getBoundingClientRect();
+        return { position: getComputedStyle(tools).position, topGap: action.top - name.top, beside: action.left >= name.right };
       });
-      check(actions.position === 'static' && actions.gap >= 0 && actions.gap <= 12,
+      check(actions.position === 'static' && Math.abs(actions.topGap) <= 1 && actions.beside,
         label + ': row actions stay beside the name and code rather than sinking to the tall note row bottom', actions);
     }
     if (label === '1366-stock') {
+      await page.emulateMedia({media:'print'});
+      check(await noteRow.locator('.stock-name strong').evaluate(node=>node.getClientRects().length>0&&node.textContent.length>0),'print media preserves the material name after it becomes a detail action');
+      await page.emulateMedia({media:'screen'});
       await noteRow.locator('[data-mw="stock-detail"]').click();
       await page.locator('#mw-view').waitFor({ state: 'visible' });
+      check(await page.locator('#mw-view-body .mw-record-fields').evaluate(table=>table.closest('.table').dataset.wsSkip==='true'&&table.querySelectorAll('tbody tr').length===6&&[...table.querySelectorAll('tbody tr')].every(row=>!row.hidden)&&!table.parentElement.nextElementSibling?.classList.contains('ws-pagination')),label+': all fields of one stock object remain together without automatic record paging');
       check((await page.locator('#mw-view-body').textContent()).includes(stockNote), label + ': inventory detail preserves the full long note');
       const stockIdentity = () => page.locator('#mw-view .mw-stock-context').evaluate(node => ({
         name: node.querySelector('strong').textContent, code: node.querySelector('small').textContent,
@@ -351,6 +356,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
       check(JSON.stringify(await stockIdentity()) === JSON.stringify(identity) && (await page.locator('#mw-view .mw-stock-context').textContent()).includes(region.name), label + ': source movements retain the same material identity and region');
       await page.locator('#mw-view .mw-detail-tabs [data-mw="stock-summary"]').click();
       check(await page.locator('#mw-view .mw-detail-tabs [data-mw="stock-summary"]').getAttribute('aria-current') === 'page', label + ': summary returns as a local tab rather than an extra dialog level');
+      check(await page.locator('#mw-view-body .mw-record-fields tbody tr').count()===6&&await page.locator('#mw-view-body .ws-pagination').count()===0,label+': returning from a peer tab does not split object fields into separate pages');
       await page.locator('#mw-view [data-mw="close-view"]').first().click();
       await page.locator('#mw-view').waitFor({ state: 'hidden' });
     }
@@ -456,6 +462,20 @@ test('production workspace keeps identity, records, returns and draft inputs usa
     check(me.data.user.display_name === '合成物资管理员', 'the real session API preserves the seeded account display name');
     await page.setViewportSize({ width: 1440, height: 900 });
     await navigate('materials');
+    await navigateMaterial('requests');
+    for (const value of ['draft','submitted','']) {
+      const queried=page.waitForResponse(response=>{
+        const url=new URL(response.url());
+        return response.request().method()==='GET'&&url.pathname==='/api/materials/requests'&&(url.searchParams.get('status')||'')===value;
+      });
+      await page.locator(`[data-mw="filter-status"][data-status="${value}"]`).click();
+      const result=await queried,query=new URL(result.url()).searchParams;
+      await page.locator(`[data-mw="filter-status"][data-status="${value}"][aria-pressed="true"]`).waitFor();
+      check(result.status()===200&&query.get('page')==='1'&&query.get('pageSize')==='10','status shortcut uses the real filtered server query: '+(value||'all'));
+      const records=await result.json();
+      check(!value||records.items.every(row=>row.status===value),'status shortcut never displays records from another state: '+(value||'all'));
+    }
+    check(await page.locator('#subtitle').isVisible()&&(await page.locator('#subtitle').textContent()).includes('申报记录'),'the single global subtitle visibly reflects the current material location');
     await navigateMaterial('catalog');
     await page.waitForFunction(() => Number(document.querySelector('#page .mw-pagebar')?.textContent.match(/每页 (\d+) 条/)?.[1]) >= 5);
     await navigateMaterial('settings');
@@ -532,7 +552,7 @@ test('production workspace keeps identity, records, returns and draft inputs usa
         if (materialPage === 'inventory') {
           await checkStockColumns(`${size.width} stock columns`);
           if (size.width < 768) {
-            const reset=page.locator('#mw-filters [data-mw="reset"]');
+            const reset=page.locator('#mw-filters > [data-mw="reset"]');
             if(await reset.count()){
               await reset.click();
               await page.locator('.mw-stock-table tbody tr').first().waitFor();
